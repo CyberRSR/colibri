@@ -157,3 +157,7 @@ limitations of the general Windows test suite.
 The [streaming experiment](experiments/mimo-stream-4090-2026-10-16/README.md)
 measures the same profile with the expert streaming and the wide kernels:
 1.156 to 1.709 tok/s for a whole request, the CPU logits unchanged to the bit.
+[Its second round](experiments/mimo-stream2-4090-2026-10-16/README.md) adds the
+CPU's prompt kernels, 512-row prompt blocks and the spread o_proj: 1.159 to 1.814
+tok/s for the benchmark, 1.061 to 1.679 over eight different prompts, a 2260-token
+prompt 4.4x faster, every reply the release engine's bytes.

@@ -5,3 +5,4 @@ c/build_mimo_cuda.bat text eol=crlf
 # and output whitespace. Keep source-code whitespace checks separate from data.
 docs/experiments/mimo-cuda-4090-2026-10-16/** -text -whitespace
 docs/experiments/mimo-stream-4090-2026-10-16/** -text -whitespace
+docs/experiments/mimo-stream2-4090-2026-10-16/** -text -whitespace

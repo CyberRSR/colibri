@@ -1,0 +1,12 @@
+[CUDA] mimo device 0: NVIDIA GeForce RTX 4090; native dense weights, float32 activations
+[SPLIT] +C:/AI/MiMoPro-Shards -> 88 shard(s)
+[SPLIT] model across 2 dir(s): 130 shard(s) total (primary D:\AI\Models\MiMo-V2.6-Pro-MOPD -> 42 shard(s)), no duplication
+[mimo] expert readers: 4 on 2 device(s)
+[CUDA] mimo placed 110 dense matrices: 19.995 / 20.000 GiB budget; CPU host copies released
+[mimo] 70 layers (60 sliding window 128, 10 full), 384 experts top-8, cache 64/layer, dense native, ctx 16384, vision -- loaded in 12.02s
+[mimo] prefill 17 tokens 7.95s, decode 32 tokens 16.98s (1.88 tok/s), experts 15296 hits 6789 misses 270388.3 MB read, rss 97.13 GB
+[mimo] time: expert reads 8.39s (32.22 GB/s), expert matmuls 10.48s, attention 5.15s, the rest (dense MLP, router, head) 0.90s
+[mimo] streaming: 6789 demand reads, 6694 prefetched (4718 used, 1976 unused), predicted 78.0% of 17112 choices, 270.39 GB read, 8.39s stalled, 0.34s predicting; attention matmuls: qkv 0.70s, o_proj 3.97s; 2.07 experts a wave
+[CUDA] mimo dense: 110 matrices, 19.995 GiB resident, 3520 matmuls, 5280 rows, 0 scratch/compute fallbacks
+[CUDA] mimo matmul wall time (copies + compute): f32 0.000s, bf16 0.350s, fp8 0.715s, int8 0.000s, int8 blocks 0.000s
+[CUDA] mimo host copies: 110 released (19.995 GiB), 0 restored from checkpoint (0.000 GiB)

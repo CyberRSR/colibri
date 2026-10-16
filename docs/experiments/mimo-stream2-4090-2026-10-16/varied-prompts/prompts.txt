@@ -1,0 +1,8 @@
+Explain the difference between TCP and UDP in a short paragraph.
+Напиши краткую инструкцию, как заварить зелёный чай.
+What is the capital of Australia, and why was it chosen?
+Write a haiku about autumn rain.
+Summarize the plot of Romeo and Juliet in three sentences.
+Give a short Python example of a list comprehension that squares even numbers.
+Почему небо голубое? Ответь кратко.
+List four benefits of regular exercise.

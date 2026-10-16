@@ -1,0 +1,350 @@
+{
+ "note": "Arms measured while developing, in order; built from intermediate working-tree states that were not committed (their engine hashes identify them). Same benchmark command and profile as the final arms. prefill: the 2260-token prompt of long-prompt/ through the CLI (run_prefill.sh) with 8 generated tokens.",
+ "arms": [
+  {
+   "arm": "s5-a8",
+   "note": "build s5: + MIMO_CUDA_OPROJ_INT8 (off) and a prefetch size per point (MIMO_PREFETCH_ATTN/_MLP); defaults",
+   "engine_sha256": "6707a49002ed04ce3dcbbc941daf342c7bca646a0dd3c53fb86bd7c20cd2ca04",
+   "cuda_dll_sha256": "ba98f0f9a4e2f2bfd59197656838a21dc74f9c31f355bedb66f9ce7d74f1cb5b",
+   "extra_config": {},
+   "median_tok_s": 1.7095781420653153,
+   "median_decode_tok_s": 1.9429225723817154,
+   "median_ttft_s": 5.0107575000147335,
+   "reply_sha256": [
+    "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+   ],
+   "streaming_last_request": "[mimo] streaming: 5527 demand reads, 9823 prefetched (6683 used, 3140 unused), predicted 77.3% of 34776 choices, 307.83 GB read, 5.63s stalled, 0.67s predicting; attention matmuls: qkv 1.21s, o_proj 7.54s"
+  },
+  {
+   "arm": "s5-a4b8",
+   "note": "as s5-a8, 4 predicted after the attention and 8 after the MLP",
+   "engine_sha256": "6707a49002ed04ce3dcbbc941daf342c7bca646a0dd3c53fb86bd7c20cd2ca04",
+   "cuda_dll_sha256": "ba98f0f9a4e2f2bfd59197656838a21dc74f9c31f355bedb66f9ce7d74f1cb5b",
+   "extra_config": {
+    "MIMO_PREFETCH_ATTN": "4",
+    "MIMO_PREFETCH_MLP": "8"
+   },
+   "median_tok_s": 1.6819046527406272,
+   "median_decode_tok_s": 1.9069615611418613,
+   "median_ttft_s": 4.995618099987041,
+   "reply_sha256": [
+    "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+   ],
+   "streaming_last_request": "[mimo] streaming: 4875 demand reads, 10340 prefetched (7336 used, 3004 unused), predicted 82.3% of 34776 choices, 305.12 GB read, 5.73s stalled, 1.29s predicting; attention matmuls: qkv 1.24s, o_proj 7.90s"
+  },
+  {
+   "arm": "s5-b8",
+   "note": "as s5-a8, 8 predicted after the MLP only",
+   "engine_sha256": "6707a49002ed04ce3dcbbc941daf342c7bca646a0dd3c53fb86bd7c20cd2ca04",
+   "cuda_dll_sha256": "ba98f0f9a4e2f2bfd59197656838a21dc74f9c31f355bedb66f9ce7d74f1cb5b",
+   "extra_config": {
+    "MIMO_PREFETCH_ATTN": "0",
+    "MIMO_PREFETCH_MLP": "8"
+   },
+   "median_tok_s": 1.6153402197395514,
+   "median_decode_tok_s": 1.820459736071153,
+   "median_ttft_s": 5.007047499995679,
+   "reply_sha256": [
+    "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+   ],
+   "streaming_last_request": "[mimo] streaming: 4913 demand reads, 10065 prefetched (7299 used, 2766 unused), predicted 81.8% of 34776 choices, 300.37 GB read, 7.74s stalled, 0.65s predicting; attention matmuls: qkv 1.24s, o_proj 8.03s"
+  },
+  {
+   "arm": "s5-decay97",
+   "note": "as s5-a8, MIMO_CACHE_DECAY=0.97 (decayed use counts): faster here, where the four requests are one prompt, but not on varied prompts",
+   "engine_sha256": "6707a49002ed04ce3dcbbc941daf342c7bca646a0dd3c53fb86bd7c20cd2ca04",
+   "cuda_dll_sha256": "ba98f0f9a4e2f2bfd59197656838a21dc74f9c31f355bedb66f9ce7d74f1cb5b",
+   "extra_config": {
+    "MIMO_CACHE_DECAY": "0.97"
+   },
+   "median_tok_s": 1.8193237849804857,
+   "median_decode_tok_s": 2.066274217125558,
+   "median_ttft_s": 4.703078899998218,
+   "reply_sha256": [
+    "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+   ],
+   "streaming_last_request": "[mimo] streaming: 4671 demand reads, 8145 prefetched (5233 used, 2912 unused), predicted 77.3% of 34776 choices, 257.01 GB read, 4.06s stalled, 0.66s predicting; attention matmuls: qkv 1.23s, o_proj 7.49s"
+  },
+  {
+   "arm": "s5-oproj8",
+   "note": "as s5-a8, every o_proj on the GPU as int8 (not exact)",
+   "engine_sha256": "6707a49002ed04ce3dcbbc941daf342c7bca646a0dd3c53fb86bd7c20cd2ca04",
+   "cuda_dll_sha256": "ba98f0f9a4e2f2bfd59197656838a21dc74f9c31f355bedb66f9ce7d74f1cb5b",
+   "extra_config": {
+    "MIMO_CUDA_DENSE_GB": "20.2",
+    "MIMO_CUDA_OPROJ_INT8": "1"
+   },
+   "median_tok_s": 2.0787873731674416,
+   "median_decode_tok_s": 2.40943833445555,
+   "median_ttft_s": 4.646243399998639,
+   "reply_sha256": [
+    "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+   ],
+   "streaming_last_request": "[mimo] streaming: 5510 demand reads, 9867 prefetched (6706 used, 3161 unused), predicted 77.3% of 34776 choices, 308.37 GB read, 5.74s stalled, 0.68s predicting; attention matmuls: qkv 1.20s, o_proj 0.70s"
+  },
+  {
+   "arm": "s6-default",
+   "note": "build s6: + the \"experts a wave\" counter; defaults",
+   "engine_sha256": "5cc7c3db7d8bcbb5fe14148c3fc6e36c4a7915c79cf990d9dbc20563a00999a2",
+   "cuda_dll_sha256": "ba98f0f9a4e2f2bfd59197656838a21dc74f9c31f355bedb66f9ce7d74f1cb5b",
+   "extra_config": {},
+   "median_tok_s": 1.7168090250094399,
+   "median_decode_tok_s": 1.9532255678653399,
+   "median_ttft_s": 5.020075999957044,
+   "reply_sha256": [
+    "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+   ],
+   "streaming_last_request": "[mimo] streaming: 5532 demand reads, 9823 prefetched (6678 used, 3145 unused), predicted 77.3% of 34776 choices, 307.93 GB read, 5.96s stalled, 0.67s predicting; attention matmuls: qkv 1.21s, o_proj 7.51s; 3.44 experts a wave"
+  },
+  {
+   "arm": "s6-int8",
+   "note": "as s6-default, int8 o_proj",
+   "engine_sha256": "5cc7c3db7d8bcbb5fe14148c3fc6e36c4a7915c79cf990d9dbc20563a00999a2",
+   "cuda_dll_sha256": "ba98f0f9a4e2f2bfd59197656838a21dc74f9c31f355bedb66f9ce7d74f1cb5b",
+   "extra_config": {
+    "MIMO_CUDA_DENSE_GB": "20.2",
+    "MIMO_CUDA_OPROJ_INT8": "1"
+   },
+   "median_tok_s": 2.0813458851459608,
+   "median_decode_tok_s": 2.4148806694770206,
+   "median_ttft_s": 4.653427999990527,
+   "reply_sha256": [
+    "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+   ],
+   "streaming_last_request": "[mimo] streaming: 5514 demand reads, 9877 prefetched (6717 used, 3160 unused), predicted 77.3% of 34776 choices, 308.65 GB read, 6.20s stalled, 0.68s predicting; attention matmuls: qkv 1.21s, o_proj 0.70s; 3.28 experts a wave"
+  },
+  {
+   "arm": "s8-default",
+   "note": "build s8: + silu fused into the up pass of moe_wave, adaptive block rows",
+   "engine_sha256": "a007ea0467259c35ae44528ec1f25e30e6b0d6aefa726f9eb3bb339e25eb97b3",
+   "cuda_dll_sha256": "ba98f0f9a4e2f2bfd59197656838a21dc74f9c31f355bedb66f9ce7d74f1cb5b",
+   "extra_config": {},
+   "median_tok_s": 1.758165770702997,
+   "median_decode_tok_s": 2.0032531814133843,
+   "median_ttft_s": 4.962796300009359,
+   "reply_sha256": [
+    "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+   ],
+   "streaming_last_request": "[mimo] streaming: 5535 demand reads, 9819 prefetched (6675 used, 3144 unused), predicted 77.3% of 34776 choices, 307.91 GB read, 7.26s stalled, 0.68s predicting; attention matmuls: qkv 1.37s, o_proj 7.63s; 3.20 experts a wave"
+  },
+  {
+   "arm": "s10-default",
+   "note": "build s10: + multi-row bf16 matmul, vectorized attention scores, reads cut into 4 MB pieces by default",
+   "engine_sha256": "daccb40681d2ba8761f6df8ecbef6d97588643bc57bfa96578766861dc21e0df",
+   "cuda_dll_sha256": "ba98f0f9a4e2f2bfd59197656838a21dc74f9c31f355bedb66f9ce7d74f1cb5b",
+   "extra_config": {},
+   "median_tok_s": 1.4825315668277759,
+   "median_decode_tok_s": 1.728233736205274,
+   "median_ttft_s": 6.68990749999648,
+   "reply_sha256": [
+    "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+   ],
+   "streaming_last_request": "[mimo] streaming: 5736 demand reads, 9498 prefetched (6467 used, 3031 unused), predicted 77.3% of 34776 choices, 305.50 GB read, 15.11s stalled, 0.67s predicting; attention matmuls: qkv 1.26s, o_proj 7.43s; 2.85 experts a wave"
+  },
+  {
+   "arm": "s10-whole",
+   "note": "as s10-default, MIMO_IO_PIECE_MB=64 (an expert one read): the 4 MB pieces were the slowdown",
+   "engine_sha256": "daccb40681d2ba8761f6df8ecbef6d97588643bc57bfa96578766861dc21e0df",
+   "cuda_dll_sha256": "ba98f0f9a4e2f2bfd59197656838a21dc74f9c31f355bedb66f9ce7d74f1cb5b",
+   "extra_config": {
+    "MIMO_IO_PIECE_MB": "64"
+   },
+   "median_tok_s": 1.7922436332984193,
+   "median_decode_tok_s": 2.031233385902323,
+   "median_ttft_s": 4.693792500009295,
+   "reply_sha256": [
+    "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+   ],
+   "streaming_last_request": "[mimo] streaming: 5531 demand reads, 9803 prefetched (6672 used, 3131 unused), predicted 77.3% of 34776 choices, 307.51 GB read, 7.37s stalled, 0.68s predicting; attention matmuls: qkv 1.19s, o_proj 7.35s; 3.18 experts a wave"
+  },
+  {
+   "arm": "s11-default",
+   "note": "build s11: + multi-row MXFP4 kernel, whole reads by default",
+   "engine_sha256": "0daadfee8d527dfb6a401643fad961beb9cbb18362eee5246eee3bc586a934f6",
+   "cuda_dll_sha256": "ba98f0f9a4e2f2bfd59197656838a21dc74f9c31f355bedb66f9ce7d74f1cb5b",
+   "extra_config": {},
+   "median_tok_s": 1.7922389706921389,
+   "median_decode_tok_s": 2.0305461110897927,
+   "median_ttft_s": 4.683387600001879,
+   "reply_sha256": [
+    "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+   ],
+   "streaming_last_request": "[mimo] streaming: 5533 demand reads, 9813 prefetched (6674 used, 3139 unused), predicted 77.3% of 34776 choices, 307.75 GB read, 7.36s stalled, 0.67s predicting; attention matmuls: qkv 1.20s, o_proj 7.32s; 3.18 experts a wave"
+  },
+  {
+   "arm": "s11-p8r6",
+   "note": "as s11-default, 8 MB pieces and 6 readers a drive",
+   "engine_sha256": "0daadfee8d527dfb6a401643fad961beb9cbb18362eee5246eee3bc586a934f6",
+   "cuda_dll_sha256": "ba98f0f9a4e2f2bfd59197656838a21dc74f9c31f355bedb66f9ce7d74f1cb5b",
+   "extra_config": {
+    "MIMO_IO_PIECE_MB": "8",
+    "MIMO_IO_PER_DRIVE": "6"
+   },
+   "median_tok_s": 1.7619474532079373,
+   "median_decode_tok_s": 1.9821002940681622,
+   "median_ttft_s": 4.541499799990561,
+   "reply_sha256": [
+    "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+   ],
+   "streaming_last_request": "[mimo] streaming: 5531 demand reads, 9820 prefetched (6677 used, 3143 unused), predicted 77.3% of 34776 choices, 307.85 GB read, 7.94s stalled, 0.71s predicting; attention matmuls: qkv 1.23s, o_proj 7.31s; 3.28 experts a wave"
+  },
+  {
+   "arm": "s13-a2k2",
+   "note": "build s13: + MIMO_CHUNK 512 by default, an experimental prefetch two layers ahead (2 experts); not kept",
+   "engine_sha256": "37aa2049b0bfed4011b17775da42ed8a36a468be8f47414e0032909aeb88ca55",
+   "cuda_dll_sha256": "ba98f0f9a4e2f2bfd59197656838a21dc74f9c31f355bedb66f9ce7d74f1cb5b",
+   "extra_config": {
+    "MIMO_PREFETCH_AHEAD2": "2"
+   },
+   "median_tok_s": 1.7811039547797964,
+   "median_decode_tok_s": 2.015743700604416,
+   "median_ttft_s": 4.679019500035793,
+   "reply_sha256": [
+    "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+   ],
+   "streaming_last_request": "[mimo] streaming: 5515 demand reads, 10097 prefetched (6688 used, 3409 unused), predicted 77.5% of 34776 choices, 313.08 GB read, 7.00s stalled, 1.31s predicting; attention matmuls: qkv 1.22s, o_proj 7.31s; 3.28 experts a wave"
+  },
+  {
+   "arm": "s13-a2k4",
+   "note": "as s13-a2k2, 4 experts two layers ahead",
+   "engine_sha256": "37aa2049b0bfed4011b17775da42ed8a36a468be8f47414e0032909aeb88ca55",
+   "cuda_dll_sha256": "ba98f0f9a4e2f2bfd59197656838a21dc74f9c31f355bedb66f9ce7d74f1cb5b",
+   "extra_config": {
+    "MIMO_PREFETCH_AHEAD2": "4"
+   },
+   "median_tok_s": 1.770797770099406,
+   "median_decode_tok_s": 2.002258585823929,
+   "median_ttft_s": 4.682640300015919,
+   "reply_sha256": [
+    "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+   ],
+   "streaming_last_request": "[mimo] streaming: 5487 demand reads, 10613 prefetched (6729 used, 3884 unused), predicted 77.9% of 34776 choices, 322.87 GB read, 7.15s stalled, 1.31s predicting; attention matmuls: qkv 1.20s, o_proj 7.29s; 3.31 experts a wave"
+  },
+  {
+   "arm": "s14-inorder",
+   "note": "build s14: + o_proj placement option; MIMO_CUDA_OPROJ_SPREAD=0 (the first 36 layers on the GPU)",
+   "engine_sha256": "168d14e95fc24aa380ef1605975006a2586282d04110aa924a8d8a354e9c155b",
+   "cuda_dll_sha256": "ba98f0f9a4e2f2bfd59197656838a21dc74f9c31f355bedb66f9ce7d74f1cb5b",
+   "extra_config": {
+    "MIMO_CUDA_OPROJ_SPREAD": "0"
+   },
+   "median_tok_s": 1.7943252797654003,
+   "median_decode_tok_s": 2.032848292179246,
+   "median_ttft_s": 4.677003999997396,
+   "reply_sha256": [
+    "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+   ],
+   "streaming_last_request": "[mimo] streaming: 5528 demand reads, 9818 prefetched (6677 used, 3141 unused), predicted 77.3% of 34776 choices, 307.75 GB read, 7.44s stalled, 0.67s predicting; attention matmuls: qkv 1.20s, o_proj 7.30s; 3.18 experts a wave"
+  },
+  {
+   "arm": "s14-spread",
+   "note": "as s14-inorder, even layers first (the default of commit 10313e4f)",
+   "engine_sha256": "168d14e95fc24aa380ef1605975006a2586282d04110aa924a8d8a354e9c155b",
+   "cuda_dll_sha256": "ba98f0f9a4e2f2bfd59197656838a21dc74f9c31f355bedb66f9ce7d74f1cb5b",
+   "extra_config": {},
+   "median_tok_s": 1.8130111361750303,
+   "median_decode_tok_s": 2.0586017991620693,
+   "median_ttft_s": 4.689134599990211,
+   "reply_sha256": [
+    "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+   ],
+   "streaming_last_request": "[mimo] streaming: 5530 demand reads, 9860 prefetched (6676 used, 3184 unused), predicted 77.3% of 34776 choices, 308.63 GB read, 6.72s stalled, 0.67s predicting; attention matmuls: qkv 1.20s, o_proj 7.62s; 3.33 experts a wave"
+  },
+  {
+   "arm": "s14-gb21",
+   "note": "as s14-spread, MIMO_CUDA_DENSE_GB=21 MIMO_CUDA_RESERVE_GB=1 (115 matrices on the card)",
+   "engine_sha256": "168d14e95fc24aa380ef1605975006a2586282d04110aa924a8d8a354e9c155b",
+   "cuda_dll_sha256": "ba98f0f9a4e2f2bfd59197656838a21dc74f9c31f355bedb66f9ce7d74f1cb5b",
+   "extra_config": {
+    "MIMO_CUDA_DENSE_GB": "21.0",
+    "MIMO_CUDA_RESERVE_GB": "1"
+   },
+   "median_tok_s": 1.8514254240045545,
+   "median_decode_tok_s": 2.10717696043863,
+   "median_ttft_s": 4.670138799992856,
+   "reply_sha256": [
+    "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+   ],
+   "streaming_last_request": "[mimo] streaming: 5526 demand reads, 9863 prefetched (6677 used, 3186 unused), predicted 77.3% of 34776 choices, 308.61 GB read, 7.02s stalled, 0.67s predicting; attention matmuls: qkv 1.20s, o_proj 6.60s; 3.21 experts a wave"
+  }
+ ],
+ "prefill": [
+  {
+   "run": "pf-c64",
+   "note": "build s6 (engine 5cc7c3db...), before the CPU prompt kernels",
+   "MIMO_CHUNK": 64,
+   "prefill_seconds": 498.11,
+   "line": "[mimo] prefill 2260 tokens 498.11s, decode 8 tokens 3.95s (2.02 tok/s), experts 152463 hits 195350 misses 3942499.2 MB read, rss 151.52 GB"
+  },
+  {
+   "run": "pf-c256",
+   "note": "build s6",
+   "MIMO_CHUNK": 256,
+   "prefill_seconds": 426.96,
+   "line": "[mimo] prefill 2260 tokens 426.96s, decode 8 tokens 4.44s (1.80 tok/s), experts 43666 hits 118590 misses 2413520.9 MB read, rss 151.65 GB"
+  },
+  {
+   "run": "pf-c1024",
+   "note": "build s6",
+   "MIMO_CHUNK": 1024,
+   "prefill_seconds": 444.9,
+   "line": "[mimo] prefill 2260 tokens 444.90s, decode 8 tokens 4.33s (1.85 tok/s), experts 12408 hits 51827 misses 1073591.7 MB read, rss 152.23 GB"
+  },
+  {
+   "run": "pf-s8c256",
+   "note": "build s8 (a007ea04...): fused silu",
+   "MIMO_CHUNK": 256,
+   "prefill_seconds": 318.93,
+   "line": "[mimo] prefill 2260 tokens 318.93s, decode 8 tokens 4.41s (1.81 tok/s), experts 43621 hits 118635 misses 2414964.8 MB read, rss 151.62 GB"
+  },
+  {
+   "run": "pf-s9c256",
+   "note": "build s9 (5bbe89e7...): + multi-row bf16 matmul",
+   "MIMO_CHUNK": 256,
+   "prefill_seconds": 280.46,
+   "line": "[mimo] prefill 2260 tokens 280.46s, decode 8 tokens 4.37s (1.83 tok/s), experts 43602 hits 118654 misses 2415185.4 MB read, rss 151.61 GB"
+  },
+  {
+   "run": "pf-s10c256",
+   "note": "build s10 (daccb406...): + vectorized attention scores, 4 MB read pieces",
+   "MIMO_CHUNK": 256,
+   "prefill_seconds": 317.63,
+   "line": "[mimo] prefill 2260 tokens 317.63s, decode 8 tokens 5.28s (1.51 tok/s), experts 43966 hits 118290 misses 2407825.5 MB read, rss 151.62 GB"
+  },
+  {
+   "run": "pf-s11c256",
+   "note": "build s11 (0daadfee...): + multi-row MXFP4, whole reads",
+   "MIMO_CHUNK": 256,
+   "prefill_seconds": 248.82,
+   "line": "[mimo] prefill 2260 tokens 248.82s, decode 8 tokens 4.24s (1.89 tok/s), experts 43603 hits 118653 misses 2415205.4 MB read, rss 151.62 GB"
+  },
+  {
+   "run": "pf-s11c1024",
+   "note": "build s11",
+   "MIMO_CHUNK": 1024,
+   "prefill_seconds": 229.21,
+   "line": "[mimo] prefill 2260 tokens 229.21s, decode 8 tokens 4.25s (1.88 tok/s), experts 12386 hits 51849 misses 1074754.9 MB read, rss 152.16 GB"
+  },
+  {
+   "run": "pf-s11c2048",
+   "note": "build s11",
+   "MIMO_CHUNK": 2048,
+   "prefill_seconds": 274.78,
+   "line": "[mimo] prefill 2260 tokens 274.78s, decode 8 tokens 4.34s (1.84 tok/s), experts 6754 hits 35263 misses 739632.2 MB read, rss 152.89 GB"
+  },
+  {
+   "run": "pf-s12c512",
+   "note": "build s12 (9ab6c36e...): + 64-row tiles in the bf16 matmul",
+   "MIMO_CHUNK": 512,
+   "prefill_seconds": 213.2,
+   "line": "[mimo] prefill 2260 tokens 213.20s, decode 8 tokens 4.14s (1.93 tok/s), experts 25679 hits 78012 misses 1597222.2 MB read, rss 151.80 GB"
+  },
+  {
+   "run": "pf-s12c1024",
+   "note": "build s12",
+   "MIMO_CHUNK": 1024,
+   "prefill_seconds": 208.25,
+   "line": "[mimo] prefill 2260 tokens 208.25s, decode 8 tokens 4.20s (1.91 tok/s), experts 12391 hits 51844 misses 1074153.3 MB read, rss 152.16 GB"
+  }
+ ]
+}

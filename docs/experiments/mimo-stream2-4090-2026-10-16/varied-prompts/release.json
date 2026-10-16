@@ -1,0 +1,162 @@
+[
+ {
+  "i": 0,
+  "tokens": 64,
+  "seconds": 64.60458099999232,
+  "ttft": 14.399989800003823,
+  "decode_tok_s": 1.25486531199988,
+  "hit": 59.4,
+  "prof": [
+   "64.543",
+   "22",
+   "64",
+   "29.699",
+   "0.000",
+   "17.634",
+   "15.803",
+   "0.000",
+   "64"
+  ],
+  "text": "TCP (Transmission Control Protocol) is a connection-oriented protocol that guarantees the reliable, ordered, and error-checked delivery of data. It establishes a connection before sending data and ensures all packets arrive in the correct sequence, making it ideal for applications like web browsing and file transfers where accuracy is critical. In contrast, UDP (User"
+ },
+ {
+  "i": 1,
+  "tokens": 64,
+  "seconds": 61.10065209999448,
+  "ttft": 16.008028400014155,
+  "decode_tok_s": 1.3971242928591776,
+  "hit": 67.3,
+  "prof": [
+   "61.029",
+   "32",
+   "64",
+   "23.883",
+   "0.000",
+   "18.845",
+   "16.829",
+   "0.000",
+   "64"
+  ],
+  "text": "Конечно! Вот краткая и понятная инструкция, как заварить вкусный зелёный чай.\n\n### **Как заварить зелёный чай: 5 простых шагов**\n\nГлавное правило: **не используйте кипяток!**"
+ },
+ {
+  "i": 2,
+  "tokens": 64,
+  "seconds": 59.981135300011374,
+  "ttft": 11.529728199995589,
+  "decode_tok_s": 1.3002718346229303,
+  "hit": 65.3,
+  "prof": [
+   "59.909",
+   "22",
+   "64",
+   "25.354",
+   "0.000",
+   "17.434",
+   "15.701",
+   "0.000",
+   "64"
+  ],
+  "text": "The capital of Australia is **Canberra**.\n\nIt was chosen as a compromise to resolve a fierce rivalry between the two largest cities in the country: **Sydney** and **Melbourne**.\n\nHere is the history of why it was chosen:\n\n**1. The Rivalry**\nWhen the six British colonies agreed"
+ },
+ {
+  "i": 3,
+  "tokens": 18,
+  "seconds": 23.080533700005617,
+  "ttft": 9.449102899990976,
+  "decode_tok_s": 1.2471178007213843,
+  "hit": 59.6,
+  "prof": [
+   "23.010",
+   "17",
+   "18",
+   "10.066",
+   "0.000",
+   "6.917",
+   "5.545",
+   "0.000",
+   "19"
+  ],
+  "text": "Amber leaves descend,\nSoft rain whispers on the pane,\nGrey sky holds the chill."
+ },
+ {
+  "i": 4,
+  "tokens": 64,
+  "seconds": 57.17349439999089,
+  "ttft": 10.065653099969495,
+  "decode_tok_s": 1.3373569720328364,
+  "hit": 69.9,
+  "prof": [
+   "57.103",
+   "22",
+   "64",
+   "22.567",
+   "0.000",
+   "17.395",
+   "15.720",
+   "0.000",
+   "64"
+  ],
+  "text": "In the city of Verona, two young lovers from feuding families, Romeo Montague and Juliet Capulet, fall instantly in love and secretly marry with the help of a friar. A series of tragic misunderstandings, including a fatal duel and a failed plan involving a sleeping potion, leads to Romeo believing Juliet is"
+ },
+ {
+  "i": 5,
+  "tokens": 64,
+  "seconds": 59.73629380000057,
+  "ttft": 12.177832400018815,
+  "decode_tok_s": 1.3246854112909585,
+  "hit": 66.5,
+  "prof": [
+   "59.665",
+   "23",
+   "64",
+   "24.834",
+   "0.000",
+   "17.588",
+   "15.815",
+   "0.000",
+   "64"
+  ],
+  "text": "Here is a short example:\n\n```python\nnumbers = [1, 2, 3, 4, 5, 6]\nsquares = [x**2 for x in numbers if x % 2 == 0]\n\nprint(squares)\n# Output: [4, 16, "
+ },
+ {
+  "i": 6,
+  "tokens": 64,
+  "seconds": 59.489911899960134,
+  "ttft": 13.646414399961941,
+  "decode_tok_s": 1.3742406979310966,
+  "hit": 67.7,
+  "prof": [
+   "59.419",
+   "27",
+   "64",
+   "23.554",
+   "0.000",
+   "18.120",
+   "16.294",
+   "0.000",
+   "64"
+  ],
+  "text": "Небо голубое из-за **рэлеевского рассеяния**.\n\nСолнечный свет состоит из всех цветов радуги. Когда он проходит через атмосферу, молекулы воздуха рассеивают коротковолновый син"
+ },
+ {
+  "i": 7,
+  "tokens": 64,
+  "seconds": 54.16271730000153,
+  "ttft": 8.766554899979383,
+  "decode_tok_s": 1.3877825055971968,
+  "hit": 70.9,
+  "prof": [
+   "54.090",
+   "16",
+   "64",
+   "21.202",
+   "0.000",
+   "16.493",
+   "15.007",
+   "0.000",
+   "64"
+  ],
+  "text": "Of course! Here are four key benefits of regular exercise:\n\n1.  **Improved Physical Health:** Regular exercise strengthens your heart and lungs, helps manage weight, and reduces the risk of chronic diseases like heart disease, type 2 diabetes, and certain cancers. It also builds stronger bones and muscles.\n\n2.  **"
+ }
+]

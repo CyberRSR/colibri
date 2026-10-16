@@ -289,7 +289,8 @@ so the time they take overlaps the computation instead of adding to it:
 `MIMO_ROUTE_TRACE` records every step's routing and the router's ranking at both
 prediction points; `tools/mimo_route_sim.py` replays it through cache policies and
 prediction sizes offline. The measured effect on the RTX 4090 machine is in
-[the streaming experiment](experiments/mimo-stream-4090-2026-10-16/README.md).
+[the streaming experiment](experiments/mimo-stream-4090-2026-10-16/README.md) and
+[its second round](experiments/mimo-stream2-4090-2026-10-16/README.md).
 
 ## On a GPU (Vulkan)
 
