@@ -11,6 +11,7 @@ static size_t (*p_free_bytes)(void);
 static MimoCudaTensor *(*p_upload)(const void *, const float *, int, int, int);
 static int (*p_matmul)(MimoCudaTensor *, float *, const float *, int);
 static void (*p_report)(void), (*p_shutdown)(void);
+static size_t (*p_bytes)(const MimoCudaTensor *);   /* optional: an older DLL has none */
 int mimo_cuda_init(int device) {
     if (module) return p_init(device);
     wchar_t path[32768];
@@ -25,6 +26,7 @@ int mimo_cuda_init(int device) {
     if (!fn) goto missing; memcpy(&p_##name, &fn, sizeof fn); } while (0)
     BIND(init); BIND(free_bytes); BIND(upload); BIND(matmul); BIND(report); BIND(shutdown);
 #undef BIND
+    { FARPROC fn = GetProcAddress(module, "mimo_cuda_bytes"); if (fn) memcpy(&p_bytes, &fn, sizeof fn); }
     return p_init(device);
 missing:
     fprintf(stderr, "[CUDA] mimo: incomplete DLL; CPU fallback\n");
@@ -38,5 +40,6 @@ MimoCudaTensor *mimo_cuda_upload(const void *w, const float *s, int fmt, int I, 
 int mimo_cuda_matmul(MimoCudaTensor *t, float *y, const float *x, int S) {
     return module ? p_matmul(t, y, x, S) : 0;
 }
+size_t mimo_cuda_bytes(const MimoCudaTensor *t) { return module && p_bytes ? p_bytes(t) : 0; }
 void mimo_cuda_report(void) { if (module) p_report(); }
 void mimo_cuda_shutdown(void) { if (module) { p_shutdown(); FreeLibrary(module); module = NULL; } }

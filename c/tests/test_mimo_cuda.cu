@@ -66,12 +66,62 @@ static int check(int fmt, int I, int O, int S) {
     printf("ok fmt=%d I=%d O=%d S=%d max_abs=%g; chunks bit-exact\n",fmt,I,O,S,max_error);
     return 0;
 }
+/* fmt 5 (bf16 packed without loss) against fmt 1 on the same bf16: the same bytes,
+ * for weights like a trained matrix's (kind 0), exponents everywhere so most weights
+ * are exceptions (1), and rows of zeros, of one value, of 15 and of 16 exponents (2). */
+static uint32_t rng_state = 12345;
+static uint32_t rng() { rng_state = rng_state * 1664525u + 1013904223u; return rng_state >> 8; }
+static int check_packed(int I, int O, int S, int kind) {
+    size_t count = (size_t)I * O;
+    std::vector<uint16_t> q(count);
+    for (size_t j = 0; j < count; j++) {
+        int o = (int)(j / I), i = (int)(j % I);
+        uint16_t b;
+        if (kind == 0) {   /* about N(0, 0.02): a sum of uniforms */
+            float f = 0;
+            for (int k = 0; k < 4; k++) f += (float)(rng() & 0xffff) / 65536.0f - 0.5f;
+            f *= 0.035f;
+            uint32_t u; memcpy(&u, &f, 4); b = (uint16_t)(u >> 16);
+        } else if (kind == 1) {   /* any sign and mantissa, exponents 0..140 */
+            b = (uint16_t)((rng() & 0x807f) | ((rng() % 141) << 7));
+        } else {
+            switch (o % 5) {
+            case 0: b = (uint16_t)(i % 3 ? 0x0000 : 0x8000); break;            /* zeros of both signs */
+            case 1: b = 0x3f80; break;                                          /* one value */
+            case 2: b = (uint16_t)((rng() & 0x807f) | ((100 + i % 15) << 7)); break;   /* exactly 15 exponents */
+            case 3: b = (uint16_t)((rng() & 0x807f) | ((100 + i % 16) << 7)); break;   /* 16: one is an exception */
+            default: b = (uint16_t)((rng() & 0x807f) | ((i % 7 ? 120 : rng() % 3) << 7)); break; /* subnormals */
+            }
+        }
+        q[j] = b;
+    }
+    std::vector<float> x((size_t)S * I), plain((size_t)S * O), got(plain.size()), single(plain.size());
+    for (size_t i = 0; i < x.size(); i++) x[i] = std::sin((float)(i + 1) * 0.137f);
+    MimoCudaTensor *a = mimo_cuda_upload(q.data(), nullptr, 1, I, O), *t = mimo_cuda_upload(q.data(), nullptr, 5, I, O);
+    if (!a || !t || !mimo_cuda_matmul(a, plain.data(), x.data(), S) || !mimo_cuda_matmul(t, got.data(), x.data(), S)) {
+        printf("FAIL packed I=%d O=%d S=%d kind=%d: upload or matmul\n", I, O, S, kind); return 1;
+    }
+    if (memcmp(got.data(), plain.data(), got.size() * sizeof(float))) {
+        for (size_t i = 0; i < got.size(); i++)
+            if (memcmp(&got[i], &plain[i], 4)) { printf("FAIL packed I=%d O=%d S=%d kind=%d at %zu: %a vs bf16 %a\n", I, O, S, kind, i, got[i], plain[i]); break; }
+        return 1;
+    }
+    for (int s = 0; s < S; s++)
+        if (!mimo_cuda_matmul(t, single.data() + (size_t)s * O, x.data() + (size_t)s * I, 1)) return 1;
+    if (memcmp(got.data(), single.data(), got.size() * sizeof(float))) { puts("FAIL packed chunk invariance"); return 1; }
+    size_t pb = mimo_cuda_bytes(t), bb = mimo_cuda_bytes(a);
+    if (bb != (size_t)I * O * 2 || !pb || (kind == 0 && pb * 4 > bb * 3 + (size_t)O * 8 + 4096)) {
+        printf("FAIL packed I=%d O=%d kind=%d: %zu bytes packed, %zu plain\n", I, O, kind, pb, bb); return 1;
+    }
+    printf("ok packed I=%d O=%d S=%d kind=%d: the bytes of bf16 from %zu bytes, not %zu\n", I, O, S, kind, pb, bb);
+    return 0;
+}
 int main() {
     if (!mimo_cuda_init(0)) return 1;
     float w = 1;
     if (mimo_cuda_upload(&w, nullptr, 2, 1, 1) || mimo_cuda_upload(&w, nullptr, 4, 1, 1) ||
-        mimo_cuda_upload(&w, nullptr, 5, 1, 1) ||
-        mimo_cuda_upload(&w, nullptr, 0, 0, 1) || mimo_cuda_init(-1)) return 1;
+        mimo_cuda_upload(&w, nullptr, 5, 1, 1) || mimo_cuda_upload(&w, nullptr, 6, 1, 1) ||
+        mimo_cuda_upload(&w, nullptr, 0, 0, 1) || mimo_cuda_init(-1) || mimo_cuda_bytes(nullptr)) return 1;
     int rc = 0;
     for (int f = 0; f < 5; f++) {
         rc |= check(f, 1, 1, 1);
@@ -80,6 +130,13 @@ int main() {
         rc |= check(f, 257, 129, 17);
         rc |= check(f, 512, 9, 17);      /* the wide kernels: FP8 and BF16, row tiles of 8 */
         rc |= check(f, 1024, 6, 9);
+    }
+    for (int kind = 0; kind < 3; kind++) {
+        rc |= check_packed(256, 5, 1, kind);
+        rc |= check_packed(512, 9, 17, kind);
+        rc |= check_packed(6144, 33, 3, kind);
+        rc |= check_packed(16384, 7, 9, kind);   /* Pro's o_proj rows */
+        rc |= check_packed(1024, 130, 8, kind);
     }
     mimo_cuda_report(); mimo_cuda_shutdown();
     if (!mimo_cuda_init(0)) return 1;

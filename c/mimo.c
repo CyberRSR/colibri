@@ -269,11 +269,16 @@ static void load_cfg(Cfg *c, const char *dir) {
 /* A dense matrix [O, I] in one of four forms. FP8 keeps the checkpoint bytes and
  * expands the 128x128 block grid to one scale per (row, column block), which is
  * what lets a row move (the qkv de-interleave) without touching its bytes. */
-enum { DW_F32 = 0, DW_BF16 = 1, DW_FP8 = 2, DW_I8 = 3 };
+enum { DW_F32 = 0, DW_BF16 = 1, DW_FP8 = 2, DW_I8 = 3, DW_BF16P = 4 };
 typedef struct {
     int fmt, O, I, nblk;
-    void *w;           /* f32 / bf16 / e4m3 / int8 */
+    void *w;           /* f32 / bf16 / e4m3 / int8 / BF16P: the sign/mantissa bytes */
     float *s;          /* FP8: [O][nblk]; I8: [O] */
+    /* BF16P (mimo_bf16_pack): the 4-bit exponent codes [O][I/2], each row's lowest
+     * exponent, where its exceptions start, the exceptions; one allocation from w */
+    uint8_t *pk_codes, *pk_lo, *pk_exc;
+    uint32_t *pk_off;
+    size_t pk_bytes;
     void *vk;          /* COLI_VULKAN: the device copy, uploaded at start-up */
     int vk_off;        /* its upload failed: this matrix stays on the CPU */
     /* COLI_VULKAN: how to read it back from disk (dw_reload), and 1 while the device
@@ -381,6 +386,167 @@ static void matmul_bf16(float *y, const float *x, const uint16_t *W, int S, int 
     }
 }
 
+/* ---- BF16 packed without loss (DW_BF16P, MIMO_BF16_PACK) ----------------------------
+ * The o_proj and the head the CPU computes, packed as the CUDA side packs them
+ * (backend_cuda_mimo.cu, fmt 5): per row the window of 15 consecutive exponents that
+ * holds most of its weights (from pk_lo), per weight a 4-bit code (exponent - lo, or
+ * 15: the next byte of the row's exception list) and the sign/mantissa byte. A quarter
+ * fewer bytes to read a token. Each group of 8 weights is rebuilt into the bf16 words
+ * matmul_bf16 loads and summed in its order, so the results are its bytes. */
+typedef struct { const uint8_t *sm, *code, *exc; uint64_t base; } PkRow;
+static inline PkRow pk_row(const DW *d, int o) {
+    PkRow r = { (const uint8_t *)d->w + (size_t)o * d->I, d->pk_codes + (size_t)o * (d->I / 2),
+                d->pk_exc + d->pk_off[o], (uint64_t)d->pk_lo[o] * 0x0101010101010101ull };
+    return r;
+}
+/* Weights i..i+7 (i a multiple of 8): the low and the high bytes of their bf16 words.
+ * Byte b of the group's 4 code bytes holds weight b's code low and weight b+4's high. */
+static inline void pk_group(PkRow *r, int i, uint64_t *lo, uint64_t *hi) {
+    uint32_t q; memcpy(&q, r->code + i / 2, 4);
+    uint64_t e = ((uint64_t)(q & 0x0F0F0F0Fu) | (uint64_t)((q >> 4) & 0x0F0F0F0Fu) << 32) + r->base;
+    uint32_t esc = q & (q >> 1) & (q >> 2) & (q >> 3) & 0x11111111u;
+    if (__builtin_expect(esc != 0, 0))
+        for (int k = 0; k < 8; k++)
+            if (esc >> (k < 4 ? 8 * k : 8 * (k - 4) + 4) & 1)
+                e = (e & ~(0xFFull << (8 * k))) | (uint64_t)*r->exc++ << (8 * k);
+    uint64_t sm; memcpy(&sm, r->sm + i, 8);
+    *hi = (sm & 0x8080808080808080ull) | ((e >> 1) & 0x7F7F7F7F7F7F7F7Full);
+    *lo = (sm & 0x7F7F7F7F7F7F7F7Full) | ((e << 7) & 0x8080808080808080ull);
+}
+#ifdef __AVX2__
+static inline __m256 pk_decode8(PkRow *r, int i) {   /* = bf16_decode8 of the 8 words */
+    uint64_t lo, hi;
+    pk_group(r, i, &lo, &hi);
+    __m128i w = _mm_unpacklo_epi8(_mm_cvtsi64_si128((long long)lo), _mm_cvtsi64_si128((long long)hi));
+    return _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(w), 16));
+}
+#endif
+static void matmul_bf16p(float *y, const float *x, const DW *d, int S) {
+    int I = d->I, O = d->O;
+#ifdef __AVX2__
+    if (S >= 4) {   /* matmul_bf16's prompt block, decoding each group once for 4 rows */
+        const float *x_all = x;
+        float *y_all = y;
+        int S_all = S;
+        for (int t0 = 0; t0 < S_all; t0 += 64) {
+        S = S_all - t0 < 64 ? S_all - t0 : 64;
+        x = x_all + (int64_t)t0 * I;
+        y = y_all + (int64_t)t0 * O;
+        #pragma omp parallel for schedule(static)
+        for (int o2 = 0; o2 < (O + 1) / 2; o2++) {
+            int o = o2 * 2, two = o + 1 < O;
+            int s = 0;
+            for (; s + 4 <= S; s += 4) {
+                PkRow ra = pk_row(d, o), rb = pk_row(d, two ? o + 1 : o);
+                const float *x0 = x + (int64_t)s * I, *x1 = x0 + I, *x2 = x1 + I, *x3 = x2 + I;
+                __m256 a0 = _mm256_setzero_ps(), a1 = a0, a2 = a0, a3 = a0, b0 = a0, b1 = a0, b2 = a0, b3 = a0;
+                for (int i = 0; i < I; i += 8) {
+                    __m256 va = pk_decode8(&ra, i), vb = pk_decode8(&rb, i);
+                    __m256 v0 = _mm256_loadu_ps(x0 + i), v1 = _mm256_loadu_ps(x1 + i);
+                    __m256 v2 = _mm256_loadu_ps(x2 + i), v3 = _mm256_loadu_ps(x3 + i);
+                    a0 = _mm256_fmadd_ps(v0, va, a0); b0 = _mm256_fmadd_ps(v0, vb, b0);
+                    a1 = _mm256_fmadd_ps(v1, va, a1); b1 = _mm256_fmadd_ps(v1, vb, b1);
+                    a2 = _mm256_fmadd_ps(v2, va, a2); b2 = _mm256_fmadd_ps(v2, vb, b2);
+                    a3 = _mm256_fmadd_ps(v3, va, a3); b3 = _mm256_fmadd_ps(v3, vb, b3);
+                }
+                y[(int64_t)(s + 0) * O + o] = hsum256(a0); y[(int64_t)(s + 1) * O + o] = hsum256(a1);
+                y[(int64_t)(s + 2) * O + o] = hsum256(a2); y[(int64_t)(s + 3) * O + o] = hsum256(a3);
+                if (two) {
+                    y[(int64_t)(s + 0) * O + o + 1] = hsum256(b0); y[(int64_t)(s + 1) * O + o + 1] = hsum256(b1);
+                    y[(int64_t)(s + 2) * O + o + 1] = hsum256(b2); y[(int64_t)(s + 3) * O + o + 1] = hsum256(b3);
+                }
+            }
+            for (; s < S; s++)
+                for (int k = 0; k < 1 + two; k++) {
+                    PkRow r = pk_row(d, o + k);
+                    const float *xs = x + (int64_t)s * I;
+                    __m256 acc = _mm256_setzero_ps();
+                    for (int i = 0; i < I; i += 8) acc = _mm256_fmadd_ps(_mm256_loadu_ps(xs + i), pk_decode8(&r, i), acc);
+                    y[(int64_t)s * O + o + k] = hsum256(acc);
+                }
+        }
+        }
+        return;
+    }
+#endif
+    #pragma omp parallel for schedule(static)
+    for (int o = 0; o < O; o++) {
+        for (int s = 0; s < S; s++) {
+            PkRow r = pk_row(d, o);
+            const float *xs = x + (int64_t)s * I;
+            float a = 0;
+#ifdef __AVX2__
+            __m256 acc = _mm256_setzero_ps();
+            for (int i = 0; i < I; i += 8)
+                acc = _mm256_fmadd_ps(_mm256_loadu_ps(xs + i), pk_decode8(&r, i), acc);
+            a = hsum256(acc);
+#else
+            for (int i = 0; i < I; i += 8) {
+                uint64_t lo, hi;
+                pk_group(&r, i, &lo, &hi);
+                for (int k = 0; k < 8; k++)
+                    a += xs[i + k] * bf16_to_f32((uint16_t)(((lo >> (8 * k)) & 0xFF) | ((hi >> (8 * k)) & 0xFF) << 8));
+            }
+#endif
+            y[(int64_t)s * O + o] = a;
+        }
+    }
+}
+
+/* Pack a bf16 matrix in place (rows a multiple of 8 long); 1 if it was. */
+static int dw_pack_bf16(DW *d, size_t *from, size_t *to) {
+    if (d->fmt != DW_BF16 || !d->w || d->I % 8 || d->O < 1) return 0;
+    int O = d->O, I = d->I;
+    const uint16_t *w = (const uint16_t *)d->w;
+    uint8_t *lo = xmalloc((size_t)O, "pack lo");
+    uint32_t *off = xmalloc((size_t)O * sizeof(uint32_t), "pack offsets");
+    #pragma omp parallel for schedule(static)
+    for (int o = 0; o < O; o++) {
+        const uint16_t *row = w + (size_t)o * I;
+        unsigned h[256] = {0};
+        for (int i = 0; i < I; i++) h[(row[i] >> 7) & 0xff]++;
+        unsigned sum = 0, best;
+        int bl = 0;
+        for (int e = 0; e < 15; e++) sum += h[e];
+        best = sum;
+        for (int l = 1; l <= 240; l++) {   /* lo + 15 stays a byte: the decoder adds bytewise */
+            sum += h[l + 14] - h[l - 1];
+            if (sum > best) { best = sum; bl = l; }
+        }
+        lo[o] = (uint8_t)bl; off[o] = (uint32_t)I - best;
+    }
+    uint64_t nexc = 0;
+    for (int o = 0; o < O; o++) { uint32_t n = off[o]; off[o] = (uint32_t)nexc; nexc += n; }
+    if (nexc > UINT32_MAX) { free(lo); free(off); return 0; }
+    size_t e = (size_t)O * I, a_codes = e, a_lo = e + e / 2, a_off = (a_lo + (size_t)O + 15) & ~(size_t)15,
+           a_exc = a_off + (size_t)O * sizeof(uint32_t), total = a_exc + (size_t)nexc;
+    uint8_t *buf = xmalloc(total, "packed bf16");
+    memcpy(buf + a_lo, lo, (size_t)O);
+    memcpy(buf + a_off, off, (size_t)O * sizeof(uint32_t));
+    #pragma omp parallel for schedule(static)
+    for (int o = 0; o < O; o++) {
+        const uint16_t *row = w + (size_t)o * I;
+        uint8_t *sm = buf + (size_t)o * I, *c = buf + a_codes + (size_t)o * (I / 2), *x = buf + a_exc + off[o];
+        unsigned l = lo[o];
+        for (int g = 0; g < I; g += 8) {
+            uint8_t code[8];
+            for (int k = 0; k < 8; k++) {
+                unsigned v = row[g + k], ex = (v >> 7) & 0xff;
+                sm[g + k] = (uint8_t)(((v >> 8) & 0x80) | (v & 0x7f));
+                if (ex >= l && ex <= l + 14) code[k] = (uint8_t)(ex - l);
+                else { code[k] = 15; *x++ = (uint8_t)ex; }
+            }
+            for (int b = 0; b < 4; b++) c[g / 2 + b] = (uint8_t)(code[b] | code[b + 4] << 4);
+        }
+    }
+    free(lo); free(off); free(d->w);
+    d->w = buf; d->pk_codes = buf + a_codes; d->pk_lo = buf + a_lo;
+    d->pk_off = (uint32_t *)(buf + a_off); d->pk_exc = buf + a_exc; d->pk_bytes = total;
+    d->fmt = DW_BF16P;
+    *from += e * 2; *to += total;
+    return 1;
+}
+
 /* FP8 with a scale per (row, 128-column block): float inside a block, double
  * across blocks, the convention of quant.h's matmul_fp8. */
 static void matmul_fp8_rows(float *y, const float *x, const uint8_t *q8, const float *rs,
@@ -468,6 +634,7 @@ static size_t dw_bytes(const DW *d) {
     case DW_BF16: return e * 2;
     case DW_FP8:  return e + (size_t)d->O * d->nblk * 4;
     case DW_I8:   return e + (size_t)d->O * 4;
+    case DW_BF16P: return d->pk_bytes;
     }
     return 0;
 }
@@ -497,6 +664,7 @@ static void dw_matmul(float *y, const float *x, int S, const DW *d) {
     switch (d->fmt) {
     case DW_F32:  matmul(y, x, (const float *)d->w, S, d->I, d->O); break;
     case DW_BF16: matmul_bf16(y, x, (const uint16_t *)d->w, S, d->I, d->O); break;
+    case DW_BF16P: matmul_bf16p(y, x, d, S); break;
     case DW_FP8:  matmul_fp8_rows(y, x, (const uint8_t *)d->w, d->s, d->nblk, S, d->I, d->O); break;
     case DW_I8:   matmul_q(y, x, (const int8_t *)d->w, d->s, S, d->I, d->O); break;
     }
@@ -709,7 +877,12 @@ typedef struct {
     int qdrive, qn;        /* a prefetch's pieces: qn jobs from qpos in drive qdrive's queue */
     unsigned qpos;
 } Slot;
-typedef struct { Slot *s; int n, cap; int *by_expert; uint8_t *arena; } LCache;
+typedef struct { Slot *s; int n, cap, max; int *by_expert; uint8_t *arena; } LCache;
+/* MIMO_CACHE_GLOBAL=1: the MoE layers share one pool of cap x layers buffers. A layer
+ * that needs a slot when the pool is full takes the least recently used buffer of any
+ * layer (not pinned, not loading, not read ahead and still waiting), and may hold up to
+ * twice cap. 0 (default): each layer its own cap, least recently used within it. */
+static int g_cache_global, g_slots_total, g_slots_used;
 typedef struct { int fd[6], fi[6]; int64_t off[6]; int contig; } ERef;
 
 typedef struct {
@@ -829,10 +1002,12 @@ static void cache_init(Model *m, int cap) {
         if (!c->moe[li]) continue;
         LCache *lc = &m->cache[li];
         lc->cap = cap; lc->n = 0;
-        lc->s = xcalloc((size_t)cap, sizeof(Slot), "expert slots");
+        lc->max = g_cache_global ? (2 * cap < c->n_experts ? 2 * cap : c->n_experts) : cap;
+        lc->s = xcalloc((size_t)lc->max, sizeof(Slot), "expert slots");
         lc->by_expert = xmalloc((size_t)c->n_experts * sizeof(int), "expert index");
         for (int e = 0; e < c->n_experts; e++) lc->by_expert[e] = -1;
-        for (int k = 0; k < cap; k++) lc->s[k].eid = -1;
+        for (int k = 0; k < lc->max; k++) lc->s[k].eid = -1;
+        g_slots_total += cap;
     }
 }
 
@@ -1159,6 +1334,7 @@ static int large_pages_enable(void) {
 static size_t slot_stride(const Model *m) { return ((size_t)m->e_bytes + 8192 + 4095) & ~(size_t)4095; }
 static void slot_alloc(Model *m, int li, Slot *s, int idx) {
 #ifdef _WIN32
+    if (g_cache_global) g_large_pages = 0;
     if (g_large_pages < 0) {
         g_large_pages = env_int("MIMO_LARGE_PAGES", 0) ? large_pages_enable() : 0;
         if (env_int("MIMO_LARGE_PAGES", 0) && !g_large_pages)
@@ -1185,17 +1361,58 @@ static void slot_alloc(Model *m, int li, Slot *s, int idx) {
     }
 }
 
+/* MIMO_CACHE_GLOBAL: an entry of layer li for a new expert, with a buffer -- a fresh
+ * one while the pool has room, else the oldest of any layer's (its expert leaves that
+ * layer). -1 when nothing can give one. */
+static int slot_entry_global(Model *m, int li) {
+    LCache *lc = &m->cache[li];
+    int idx = -1;
+    for (int k = 0; k < lc->n && idx < 0; k++)
+        if (lc->s[k].eid < 0 && !lc->s[k].pin &&
+            atomic_load_explicit(&lc->s[k].state, memory_order_acquire) != SLOT_LOADING) idx = k;
+    if (idx < 0 && lc->n < lc->max) idx = lc->n++;
+    if (idx >= 0 && lc->s[idx].base) return idx;
+    if (idx >= 0 && g_slots_used < g_slots_total) {
+        if (posix_memalign((void **)&lc->s[idx].base, 4096, (size_t)m->e_bytes + 8192)) {
+            fprintf(stderr, "[mimo] out of memory for an expert slot\n"); exit(1);
+        }
+        g_slots_used++;
+        return idx;
+    }
+    if (idx < 0) return -1;                /* the layer holds its most: its own LRU (slot_take) */
+    Slot *v = NULL; int vl = -1, vk = -1;
+    uint64_t oldest = UINT64_MAX;
+    for (int l2 = 0; l2 < m->c.n_layers; l2++) {
+        LCache *c2 = &m->cache[l2];
+        if (!c2->s) continue;
+        for (int k = 0; k < c2->n; k++) {
+            Slot *x = &c2->s[k];
+            if (!x->base || x->eid < 0 || x->pin || x->pref ||
+                atomic_load_explicit(&x->state, memory_order_acquire) == SLOT_LOADING) continue;
+            if (x->used < oldest) { oldest = x->used; v = x; vl = l2; vk = k; }
+        }
+    }
+    if (!v) return -1;
+    m->cache[vl].by_expert[v->eid] = -1;
+    v->eid = -1; v->used = 0;
+    if (vl == li) return vk;               /* this layer's own: reused in place */
+    lc->s[idx].base = v->base; v->base = NULL; v->buf = NULL;
+    return idx;
+}
+
 /* A slot for expert e of layer li: the one that holds it (resident or on its way), or
  * the least recently used (MIMO_CACHE_DECAY: the least used) that is neither pinned
  * nor loading, its read submitted -- before the others, one whose expert the Vulkan
  * tier holds (vkt_ram_first). A prefetch spares the slots read ahead and not asked
- * for yet. NULL when no slot is free. */
+ * for yet. MIMO_CACHE_GLOBAL: a buffer from the pool first (slot_entry_global).
+ * NULL when no slot is free. */
 static Slot *slot_take(Model *m, int li, int e, int prefetch) {
     LCache *lc = &m->cache[li];
     int si = lc->by_expert[e];
     if (si >= 0) return &lc->s[si];
     int best = -1;
-    if (lc->n < lc->cap) best = lc->n++;
+    if (g_cache_global && (best = slot_entry_global(m, li)) >= 0) { /* an entry with a buffer */ }
+    else if (lc->n < lc->cap && !g_cache_global) best = lc->n++;
     else {
         uint64_t oldest = UINT64_MAX, dev_oldest = UINT64_MAX;
         float least = INFINITY;
@@ -1203,6 +1420,7 @@ static Slot *slot_take(Model *m, int li, int e, int prefetch) {
         for (int k = 0; k < lc->n; k++) {
             Slot *s = &lc->s[k];
             if (s->pin || (prefetch && s->pref) || atomic_load_explicit(&s->state, memory_order_acquire) == SLOT_LOADING) continue;
+            if (g_cache_global && !s->base) continue;   /* an entry whose buffer went to another layer */
             if (s->eid >= 0 && vkt_ram_first(li, s->eid)) {
                 if (s->used < dev_oldest) { dev_oldest = s->used; dev = k; }
             } else if (m->efreq && s->eid >= 0) {
@@ -1344,6 +1562,9 @@ static void model_load(Model *m, const char *dir, int cap) {
         }
     }
     expert_table_init(m);
+    g_cache_global = env_int("MIMO_CACHE_GLOBAL", 0) != 0;
+    if (g_cache_global && env_int("MIMO_LARGE_PAGES", 0))
+        fprintf(stderr, "[mimo] MIMO_CACHE_GLOBAL moves buffers between layers: ordinary pages\n");
     cache_init(m, cap);
     m->pf_on = env_int("MIMO_PREFETCH", 1);
     /* MIMO_PREFETCH=1 predicts top-k after the attention, 2 also after the MLP;
@@ -1360,6 +1581,7 @@ static void model_load(Model *m, const char *dir, int cap) {
     if (m->pf_extra < 0) m->pf_extra = 0;
     const char *dv = getenv("MIMO_CACHE_DECAY");
     m->decay = dv && *dv ? (float)atof(dv) : 0.0f;
+    if (g_cache_global) fprintf(stderr, "[mimo] expert cache: one pool of %d slots for every layer (MIMO_CACHE_GLOBAL)\n", g_slots_total);
     if (m->decay > 0 && m->decay < 1) {
         m->efreq = xcalloc((size_t)c->n_layers * c->n_experts, sizeof(float), "expert counts");
         m->etime = xcalloc((size_t)c->n_layers * c->n_experts, sizeof(uint32_t), "expert count times");
@@ -3354,13 +3576,31 @@ static double mimo_cuda_gb(const char *key, double fallback) {
     }
     return n;
 }
+/* MIMO_CUDA_BF16_PACK (default 1): a BF16 matrix with rows a multiple of 256 (the head,
+ * every o_proj) goes up packed without loss -- 12 bits a weight, the kernel computing the
+ * bytes of the plain bf16 one (backend_cuda_mimo.cu, fmt 5) -- so about a third more of
+ * them fit. 0: plain bf16. */
+static int g_mimo_cuda_pack = 1, g_mimo_cuda_packed;
 static void mimo_cuda_place(DW *d, size_t *budget, int *count) {
     if (!d->w || d->O < 1 || d->I < 1) return;
-    size_t b = dw_bytes(d);
-    if (b > *budget) return;
-    d->cuda = mimo_cuda_upload(d->w, d->s, d->fmt, d->I, d->O);
+    size_t b = dw_bytes(d), used = b;
+    if (g_mimo_cuda_pack && d->fmt == DW_BF16 && d->I % 256 == 0) {
+        size_t est = (size_t)d->O * d->I * 3 / 2 + (size_t)d->O * 5;
+        if (est > *budget) return;
+        d->cuda = mimo_cuda_upload(d->w, NULL, 5, d->I, d->O);
+        if (d->cuda) {
+            used = mimo_cuda_bytes(d->cuda);
+            if (!used) used = est;
+            if (used > *budget) used = *budget;   /* its exceptions went past: the budget is spent */
+            g_mimo_cuda_packed++;
+        }
+    }
+    if (!d->cuda) {
+        if (b > *budget) return;
+        d->cuda = mimo_cuda_upload(d->w, d->s, d->fmt, d->I, d->O);
+    }
     if (d->cuda) {
-        *budget -= b; (*count)++;
+        *budget -= used; (*count)++;
         if (g_mimo_cuda_release && d->vk_name && d->vk_kind != DWK_NONE) {
             free(d->w); free(d->s); d->w = NULL; d->s = NULL; d->vk_gone = 1;
             g_mimo_cuda_host_bytes += b; g_mimo_cuda_dropped++;
@@ -3423,6 +3663,7 @@ static void mimo_cuda_start(Model *m) {
     atexit(mimo_cuda_host_report);
     g_dw_dho_S = &m->S; g_dw_dho_c = &m->c;
     g_mimo_cuda_release = env_int("MIMO_CUDA_RELEASE_HOST", 0) != 0;
+    g_mimo_cuda_pack = env_int("MIMO_CUDA_BF16_PACK", 1) != 0;
     int fault = env_int("MIMO_CUDA_FAULT", 0);
     g_mimo_cuda_fault = fault > 0 ? (unsigned)fault : 0;
     size_t fr = mimo_cuda_free_bytes(), headroom = (size_t)(reserve * 1073741824.0);
@@ -3453,13 +3694,37 @@ static void mimo_cuda_start(Model *m) {
             else mimo_cuda_place(&m->L[i].o, &budget, &count);
         }
     g_mimo_cuda = count > 0;
-    fprintf(stderr, "[CUDA] mimo placed %d dense matrices: %.3f / %.3f GiB budget; CPU host copies %s\n",
-            count, (start - budget) / 1073741824.0, start / 1073741824.0, g_mimo_cuda_release ? "released" : "retained");
+    fprintf(stderr, "[CUDA] mimo placed %d dense matrices (%d bf16 packed): %.3f / %.3f GiB budget; CPU host copies %s\n",
+            count, g_mimo_cuda_packed, (start - budget) / 1073741824.0, start / 1073741824.0, g_mimo_cuda_release ? "released" : "retained");
     if (g_mimo_cuda_oproj_i8)
         fprintf(stderr, "[CUDA] mimo MIMO_CUDA_OPROJ_INT8: %d o_proj as int8 per 128 columns -- NOT exact\n",
                 g_mimo_cuda_oproj_i8_n);
 }
 #endif
+
+/* MIMO_BF16_PACK (default 1): the o_proj and the head the CPU computes (none the GPU
+ * holds) packed without loss (DW_BF16P), with MIMO_DENSE_BITS 0 and no Vulkan device.
+ * 0: plain bf16. */
+static void mimo_bf16_pack(Model *m) {
+    if (!env_int("MIMO_BF16_PACK", 1) || g_dense_bits != 0) return;
+#ifdef COLI_VULKAN
+    if (g_vk_ready) return;   /* the device may take them as bf16 */
+#endif
+    int n = 0;
+    size_t from = 0, to = 0;
+    for (int i = 0; i < m->c.n_layers; i++) {
+#ifdef COLI_MIMO_CUDA
+        if (m->L[i].o.cuda) continue;
+#endif
+        n += dw_pack_bf16(&m->L[i].o, &from, &to);
+    }
+#ifdef COLI_MIMO_CUDA
+    if (!m->head.cuda)
+#endif
+    n += dw_pack_bf16(&m->head, &from, &to);
+    if (n) fprintf(stderr, "[mimo] %d bf16 matrices packed without loss for the CPU: %.2f GB for %.2f GB\n",
+                   n, to / 1e9, from / 1e9);
+}
 
 int main(int argc, char **argv) {
     coli_omp_tune_threads("mimo");
@@ -3558,6 +3823,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "[VK] mimo: %d dense matrices on the GPU (%.2f GB)\n", up, used / 1e9);
     }
 #endif
+    mimo_bf16_pack(m);
     int swa = 0, shown_cap = 0;
     for (int i = 0; i < c->n_layers; i++) { swa += c->swa[i]; if (c->moe[i] && !shown_cap) shown_cap = m->cache[i].cap; }
     fprintf(stderr, "[mimo] %d layers (%d sliding window %d, %d full), %d experts top-%d, cache %d/layer, "

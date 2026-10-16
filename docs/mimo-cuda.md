@@ -73,9 +73,9 @@ hardware validation target; Linux is not covered by those local results.
 The example profile expects the model in `D:\AI\Models\MiMo-V2.6-Pro-MOPD`
 and additional shards in `C:\AI\MiMoPro-Shards`; both paths are parameters.
 It serves localhost port 18080. Existing launchers and model files are untouched.
-`-DenseGB 21 -ReserveGB 1` places five more o_proj (115 matrices, 20.9 GiB) and
-measured +2% (1.81 to 1.85 tok/s), leaving about 1 GiB of the card free while it
-runs; the default keeps 2 GiB for other programs.
+`-DenseGB 21 -ReserveGB 1` places more o_proj (before the packing: five more, 115
+matrices, 20.9 GiB, +2%: 1.81 to 1.85 tok/s), leaving about 1 GiB of the card free
+while it runs; the default keeps 2 GiB for other programs.
 The expert-cache default is 104 entries per MoE layer, with 16 CPU workers, two
 expert readers per drive and the next layer's prefetch (`-IoPerDrive`, `-Prefetch`;
 see [expert streaming](mimo.md#expert-streaming)). The profile enables host-copy release, freeing about 20 GiB of RAM
@@ -92,6 +92,7 @@ and sets the requested context explicitly.
 | `MIMO_CUDA_DENSE_GB` | 20 | Maximum resident dense GiB; 0 disables placement |
 | `MIMO_CUDA_RESERVE_GB` | 2 | Free VRAM left for scratch and other applications |
 | `MIMO_CUDA_RELEASE_HOST` | 0 | Release uploaded host matrices; reload from checkpoint for CPU fallback |
+| `MIMO_CUDA_BF16_PACK` | 1 | BF16 matrices (the head, the o_proj) go up packed without loss, 12 bits a weight -- the same results, see below; 0: plain bf16 |
 | `MIMO_CUDA_OPROJ_INT8` | 0 | 1: every o_proj on the GPU as int8 per 128 columns -- **not exact**, see below |
 | `MIMO_CUDA_OPROJ_SPREAD` | 1 | The o_proj that fit go up even layers first, so the CPU's are every other layer rather than the second half (the disks catch up during a slow attention: +1%); 0: in layer order |
 | `COLI_GPU` | 0 | CUDA device ordinal |
@@ -105,12 +106,37 @@ by the production profile or benchmark.
 Large prefill scratch allocations can fall back to CPU without changing output
 ownership. A 16K context allocation is not a performance claim at 16K tokens.
 
+## BF16 packed without loss (`MIMO_CUDA_BF16_PACK`, on by default)
+
+The head and the o_proj are BF16, and a trained matrix uses few of the exponents a
+bf16 can hold: on Pro, a window of 15 consecutive exponents per row holds all but
+0.018% of the weights. A BF16 matrix whose rows are a multiple of 256 therefore
+goes up as two planes: each weight's sign/mantissa byte, and a 4-bit code, its
+exponent minus the start of its row's window -- or 15, which says the exponent is
+the next byte of the row's exception list. 12 bits a weight instead of 16. The
+kernel rebuilds each weight's bf16 in registers (a byte add, two masks and a byte
+permute per four weights; an exception costs a warp a prefix count) and sums
+exactly as the bf16 kernel does, so the results are the same bytes:
+`tests/test_mimo_cuda.cu` compares the two kernels on trained-like matrices, on
+matrices whose weights are mostly exceptions and on degenerate rows (zeros of both
+signs, one value, 15 and 16 exponents, subnormals), for 1 to 17 rows. Packing is
+done once at start-up on the host, in parallel: the engine starts in 14.5 s instead
+of 12.1.
+
+In the 20-GiB budget the head and 51 o_proj fit instead of the head and 36 (52
+packed matrices, 8.49 GiB for 11.31 GiB of bf16), so the CPU computes 19 o_proj a
+token instead of 34. The CPU packs its own the same way (`MIMO_BF16_PACK`,
+[mimo.md](mimo.md#environment)). Measured with the profile above, in one series:
+1.791 tok/s for the engine before them, 1.824 with the CPU's packing alone, 1.918
+with the GPU's alone, 1.936 with both (+8.1%; decode 2.032 to 2.226) -- every reply
+the same bytes.
+
 ## The faster, inexact o_proj (`MIMO_CUDA_OPROJ_INT8=1`)
 
-On a 24-GiB card 36 of Pro's 70 o_proj fit beside the qkv and the head; the CPU
-computes the other 34 every token, 6.8 GB of bf16 from RAM, about 120 ms. With
+On a 24-GiB card 51 of Pro's 70 o_proj fit beside the qkv and the head when packed
+(36 as plain bf16); the CPU computes the others every token. With
 `MIMO_CUDA_OPROJ_INT8=1` each o_proj goes up as int8 with a float scale per (row,
-128 columns), half its bytes, and all 70 fit (20.01 GiB in all: give the budget
+128 columns), half its bf16 bytes, and all 70 fit (20.01 GiB in all: give the budget
 `MIMO_CUDA_DENSE_GB=20.2`). The CPU computes none, and the RAM they leave is the
 experts'. It is **not exact**: on Pro's own activations a projection is off by 0.5%
 (median, 1.35% at most) against bf16; through 70 layers and the routers' top-8 cuts
@@ -120,9 +146,10 @@ varied 64-token answers, three were the same bytes and the others parted after 2
 145 characters into equivalent wording ("in the country" / "at the time"). The host
 copies stay bf16, so a CPU that has to take over computes the released bytes.
 
-Measured with the profile above: 1.71 to 2.08 tok/s for the benchmark request (2.41
-decode), 1.58 to 1.89 tok/s over eight different prompts. Use it when speed matters
-more than the bits.
+Measured with the profile above before the packing: 1.71 to 2.08 tok/s for the
+benchmark request (2.41 decode), 1.58 to 1.89 tok/s over eight different prompts;
+in the second streaming round 2.168 against 1.814. Use it when speed matters more
+than the bits.
 
 ## Reproduce the benchmark
 
