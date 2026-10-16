@@ -255,6 +255,40 @@ picture's path at the start of the line, and `coli web` with the upload button:
 
 ![MiMo-V2.6 Pro in coli web, reading a picture made by Qwen-Image](media/mimo-pro-web.png)
 
+## Expert streaming
+
+Pro reads several GB of experts per token: with 104 of 384 experts cached per layer
+about 30% of the routed experts are not in RAM. The reads run on their own threads,
+so the time they take overlaps the computation instead of adding to it:
+
+- **a pool of readers per storage device.** The shards' devices are told apart (a
+  RAID volume is one device; the release split across `C:` and `D:` is two), each
+  gets `MIMO_IO_PER_DRIVE` readers (2) and its own queues. A reader takes a demand
+  (an expert the step being computed needs) before a prefetch, so a demand never
+  waits behind more than two reads of its own device. On Windows each reader opens
+  its own unbuffered handle per shard: reads through one synchronous handle are
+  serialized by its file object's lock.
+- **compute what is there while the rest arrives.** A MoE step pins its experts the
+  cache holds and computes them at once, while the missing ones are read; then each
+  wave computes whatever has arrived (`moe_cpu`). The kernel and the rows are those
+  of a step computed all at once, and the weighted sum still runs row by row in each
+  row's routing order, so the logits are the same bytes.
+- **read the next layer's experts ahead.** After a layer's attention, the next MoE
+  layer's router is applied to the residual (normed by that layer's own
+  post-attention norm) and the experts it picks are queued as prefetches while this
+  layer's MLP runs. The residual changes little from one layer to the next: on Pro
+  77% of the experts a step chooses were predicted. A wrong prediction costs a read
+  and a slot that is the first to be reused, never a number: the routing that counts
+  is the layer's own, on its own input. Predicting again after the MLP (`MIMO_PREFETCH=2`)
+  or beyond top-k (`MIMO_PREFETCH_EXTRA`) predicts more but reads more, and was slower
+  on the measured machine (the reads share the RAM's bandwidth with the experts'
+  computation).
+
+`MIMO_ROUTE_TRACE` records every step's routing and the router's ranking at both
+prediction points; `tools/mimo_route_sim.py` replays it through cache policies and
+prediction sizes offline. The measured effect on the RTX 4090 machine is in
+[the streaming experiment](experiments/mimo-stream-4090-2026-10-16/README.md).
+
 ## On a GPU (Vulkan)
 
 A `make mimo VK=1` build run with `COLI_VULKAN=1` puts the routed experts on the
@@ -291,7 +325,16 @@ photo equal to the same prompt computed cold) are the CPU's, and hold with
 | `MIMO_DENSE_BITS` | 0 | 0: dense weights as released (FP8, BF16), exact. 8: int8 per row, less RAM, not exact. 32: f32, the oracle's configuration. |
 | `MIMO_IDOT` | 0 | 1: int8 activations for the expert matmuls (not exact; no faster in the measurement above). |
 | `MIMO_DIRECT` | 1 | 0: buffered expert reads instead of `O_DIRECT`. |
-| `MIMO_READ_THREADS` | 8 | Parallel expert reads per layer. |
+| `MIMO_IO_PER_DRIVE` | 2 | Expert readers per storage device the shards are on (each device has its own queue; a RAID volume is one device). See [Expert streaming](#expert-streaming). |
+| `MIMO_IO_THREADS` | unset | N: N readers on one queue for every device instead; 0: each expert read on the computing thread, one after the other. |
+| `MIMO_PREFETCH` | 1 | 0: off. 1: the next MoE layer's router, applied to the residual after this layer's attention, picks experts read ahead while this layer computes. 2: also again after this layer's MLP. |
+| `MIMO_PREFETCH_EXTRA` | 0 | Experts predicted beyond top-k for each row. |
+| `MIMO_PREFETCH_ROWS` | 4 | The largest step a prediction is made for (a decode step, the conversations of a multiplexed one). |
+| `MIMO_PREFETCH_LIMIT` | 64 | Prefetches waiting in the queues at once. |
+| `MIMO_CACHE_DECAY` | 0 | 0: the expert cache reuses its least recently used slot. 0 < d < 1: the slot whose expert has the lowest use count, decayed by d at each of the layer's steps. |
+| `MIMO_LARGE_PAGES` | 0 | Windows: 1 keeps each layer's expert cache in 2 MiB locked pages (needs the "Lock pages in memory" right); ordinary pages when they cannot be had. |
+| `MIMO_ROUTE_TRACE` | unset | Write every MoE step's routing, and the router's ranking at the prefetcher's two points, to this file for `tools/mimo_route_sim.py`. |
+| `MIMO_READ_THREADS` | -- | No longer read: the readers are `MIMO_IO_PER_DRIVE` per device (`MIMO_IO_THREADS` for one shared queue). |
 | `MIMO_CHUNK` | 64 | Prompt tokens per prefill block. |
 | `MIMO_CTX` / `CTX` | 8192 | Context the KV cache is sized for (capped by the checkpoint). |
 | `MIMO_CAP` | 64 | Expert cache slots per layer when no argument gives one. |

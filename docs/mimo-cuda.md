@@ -12,6 +12,17 @@ deinterleaved **per-row** layout, not the generic CUDA backend's block grid.
 Pinned activation staging is reused between calls. The same kernel reduction
 is used for decode and prefill so chunk sizes do not change the arithmetic.
 
+The trunk's shapes (FP8 rows a multiple of 512 bytes, BF16 rows a multiple of 256
+elements: every MiMo matrix) run on wide kernels: one warp per output row, each
+lane loading 16 weight bytes at a time, e4m3 widened by the hardware conversion
+(exact), and a tile of up to 8 activation rows sharing every weight it decodes,
+so a prompt chunk streams a matrix once per 8 rows instead of once per row. A
+decode step uses a one-row tile (more warps in flight). Each row's sums follow
+the element index only, so a chunk of S rows gives the bytes of S one-row calls
+(`tests/test_mimo_cuda.cu` checks it on both kernels). On the RTX 4090 a 27136 x
+6144 FP8 qkv takes 0.22 ms per decode call instead of 0.63, and a 17-row prompt
+chunk 1.7 ms instead of 9.2.
+
 Routing, streamed MXFP4 experts, attention/KV state and vision remain on CPU.
 CPU weight copies are retained by default. `MIMO_CUDA_RELEASE_HOST=1` releases
 successfully uploaded host matrices so RAM can hold more experts. If CUDA
@@ -62,8 +73,9 @@ hardware validation target; Linux is not covered by those local results.
 The example profile expects the model in `D:\AI\Models\MiMo-V2.6-Pro-MOPD`
 and additional shards in `C:\AI\MiMoPro-Shards`; both paths are parameters.
 It serves localhost port 18080. Existing launchers and model files are untouched.
-The expert-cache default is 104 entries per MoE layer, with 16 CPU workers and
-16 readers. The profile enables host-copy release, freeing about 20 GiB of RAM
+The expert-cache default is 104 entries per MoE layer, with 16 CPU workers, two
+expert readers per drive and the next layer's prefetch (`-IoPerDrive`, `-Prefetch`;
+see [expert streaming](mimo.md#expert-streaming)). The profile enables host-copy release, freeing about 20 GiB of RAM
 on this checkpoint. Its nominal RAM budget is 174 GiB; the cap is explicitly
 bounded at 104 so recovery has headroom on the validated machine. Plain
 `MIMO_CUDA=1` still retains host copies unless release is explicitly enabled.

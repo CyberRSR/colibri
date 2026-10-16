@@ -601,7 +601,16 @@ Read **only** by `c/mimo.c` (and `MIMO_MAX_IMAGE_TOKENS` by the gateway). See [m
 | `MIMO_DENSE_BITS` | 0 | MiMo: 0 keeps the dense weights as released (FP8, BF16), exact; 8 is int8 per row, less RAM, not exact; 32 is f32, the oracle's configuration. |
 | `MIMO_IDOT` | 0 | MiMo: 1 quantizes the expert matmuls' activations to int8 per 32 (faster, not exact). |
 | `MIMO_DIRECT` | 1 | MiMo: 0 reads experts through the page cache instead of `O_DIRECT`. |
-| `MIMO_READ_THREADS` | 8 | MiMo: parallel expert reads per layer. |
+| `MIMO_IO_PER_DRIVE` | 2 | MiMo: expert readers per storage device the shards are on, each device with its own queue (demands before prefetches). |
+| `MIMO_IO_THREADS` | unset | MiMo: N readers on one shared queue instead; 0 reads each expert on the computing thread. |
+| `MIMO_PREFETCH` | 1 | MiMo: 0 off; 1 reads ahead the experts the next layer's router picks from the residual after this layer's attention; 2 also after this layer's MLP. |
+| `MIMO_PREFETCH_EXTRA` | 0 | MiMo: experts predicted beyond top-k for each row. |
+| `MIMO_PREFETCH_ROWS` | 4 | MiMo: the largest step a prediction is made for. |
+| `MIMO_PREFETCH_LIMIT` | 64 | MiMo: prefetches waiting at once. |
+| `MIMO_CACHE_DECAY` | 0 | MiMo: 0 is an LRU expert cache; 0 < d < 1 reuses the slot whose expert has the lowest use count decayed by d per step of its layer. |
+| `MIMO_LARGE_PAGES` | 0 | MiMo, Windows: 1 keeps the expert cache in 2 MiB locked pages when the account has the lock-pages right. |
+| `MIMO_ROUTE_TRACE` | unset | MiMo: write every MoE step's routing for `tools/mimo_route_sim.py`. |
+| `MIMO_READ_THREADS` | -- | MiMo: no longer read; see `MIMO_IO_PER_DRIVE`. |
 | `MIMO_CHUNK` | 64 | MiMo: prompt tokens per prefill block. |
 | `MIMO_CTX` | `CTX`, else 8192 | MiMo: context the KV cache is sized for, capped by the checkpoint. |
 | `MIMO_CAP` | 64 | MiMo: expert cache slots per layer when no argument gives one; never below one routing step. |

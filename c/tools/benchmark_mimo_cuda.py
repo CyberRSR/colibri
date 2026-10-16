@@ -77,6 +77,8 @@ def main():
     p.add_argument("--release-host", action="store_true")
     p.add_argument("--chain-layers", type=int, default=32)
     p.add_argument("--timeout", type=float, default=1800)
+    p.add_argument("--env", action="append", default=[], metavar="KEY=VALUE",
+                   help="extra engine variable, recorded in the config (repeatable)")
     args = p.parse_args()
     if args.runs < 3 or args.tokens < 2 or args.timeout <= 0:
         p.error("use at least three measured runs, two tokens and a positive timeout")
@@ -95,6 +97,11 @@ def main():
               "COLI_VULKAN": "1" if args.backend == "vulkan" else "0",
               "COLI_VK_CHAIN": "1", "COLI_VK_DENSE": "1", "COLI_VK_TIER_RESERVE_GB": "2",
               "COLI_VK_CHAIN_LAYERS": str(args.chain_layers)}
+    for item in args.env:
+        key, sep, value = item.partition("=")
+        if not sep or not key:
+            p.error(f"--env wants KEY=VALUE, got {item!r}")
+        config[key] = value
     env.update(config)
     events = queue.Queue()
     monitor = None
