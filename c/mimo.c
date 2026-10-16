@@ -707,6 +707,8 @@ typedef struct {
      * residual, its likely experts read while this layer computes. pf_h is the residual
      * a prediction is waiting for (taken right after the current layer's own reads). */
     int pf_on, pf_rows, pf_extra, pf_limit;
+    int pf_ka, pf_kb;            /* experts predicted per row after the attention, after the MLP */
+    uint64_t waves, wave_experts;   /* moe_wave calls and the experts they computed */
     const float *pf_h; int pf_n, pf_li;
     uint8_t *pf_mark;            /* [layer][expert] predicted for the layer's next step */
     uint8_t *pf_made;            /* [layer] a prediction stands */
@@ -1253,6 +1255,14 @@ static void model_load(Model *m, const char *dir, int cap) {
     expert_table_init(m);
     cache_init(m, cap);
     m->pf_on = env_int("MIMO_PREFETCH", 1);
+    /* MIMO_PREFETCH=1 predicts top-k after the attention, 2 also after the MLP;
+     * MIMO_PREFETCH_ATTN / MIMO_PREFETCH_MLP set either point's size (0: not there) */
+    m->pf_ka = env_int("MIMO_PREFETCH_ATTN", m->pf_on ? c->topk : 0);
+    m->pf_kb = env_int("MIMO_PREFETCH_MLP", m->pf_on >= 2 ? c->topk : 0);
+    if (!m->pf_on) m->pf_ka = m->pf_kb = 0;
+    if (m->pf_ka < 0) m->pf_ka = 0;
+    if (m->pf_kb < 0) m->pf_kb = 0;
+    m->pf_on = m->pf_ka > 0 || m->pf_kb > 0;
     m->pf_rows = env_int("MIMO_PREFETCH_ROWS", 4);
     m->pf_extra = env_int("MIMO_PREFETCH_EXTRA", 0);
     m->pf_limit = env_int("MIMO_PREFETCH_LIMIT", 64);
@@ -1573,7 +1583,14 @@ static void moe_wave(Model *m, const int *wave, int nw, Slot *const *sl, const i
     int H = c->hidden, MI = c->moe_inter;
     void (*mm)(float *, const float *, const uint8_t *, const uint8_t *, int, int, int)
         = m->idot ? matmul_mxfp4_i8 : matmul_mxfp4;
-    const int BLOCK_ROWS = 256;
+    /* rows per task: a wave of one or two arrivals is cut finer, so every worker has
+     * a few tasks (a row's numbers do not depend on the cut) */
+    int threads = 1;
+#ifdef _OPENMP
+    threads = omp_get_max_threads();
+#endif
+    int BLOCK_ROWS = 256;
+    while (BLOCK_ROWS > 64 && nw * 2 * ((MI + BLOCK_ROWS - 1) / BLOCK_ROWS) < 4 * threads) BLOCK_ROWS /= 2;
     int up_blocks = (MI + BLOCK_ROWS - 1) / BLOCK_ROWS, down_blocks = (H + BLOCK_ROWS - 1) / BLOCK_ROWS;
     int rb_mi = MI / 2, gb_mi = MI / 32, rb_h = H / 2, gb_h = H / 32;
     #pragma omp parallel for schedule(dynamic, 1)
@@ -1680,6 +1697,7 @@ static int moe_cpu(Model *m, int li, const float *xn, int n, const int *sel,
             io_wait_any(m, seen_io);
         } else {
             moe_wave(m, wave, nw, sl, first, xg, g, u, y, base);
+            m->waves++; m->wave_experts += (uint64_t)nw;
             for (int w = 0; w < nw; w++) {
                 int j = wave[w];
                 done[j] = 1; sl[j]->pin--; left--;
@@ -1712,11 +1730,11 @@ static int moe_cpu(Model *m, int li, const float *xn, int n, const int *sel,
  * MIMO_PREFETCH_ROWS bounds the rows a prediction is made for (a decode step, the
  * conversations of a multiplexed one; not a prefill block); MIMO_PREFETCH_LIMIT the
  * prefetches waiting at once. */
-static void mimo_prefetch(Model *m, int li, const float *h, int n) {
+static void mimo_prefetch(Model *m, int li, const float *h, int n, int k) {
     Cfg *c = &m->c;
-    if (!m->pf_on || !g_io.nth || li >= c->n_layers || !c->moe[li] || n < 1 || n > m->pf_rows) return;
+    if (k < 1 || !g_io.nth || li >= c->n_layers || !c->moe[li] || n < 1 || n > m->pf_rows) return;
     double t0 = now_s();
-    int H = c->hidden, E = c->n_experts, K = c->topk + m->pf_extra;
+    int H = c->hidden, E = c->n_experts, K = k + m->pf_extra;
     if (K > E) K = E;
     Layer *l = &m->L[li];
     float *xn = xmalloc((size_t)n * H * sizeof(float), "prefetch input");
@@ -1769,7 +1787,7 @@ static void mimo_prefetch_pending(Model *m) {
     if (!m->pf_h) return;
     const float *h = m->pf_h;
     m->pf_h = NULL;
-    mimo_prefetch(m, m->pf_li, h, m->pf_n);
+    mimo_prefetch(m, m->pf_li, h, m->pf_n, m->pf_ka);
 }
 
 /* A step's routing against the prediction that stood for it, then the prediction is spent. */
@@ -1958,9 +1976,9 @@ static void layers_cpu(Model *m, float *hc, int nc, int pc, int l0, float *xn, f
         for (size_t i = 0; i < (size_t)nc * H; i++) hc[i] += tmp[i];
         if (trace) fwrite(hc, sizeof(float), (size_t)nc * H, trace);
         if (g_rtrace && nc == 1) mimo_trace_rank(m, li + 1, hc, 1);
-        /* MIMO_PREFETCH=2: again from the layer's output, the experts the first
-         * prediction missed */
-        if (m->pf_on >= 2) mimo_prefetch(m, li + 1, hc, nc);
+        /* MIMO_PREFETCH=2 or MIMO_PREFETCH_MLP: again from the layer's output, the
+         * experts the first prediction missed */
+        if (m->pf_kb) mimo_prefetch(m, li + 1, hc, nc, m->pf_kb);
     }
 }
 /* The final norm and lm_head on the CPU: every row of hc into lc (all_rows), or its last. */
@@ -2700,7 +2718,7 @@ static int serve_budget(int prompt, int requested, int context, int logprobs) {
 typedef struct {
     double started, disk0, expert0, attn0, pred0, qkv0, oproj0;
     double prefilled, pdisk, pexpert, pattn;   /* the counters when the prompt was in */
-    uint64_t pmiss, ppfi;
+    uint64_t pmiss, ppfi, waves0, wexp0;
     uint64_t hits0, miss0, fw0, pfi0, pfu0, pfw0, pp0, pph0, br0;
     int n_prompt, budget;
 } MimoReq;
@@ -2713,11 +2731,12 @@ static void mimo_stream_report(const Model *m, const MimoReq *rq) {
              pp = m->pf_pred - rq->pp0, ph = m->pf_pred_hit - rq->pph0;
     fprintf(stderr, "[mimo] streaming: %llu demand reads, %llu prefetched (%llu used, %llu unused), "
                     "predicted %.1f%% of %llu choices, %.2f GB read, %.2fs stalled, %.2fs predicting; "
-                    "attention matmuls: qkv %.2fs, o_proj %.2fs\n",
+                    "attention matmuls: qkv %.2fs, o_proj %.2fs; %.2f experts a wave\n",
             (unsigned long long)(m->miss - rq->miss0), (unsigned long long)pi, (unsigned long long)pu,
             (unsigned long long)pw, pp ? 100.0 * ph / pp : 0.0, (unsigned long long)pp,
             (m->bytes_read - rq->br0) / 1e9, m->t_disk - rq->disk0, m->t_pred - rq->pred0,
-            m->t_qkv - rq->qkv0, m->t_oproj - rq->oproj0);
+            m->t_qkv - rq->qkv0, m->t_oproj - rq->oproj0,
+            m->waves > rq->waves0 ? (double)(m->wave_experts - rq->wexp0) / (double)(m->waves - rq->waves0) : 0.0);
     if (rq->prefilled > 0)
         fprintf(stderr, "[mimo] prompt %.2fs (stalled %.2fs, experts %.2fs, attention %.2fs, %llu demand reads); "
                         "generation %.2fs (stalled %.2fs, experts %.2fs, attention %.2fs, %llu demand reads, %llu prefetched)\n",
@@ -2740,7 +2759,7 @@ static int mimo_serve_start(Model *m, Tok *tokenizer, ColiServeCommand *cmd, int
     uint64_t hits0 = m->hits, miss0 = m->miss, fw0 = m->forwards;
     rq->pred0 = m->t_pred; rq->pfi0 = m->pf_issued; rq->pfu0 = m->pf_used; rq->pfw0 = m->pf_wasted;
     rq->pp0 = m->pf_pred; rq->pph0 = m->pf_pred_hit; rq->br0 = m->bytes_read;
-    rq->qkv0 = m->t_qkv; rq->oproj0 = m->t_oproj;
+    rq->qkv0 = m->t_qkv; rq->oproj0 = m->t_oproj; rq->waves0 = m->waves; rq->wexp0 = m->wave_experts;
     int n_prompt = tok_encode(tokenizer, (const char *)cmd->payload, (int)cmd->payload_bytes,
                               ids, m->ctx + 1);
     int budget = serve_budget(n_prompt, cmd->max_tokens, m->ctx, cmd->logprobs);
@@ -3153,6 +3172,44 @@ static void mimo_cuda_place(DW *d, size_t *budget, int *count) {
         }
     }
 }
+/* MIMO_CUDA_OPROJ_INT8=1: an o_proj goes up as int8 with a scale per (row, 128
+ * columns), half its bf16 bytes, so every layer's fits beside the qkv and the head on
+ * a 24-GiB card and the CPU computes none. NOT exact: about 0.65% relative error on
+ * the projection (measured on Pro's weights; bf16 itself is about 0.1%). The host
+ * copy stays bf16, so a CPU that has to take over computes the released bytes. */
+static int g_mimo_cuda_oproj_i8, g_mimo_cuda_oproj_i8_n;
+static void mimo_cuda_place_i8(DW *d, size_t *budget, int *count) {
+    if (!d->w || d->fmt != DW_BF16 || d->O < 1 || d->I < 128 || d->I % 128) { mimo_cuda_place(d, budget, count); return; }
+    int nb = d->I / 128;
+    size_t qb = (size_t)d->O * d->I, sb = (size_t)d->O * nb * sizeof(float), b = dw_bytes(d);
+    if (qb + sb > *budget) return;
+    int8_t *q = malloc(qb);
+    float *sc = malloc(sb);
+    if (!q || !sc) { free(q); free(sc); return; }
+    const uint16_t *w = (const uint16_t *)d->w;
+    #pragma omp parallel for schedule(static)
+    for (int o = 0; o < d->O; o++)
+        for (int k = 0; k < nb; k++) {
+            const uint16_t *src = w + (size_t)o * d->I + (size_t)k * 128;
+            float most = 0;
+            for (int i = 0; i < 128; i++) { float a = fabsf(bf16_to_f32(src[i])); if (a > most) most = a; }
+            float step = most > 0 ? most / 127.0f : 1.0f;
+            sc[(size_t)o * nb + k] = step;
+            int8_t *dst = q + (size_t)o * d->I + (size_t)k * 128;
+            for (int i = 0; i < 128; i++) {
+                long v = lrintf(bf16_to_f32(src[i]) / step);
+                dst[i] = (int8_t)(v > 127 ? 127 : v < -127 ? -127 : v);
+            }
+        }
+    d->cuda = mimo_cuda_upload(q, sc, 4, d->I, d->O);
+    free(q); free(sc);
+    if (!d->cuda) return;
+    *budget -= qb + sb; (*count)++; g_mimo_cuda_oproj_i8_n++;
+    if (g_mimo_cuda_release && d->vk_name && d->vk_kind != DWK_NONE) {
+        free(d->w); free(d->s); d->w = NULL; d->s = NULL; d->vk_gone = 1;
+        g_mimo_cuda_host_bytes += b; g_mimo_cuda_dropped++;
+    }
+}
 static void mimo_cuda_host_report(void) {
     fprintf(stderr, "[CUDA] mimo host copies: %d released (%.3f GiB), %d restored from checkpoint (%.3f GiB)\n",
             g_mimo_cuda_dropped, g_mimo_cuda_host_bytes / 1073741824.0,
@@ -3188,10 +3245,17 @@ static void mimo_cuda_start(Model *m) {
         mimo_cuda_place(&m->L[i].up, &budget, &count);
         mimo_cuda_place(&m->L[i].down, &budget, &count);
     }
-    for (int i = 0; i < m->c.n_layers; i++) mimo_cuda_place(&m->L[i].o, &budget, &count);
+    g_mimo_cuda_oproj_i8 = env_int("MIMO_CUDA_OPROJ_INT8", 0) != 0;
+    for (int i = 0; i < m->c.n_layers; i++) {
+        if (g_mimo_cuda_oproj_i8) mimo_cuda_place_i8(&m->L[i].o, &budget, &count);
+        else mimo_cuda_place(&m->L[i].o, &budget, &count);
+    }
     g_mimo_cuda = count > 0;
     fprintf(stderr, "[CUDA] mimo placed %d dense matrices: %.3f / %.3f GiB budget; CPU host copies %s\n",
             count, (start - budget) / 1073741824.0, start / 1073741824.0, g_mimo_cuda_release ? "released" : "retained");
+    if (g_mimo_cuda_oproj_i8)
+        fprintf(stderr, "[CUDA] mimo MIMO_CUDA_OPROJ_INT8: %d o_proj as int8 per 128 columns -- NOT exact\n",
+                g_mimo_cuda_oproj_i8_n);
 }
 #endif
 

@@ -604,10 +604,13 @@ Read **only** by `c/mimo.c` (and `MIMO_MAX_IMAGE_TOKENS` by the gateway). See [m
 | `MIMO_IO_PER_DRIVE` | 2 | MiMo: expert readers per storage device the shards are on, each device with its own queue (demands before prefetches). |
 | `MIMO_IO_THREADS` | unset | MiMo: N readers on one shared queue instead; 0 reads each expert on the computing thread. |
 | `MIMO_PREFETCH` | 1 | MiMo: 0 off; 1 reads ahead the experts the next layer's router picks from the residual after this layer's attention; 2 also after this layer's MLP. |
-| `MIMO_PREFETCH_EXTRA` | 0 | MiMo: experts predicted beyond top-k for each row. |
+| `MIMO_PREFETCH_ATTN` | top-k | MiMo: experts predicted per row after the attention (0: none there). |
+| `MIMO_PREFETCH_MLP` | 0, top-k with `MIMO_PREFETCH=2` | MiMo: experts predicted per row after the MLP. |
+| `MIMO_PREFETCH_EXTRA` | 0 | MiMo: experts predicted beyond each point's size for each row. |
 | `MIMO_PREFETCH_ROWS` | 4 | MiMo: the largest step a prediction is made for. |
 | `MIMO_PREFETCH_LIMIT` | 64 | MiMo: prefetches waiting at once. |
 | `MIMO_CACHE_DECAY` | 0 | MiMo: 0 is an LRU expert cache; 0 < d < 1 reuses the slot whose expert has the lowest use count decayed by d per step of its layer. |
+| `MIMO_CUDA_OPROJ_INT8` | 0 | MiMo, CUDA: 1 puts every o_proj on the GPU as int8 per 128 columns (not exact; see mimo-cuda.md). |
 | `MIMO_LARGE_PAGES` | 0 | MiMo, Windows: 1 keeps the expert cache in 2 MiB locked pages when the account has the lock-pages right. |
 | `MIMO_ROUTE_TRACE` | unset | MiMo: write every MoE step's routing for `tools/mimo_route_sim.py`. |
 | `MIMO_READ_THREADS` | -- | MiMo: no longer read; see `MIMO_IO_PER_DRIVE`. |

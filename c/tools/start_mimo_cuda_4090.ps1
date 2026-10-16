@@ -8,7 +8,9 @@ param(
     [ValidateRange(0,2)][int]$Prefetch = 1,
     [ValidateRange(1,21)][double]$DenseGB = 20,
     [ValidateRange(512,32768)][int]$Context = 16384,
-    [ValidateRange(1,65535)][int]$Port = 18080
+    [ValidateRange(1,65535)][int]$Port = 18080,
+    # Faster and NOT exact: every o_proj on the GPU as int8 (docs/mimo-cuda.md)
+    [switch]$OprojInt8
 )
 $ErrorActionPreference = 'Stop'
 $EngineDir = Split-Path -Parent $PSScriptRoot
@@ -25,7 +27,9 @@ if ($ShardDir -and !(Test-Path -LiteralPath $ShardDir -PathType Container)) {
 }
 $env:MIMO_DIRS = $ShardDir
 $env:MIMO_CUDA = '1'
+if ($OprojInt8 -and -not $PSBoundParameters.ContainsKey('DenseGB')) { $DenseGB = 20.2 }
 $env:MIMO_CUDA_DENSE_GB = [string]$DenseGB
+$env:MIMO_CUDA_OPROJ_INT8 = $(if ($OprojInt8) { '1' } else { '0' })
 $env:MIMO_CUDA_RESERVE_GB = '2'
 $env:MIMO_CUDA_RELEASE_HOST = '1'
 $env:MIMO_CHUNK = '64'
@@ -43,7 +47,7 @@ foreach ($key in @('MIMO_CUDA_FAULT', 'MIMO_LAYERS', 'MIMO_TRACE', 'MIMO_LOGITS'
                    'MIMO_IO_THREADS', 'MIMO_READ_THREADS')) {
     Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue
 }
-Write-Host "MiMo native CUDA: dense budget $DenseGB GiB, cache $Cap experts/layer, CPU $Threads, readers $IoPerDrive per drive, prefetch $Prefetch"
+Write-Host "MiMo native CUDA: dense budget $DenseGB GiB, cache $Cap experts/layer, CPU $Threads, readers $IoPerDrive per drive, prefetch $Prefetch$(if ($OprojInt8) { ', o_proj int8 (not exact)' })"
 Write-Host "API: http://127.0.0.1:$Port/v1"
 & python (Join-Path $EngineDir 'coli') serve --model $ModelDir --cap $Cap --ram 174 --ctx $Context `
     --host 127.0.0.1 --port $Port --model-id 'mimo-v2.6-pro-mopd' --kv-slots 1 `

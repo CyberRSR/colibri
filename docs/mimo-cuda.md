@@ -89,6 +89,7 @@ and sets the requested context explicitly.
 | `MIMO_CUDA_DENSE_GB` | 20 | Maximum resident dense GiB; 0 disables placement |
 | `MIMO_CUDA_RESERVE_GB` | 2 | Free VRAM left for scratch and other applications |
 | `MIMO_CUDA_RELEASE_HOST` | 0 | Release uploaded host matrices; reload from checkpoint for CPU fallback |
+| `MIMO_CUDA_OPROJ_INT8` | 0 | 1: every o_proj on the GPU as int8 per 128 columns -- **not exact**, see below |
 | `COLI_GPU` | 0 | CUDA device ordinal |
 
 The actual budget is the smaller of the requested budget and free VRAM minus
@@ -99,6 +100,25 @@ The host-copy report counts released and restored matrices. For recovery tests,
 by the production profile or benchmark.
 Large prefill scratch allocations can fall back to CPU without changing output
 ownership. A 16K context allocation is not a performance claim at 16K tokens.
+
+## The faster, inexact o_proj (`MIMO_CUDA_OPROJ_INT8=1`)
+
+On a 24-GiB card 36 of Pro's 70 o_proj fit beside the qkv and the head; the CPU
+computes the other 34 every token, 6.8 GB of bf16 from RAM, about 120 ms. With
+`MIMO_CUDA_OPROJ_INT8=1` each o_proj goes up as int8 with a float scale per (row,
+128 columns), half its bytes, and all 70 fit (20.01 GiB in all: give the budget
+`MIMO_CUDA_DENSE_GB=20.2`). The CPU computes none, and the RAM they leave is the
+experts'. It is **not exact**: on Pro's own activations a projection is off by 0.5%
+(median, 1.35% at most) against bf16; through 70 layers and the routers' top-8 cuts
+that becomes, on a 451-token prompt read teacher-forced, the same argmax at 398 of
+451 positions (88%), mean KL 0.13 (the exact CUDA path: 451/451, 7.6e-12). On eight
+varied 64-token answers, three were the same bytes and the others parted after 22 to
+145 characters into equivalent wording ("in the country" / "at the time"). The host
+copies stay bf16, so a CPU that has to take over computes the released bytes.
+
+Measured with the profile above: 1.71 to 2.08 tok/s for the benchmark request (2.41
+decode), 1.58 to 1.89 tok/s over eight different prompts. Use it when speed matters
+more than the bits.
 
 ## Reproduce the benchmark
 

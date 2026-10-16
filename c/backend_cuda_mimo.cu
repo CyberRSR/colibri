@@ -26,7 +26,7 @@ static MimoCudaTensor *tensors;
 static float *dx, *dy, *hx, *hy;
 static size_t xcap, ycap, resident, tensor_count;
 static unsigned long long calls, rows, fallback;
-static double seconds[4];
+static double seconds[5];
 
 static int checked(cudaError_t e, const char *where) {
     if (e == cudaSuccess) return 1;
@@ -56,12 +56,12 @@ extern "C" size_t mimo_cuda_free_bytes(void) {
 }
 
 extern "C" MimoCudaTensor *mimo_cuda_upload(const void *w, const float *scales, int fmt, int I, int O) {
-    if (!ready || failed || !w || I < 1 || I > INT_MAX - 127 || O < 1 || O > INT_MAX - 3 || fmt < 0 || fmt > 3 ||
-        ((fmt == 2 || fmt == 3) && !scales)) return nullptr;
+    if (!ready || failed || !w || I < 1 || I > INT_MAX - 127 || O < 1 || O > INT_MAX - 3 || fmt < 0 || fmt > 4 ||
+        ((fmt == 2 || fmt == 3 || fmt == 4) && !scales)) return nullptr;
     size_t esz = fmt == 0 ? 4 : fmt == 1 ? 2 : 1;
     if ((size_t)O > SIZE_MAX / (size_t)I / esz) return nullptr;
     size_t wb = (size_t)O * I * esz;
-    size_t ns = fmt == 2 ? (size_t)O * (((size_t)I + 127) / 128) : fmt == 3 ? (size_t)O : 0;
+    size_t ns = fmt == 2 || fmt == 4 ? (size_t)O * (((size_t)I + 127) / 128) : fmt == 3 ? (size_t)O : 0;
     if (ns > SIZE_MAX / sizeof(float)) return nullptr;
     size_t sb = ns * sizeof(float);
     MimoCudaTensor *t = (MimoCudaTensor *)calloc(1, sizeof *t);
@@ -98,14 +98,15 @@ __global__ static void dense(const void *__restrict__ weights, const float *__re
     const float *xs = x + (size_t)blockIdx.y * I;
     size_t base = (size_t)o * I;
     float sum = 0;
-    if (FMT == 2) {
+    if (FMT == 2 || FMT == 4) {
         double total = 0;
         int nb = (I + 127) / 128;
         for (int b = 0; b < nb; b++) {
             float part = 0;
             for (int k = lane; k < 128 && b * 128 + k < I; k += 32) {
                 int i = b * 128 + k;
-                part = fmaf(e4m3(((const unsigned char *)weights)[base + i]), xs[i], part);
+                unsigned char q = ((const unsigned char *)weights)[base + i];
+                part = fmaf(FMT == 2 ? e4m3(q) : (float)(signed char)q, xs[i], part);
             }
             part = warp_sum(part);
             if (!lane) total += (double)part * scales[(size_t)o * nb + b];
@@ -148,7 +149,15 @@ __device__ static __forceinline__ void fp8x16(const uint4 q, float *w) {
         w[4 * k] = a.x; w[4 * k + 1] = a.y; w[4 * k + 2] = b.x; w[4 * k + 3] = b.y;
     }
 }
-template<int TS>
+__device__ static __forceinline__ void i8x16(const uint4 q, float *w) {
+    const unsigned int v[4] = {q.x, q.y, q.z, q.w};
+    #pragma unroll
+    for (int k = 0; k < 4; k++)
+        #pragma unroll
+        for (int b = 0; b < 4; b++) w[4 * k + b] = (float)(signed char)(v[k] >> (8 * b));
+}
+/* FP8 (FMT 2) or int8 with the same block scales (FMT 4, the opt-in o_proj form) */
+template<int TS, int FMT>
 __global__ static void __launch_bounds__(128) fp8_wide(const uint8_t *__restrict__ weights, const float *__restrict__ scales,
                                                        const float *__restrict__ x, float *__restrict__ y,
                                                        int I, int O, int S) {
@@ -164,7 +173,8 @@ __global__ static void __launch_bounds__(128) fp8_wide(const uint8_t *__restrict
     for (int it = 0; it < I / 512; it++) {
         int c = it * 32 + lane;
         float w[16];
-        fp8x16(__ldcs(wr + c), w);
+        if (FMT == 4) i8x16(__ldcs(wr + c), w);
+        else fp8x16(__ldcs(wr + c), w);
         float part[TS];
         #pragma unroll
         for (int s = 0; s < TS; s++) {
@@ -245,7 +255,7 @@ __global__ static void __launch_bounds__(128) bf16_wide(const uint16_t *__restri
     }
 }
 static int wide(const MimoCudaTensor *t) {
-    return (t->fmt == 2 && t->I % 512 == 0) || (t->fmt == 1 && t->I % 256 == 0);
+    return ((t->fmt == 2 || t->fmt == 4) && t->I % 512 == 0) || (t->fmt == 1 && t->I % 256 == 0);
 }
 
 /* Grow transactionally: a partially successful allocation neither leaks nor
@@ -274,9 +284,13 @@ extern "C" int mimo_cuda_matmul(MimoCudaTensor *t, float *y, const float *x, int
     int ts = S == 1 ? 1 : MIMO_TS;
     dim3 tiles((unsigned)((t->O + 3) / 4), (unsigned)((S + ts - 1) / ts));
     if (wide(t) && t->fmt == 2 && ts == 1)
-        fp8_wide<1><<<tiles,128,0,stream>>>((const uint8_t *)t->w,t->scales,dx,dy,t->I,t->O,S);
+        fp8_wide<1, 2><<<tiles,128,0,stream>>>((const uint8_t *)t->w,t->scales,dx,dy,t->I,t->O,S);
     else if (wide(t) && t->fmt == 2)
-        fp8_wide<MIMO_TS><<<tiles,128,0,stream>>>((const uint8_t *)t->w,t->scales,dx,dy,t->I,t->O,S);
+        fp8_wide<MIMO_TS, 2><<<tiles,128,0,stream>>>((const uint8_t *)t->w,t->scales,dx,dy,t->I,t->O,S);
+    else if (wide(t) && t->fmt == 4 && ts == 1)
+        fp8_wide<1, 4><<<tiles,128,0,stream>>>((const uint8_t *)t->w,t->scales,dx,dy,t->I,t->O,S);
+    else if (wide(t) && t->fmt == 4)
+        fp8_wide<MIMO_TS, 4><<<tiles,128,0,stream>>>((const uint8_t *)t->w,t->scales,dx,dy,t->I,t->O,S);
     else if (wide(t) && ts == 1)
         bf16_wide<1><<<tiles,128,0,stream>>>((const uint16_t *)t->w,dx,dy,t->I,t->O,S);
     else if (wide(t))
@@ -286,6 +300,7 @@ extern "C" int mimo_cuda_matmul(MimoCudaTensor *t, float *y, const float *x, int
     case 1: dense<1><<<grid,128,0,stream>>>(t->w,t->scales,dx,dy,t->I,t->O); break;
     case 2: dense<2><<<grid,128,0,stream>>>(t->w,t->scales,dx,dy,t->I,t->O); break;
     case 3: dense<3><<<grid,128,0,stream>>>(t->w,t->scales,dx,dy,t->I,t->O); break;
+    case 4: dense<4><<<grid,128,0,stream>>>(t->w,t->scales,dx,dy,t->I,t->O); break;
     default: return 0;
     }
     if (!checked(cudaGetLastError(), "kernel") ||
@@ -300,8 +315,8 @@ extern "C" int mimo_cuda_matmul(MimoCudaTensor *t, float *y, const float *x, int
 extern "C" void mimo_cuda_report(void) {
     if (ready) fprintf(stderr, "[CUDA] mimo dense: %zu matrices, %.3f GiB resident, %llu matmuls, %llu rows, %llu scratch/compute fallbacks%s\n",
                        tensor_count, resident / 1073741824.0, calls, rows, fallback, failed ? ", device failed" : "");
-    if (ready) fprintf(stderr, "[CUDA] mimo matmul wall time (copies + compute): f32 %.3fs, bf16 %.3fs, fp8 %.3fs, int8 %.3fs\n",
-                       seconds[0], seconds[1], seconds[2], seconds[3]);
+    if (ready) fprintf(stderr, "[CUDA] mimo matmul wall time (copies + compute): f32 %.3fs, bf16 %.3fs, fp8 %.3fs, int8 %.3fs, int8 blocks %.3fs\n",
+                       seconds[0], seconds[1], seconds[2], seconds[3], seconds[4]);
 }
 extern "C" void mimo_cuda_shutdown(void) {
     if (stream) cudaStreamSynchronize(stream);

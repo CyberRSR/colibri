@@ -1,5 +1,7 @@
 /* MiMo resident dense matrices. The format numbers are MiMo DW_* values,
- * NOT the generic backend's QT formats. All activations stay float32.
+ * NOT the generic backend's QT formats, plus 4: int8 with a float scale per
+ * (row, 128-column block), MIMO_CUDA_OPROJ_INT8's device form, which no host
+ * matrix has. All activations stay float32.
  * Single host thread; opaque handles never cross an allocator boundary.
  * Every operation returns 1 on success, 0 on failure; matmul leaves y alone
  * on failure so the caller can recompute with its canonical host weights. */

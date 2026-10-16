@@ -191,6 +191,71 @@ def cache_report(steps, L, caps, skip, decays):
         print(f"    {'Belady optimum':24s} {100 * bh / max(bt, 1):5.1f}% (every step, cold start)")
 
 
+class GlobalDecay:
+    """One pool for all layers, the lowest decayed use count goes (a count decays by
+    the factor once per step of its own layer: once per token on every layer)."""
+    def __init__(self, total, decay):
+        self.total, self.decay = total, decay
+        self.used = {}                         # (li, e) -> stamp
+        self.freq, self.ftime = defaultdict(float), defaultdict(int)
+        self.t, self.clock = defaultdict(int), 0
+
+    def f(self, key):
+        return self.freq[key] * self.decay ** (self.t[key[0]] - self.ftime[key])
+
+    def step(self, experts, li):
+        self.clock += 1
+        self.t[li] += 1
+        keys = [(li, e) for e in experts]
+        for k in keys:
+            self.freq[k] = self.f(k) + 1.0
+            self.ftime[k] = self.t[li]
+        hits, misses = 0, []
+        for k in keys:
+            if k in self.used:
+                hits += 1
+                self.used[k] = self.clock
+            else:
+                misses.append(k)
+        protect = set(keys)
+        for k in misses:
+            if len(self.used) >= self.total:
+                cand = [v for v in self.used if v not in protect] or list(self.used)
+                victim = min(cand, key=lambda v: (self.f(v), self.used[v]))
+                del self.used[victim]
+            self.used[k] = self.clock
+        return hits
+
+
+def prefetch_report(steps, cap, rules):
+    """Per decode step, with the engine's LRU cache: the reads a prefetch rule issues
+    for experts the cache lacks (useful when the step then chooses them, unused
+    otherwise) and the demand reads left for the experts it did not predict."""
+    caches = defaultdict(lambda: EngineCache(cap))
+    tot = {r: [0, 0, 0] for r in rules}
+    ndec = 0
+    for li, n, pos, sel, pred in steps:
+        ex = union(sel)
+        cache = caches[li]
+        if n == 1 and pred and pred[0] is not None and pred[1] is not None:
+            ndec += 1
+            resident = set(cache.used)
+            actual = set(ex)
+            for r in rules:
+                ka, kb = r
+                p = set(pred[0][:ka]) | set(pred[1][:kb])
+                reads = p - resident
+                tot[r][0] += len(reads & actual)
+                tot[r][1] += len(reads - actual)
+                tot[r][2] += len(actual - resident - p)
+        cache.step(ex, li)
+    print(f"prefetch rules at cap {cap}, per decode step of a layer ({ndec} steps):")
+    for r in rules:
+        u, w, d = (x / max(ndec, 1) for x in tot[r])
+        print(f"  after attention top-{r[0]:<2d} + after MLP top-{r[1]:<2d}: useful {u:.2f}, unused {w:.2f}, "
+              f"demand {d:.2f}, all reads {u + w + d:.2f}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("trace")
@@ -201,6 +266,8 @@ def main():
     (L, E, K, R), steps = read_trace(a.trace)
     print(f"{len(steps)} MoE steps, {L} layers, {E} experts, top-{K}")
     prediction_report(steps, K)
+    prefetch_report(steps, (a.cap or [104])[0],
+                    [(0, 0), (8, 0), (6, 0), (10, 0), (0, 8), (8, 8), (6, 8), (4, 8), (6, 6), (8, 4)])
     cache_report(steps, L, a.cap or [104], a.skip_steps, a.decay or [0.9, 0.97, 0.99, 0.995])
 
 

@@ -282,7 +282,9 @@ so the time they take overlaps the computation instead of adding to it:
   is the layer's own, on its own input. Predicting again after the MLP (`MIMO_PREFETCH=2`)
   or beyond top-k (`MIMO_PREFETCH_EXTRA`) predicts more but reads more, and was slower
   on the measured machine (the reads share the RAM's bandwidth with the experts'
-  computation).
+  computation). Predicting only after the MLP (`MIMO_PREFETCH_ATTN=0
+  MIMO_PREFETCH_MLP=8`) is more accurate (82%) and slower still: the reads start too
+  late. What counts is the time a read gets, not the last points of accuracy.
 
 `MIMO_ROUTE_TRACE` records every step's routing and the router's ranking at both
 prediction points; `tools/mimo_route_sim.py` replays it through cache policies and
@@ -328,10 +330,12 @@ photo equal to the same prompt computed cold) are the CPU's, and hold with
 | `MIMO_IO_PER_DRIVE` | 2 | Expert readers per storage device the shards are on (each device has its own queue; a RAID volume is one device). See [Expert streaming](#expert-streaming). |
 | `MIMO_IO_THREADS` | unset | N: N readers on one queue for every device instead; 0: each expert read on the computing thread, one after the other. |
 | `MIMO_PREFETCH` | 1 | 0: off. 1: the next MoE layer's router, applied to the residual after this layer's attention, picks experts read ahead while this layer computes. 2: also again after this layer's MLP. |
-| `MIMO_PREFETCH_EXTRA` | 0 | Experts predicted beyond top-k for each row. |
+| `MIMO_PREFETCH_ATTN` | top-k (8) | Experts predicted per row after the attention (0: none there); set, it overrides `MIMO_PREFETCH`'s choice. |
+| `MIMO_PREFETCH_MLP` | 0 (8 with `MIMO_PREFETCH=2`) | Experts predicted per row after the MLP. |
+| `MIMO_PREFETCH_EXTRA` | 0 | Experts predicted beyond each point's size for each row. |
 | `MIMO_PREFETCH_ROWS` | 4 | The largest step a prediction is made for (a decode step, the conversations of a multiplexed one). |
 | `MIMO_PREFETCH_LIMIT` | 64 | Prefetches waiting in the queues at once. |
-| `MIMO_CACHE_DECAY` | 0 | 0: the expert cache reuses its least recently used slot. 0 < d < 1: the slot whose expert has the lowest use count, decayed by d at each of the layer's steps. |
+| `MIMO_CACHE_DECAY` | 0 | 0: the expert cache reuses its least recently used slot. 0 < d < 1: the slot whose expert has the lowest use count, decayed by d at each of the layer's steps. 0.97 read 17% less on a benchmark that repeats one prompt (it keeps what the last identical request used) and was no faster on eight different prompts, so LRU stays the default. |
 | `MIMO_LARGE_PAGES` | 0 | Windows: 1 keeps each layer's expert cache in 2 MiB locked pages (needs the "Lock pages in memory" right); ordinary pages when they cannot be had. |
 | `MIMO_ROUTE_TRACE` | unset | Write every MoE step's routing, and the router's ranking at the prefetcher's two points, to this file for `tools/mimo_route_sim.py`. |
 | `MIMO_READ_THREADS` | -- | No longer read: the readers are `MIMO_IO_PER_DRIVE` per device (`MIMO_IO_THREADS` for one shared queue). |

@@ -37,6 +37,10 @@ static int check(int fmt, int I, int O, int S) {
             int8_t v = (int8_t)((int)(j * 37 % 255) - 127);
             memcpy(q.data() + j, &v, 1); w[j] = v * scales[j / I];
         }
+        if (fmt == 4) {   /* int8 with a scale per (row, 128-column block) */
+            int8_t v = (int8_t)((int)(j * 37 % 255) - 127);
+            memcpy(q.data() + j, &v, 1); w[j] = v * scales[(j / I) * blocks + (j % I) / 128];
+        }
     }
     for (int s = 0; s < S; s++) for (int o = 0; o < O; o++) {
         double acc = 0;
@@ -66,9 +70,10 @@ int main() {
     if (!mimo_cuda_init(0)) return 1;
     float w = 1;
     if (mimo_cuda_upload(&w, nullptr, 2, 1, 1) || mimo_cuda_upload(&w, nullptr, 4, 1, 1) ||
+        mimo_cuda_upload(&w, nullptr, 5, 1, 1) ||
         mimo_cuda_upload(&w, nullptr, 0, 0, 1) || mimo_cuda_init(-1)) return 1;
     int rc = 0;
-    for (int f = 0; f < 4; f++) {
+    for (int f = 0; f < 5; f++) {
         rc |= check(f, 1, 1, 1);
         rc |= check(f, 129, 13, 7);
         rc |= check(f, 6144, 33, 3);
