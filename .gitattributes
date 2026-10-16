@@ -4,3 +4,4 @@ c/build_mimo_cuda.bat text eol=crlf
 # Experiment checksums describe exact recorded bytes, including native log EOLs
 # and output whitespace. Keep source-code whitespace checks separate from data.
 docs/experiments/mimo-cuda-4090-2026-10-16/** -text -whitespace
+docs/experiments/mimo-stream-4090-2026-10-16/** -text -whitespace

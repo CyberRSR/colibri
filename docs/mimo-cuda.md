@@ -129,3 +129,7 @@ backends use the entire model and the same checkpoint, context and precision.
 See the [RTX 4090 experiment](experiments/mimo-cuda-4090-2026-10-16/README.md)
 for raw samples, actual GPU work, numerical checks, rejected tuning and the
 limitations of the general Windows test suite.
+
+The [streaming experiment](experiments/mimo-stream-4090-2026-10-16/README.md)
+measures the same profile with the expert streaming and the wide kernels:
+1.156 to 1.709 tok/s for a whole request, the CPU logits unchanged to the bit.
