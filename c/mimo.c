@@ -877,11 +877,21 @@ typedef struct {
     int qdrive, qn;        /* a prefetch's pieces: qn jobs from qpos in drive qdrive's queue */
     unsigned qpos;
 } Slot;
-typedef struct { Slot *s; int n, cap, max; int *by_expert; uint8_t *arena; } LCache;
-/* MIMO_CACHE_GLOBAL=1: the MoE layers share one pool of cap x layers buffers. A layer
- * that needs a slot when the pool is full takes the least recently used buffer of any
- * layer (not pinned, not loading, not read ahead and still waiting), and may hold up to
- * twice cap. 0 (default): each layer its own cap, least recently used within it. */
+typedef struct { Slot *s; int n, cap, max, nbuf; int *by_expert; uint8_t *arena; } LCache;
+/* MIMO_CACHE_GLOBAL (default 1; 0 in a VK=1 build, whose expert tier steers the
+ * per-layer choice): the MoE layers share one pool of cap x layers buffers. A layer
+ * that needs a slot in a decode step when the pool is full takes the least recently
+ * used buffer of any layer (not pinned, not loading, not read ahead and still
+ * waiting), and may hold up to twice cap, so the layers whose routing spreads wider
+ * hold more: on Pro a decode step reads about 10% fewer experts on demand. A prompt
+ * block's step reuses the layer's own least recently used buffer once the layer
+ * holds cap of them: a new prompt's many experts would otherwise push out what the
+ * next layers hold. 0: each layer its own cap, least recently used within it. */
+#ifdef COLI_VULKAN
+#define MIMO_CACHE_GLOBAL_DEFAULT 0
+#else
+#define MIMO_CACHE_GLOBAL_DEFAULT 1
+#endif
 static int g_cache_global, g_slots_total, g_slots_used;
 typedef struct { int fd[6], fi[6]; int64_t off[6]; int contig; } ERef;
 
@@ -931,6 +941,7 @@ typedef struct {
      * residual, its likely experts read while this layer computes. pf_h is the residual
      * a prediction is waiting for (taken right after the current layer's own reads). */
     int pf_on, pf_rows, pf_extra, pf_limit;
+    int bulk;          /* the MoE step being computed has more rows than pf_rows (a prompt block) */
     int pf_ka, pf_kb;            /* experts predicted per row after the attention, after the MLP */
     uint64_t waves, wave_experts;   /* moe_wave calls and the experts they computed */
     const float *pf_h; int pf_n, pf_li;
@@ -1376,9 +1387,10 @@ static int slot_entry_global(Model *m, int li) {
         if (posix_memalign((void **)&lc->s[idx].base, 4096, (size_t)m->e_bytes + 8192)) {
             fprintf(stderr, "[mimo] out of memory for an expert slot\n"); exit(1);
         }
-        g_slots_used++;
+        g_slots_used++; lc->nbuf++;
         return idx;
     }
+    if (m->bulk && lc->nbuf >= lc->cap) return -1;   /* a prompt block: the layer's own LRU */
     if (idx < 0) return -1;                /* the layer holds its most: its own LRU (slot_take) */
     Slot *v = NULL; int vl = -1, vk = -1;
     uint64_t oldest = UINT64_MAX;
@@ -1397,6 +1409,7 @@ static int slot_entry_global(Model *m, int li) {
     v->eid = -1; v->used = 0;
     if (vl == li) return vk;               /* this layer's own: reused in place */
     lc->s[idx].base = v->base; v->base = NULL; v->buf = NULL;
+    m->cache[vl].nbuf--; lc->nbuf++;
     return idx;
 }
 
@@ -1562,7 +1575,7 @@ static void model_load(Model *m, const char *dir, int cap) {
         }
     }
     expert_table_init(m);
-    g_cache_global = env_int("MIMO_CACHE_GLOBAL", 0) != 0;
+    g_cache_global = env_int("MIMO_CACHE_GLOBAL", MIMO_CACHE_GLOBAL_DEFAULT) != 0;
     if (g_cache_global && env_int("MIMO_LARGE_PAGES", 0))
         fprintf(stderr, "[mimo] MIMO_CACHE_GLOBAL moves buffers between layers: ordinary pages\n");
     cache_init(m, cap);
@@ -2094,6 +2107,7 @@ static int moe_cpu(Model *m, int li, const float *xn, int n, const int *sel,
     first[nu] = total - base;
 #undef MIMO_WANT
     Slot **sl = xmalloc((size_t)(nu ? nu : 1) * sizeof(Slot *), "expert slots of a step");
+    m->bulk = n > m->pf_rows;
     uint64_t stamp = slots_demand(m, li, uni, nu, sl);
     if (m->pf_h) mimo_prefetch_pending(m);
     double t0 = now_s(), waited = m->t_disk;
