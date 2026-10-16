@@ -76,7 +76,9 @@ class RegistryEngineAgreementTest(unittest.TestCase):
             with self.subTest(family=family.id):
                 rule = engine_rule(family.engine_artifact)
                 self.assertTrue(rule, f"no Makefile rule for {family.engine_artifact}")
-                has_backend = any(obj in rule for obj in BACKEND_OBJECTS)
+                # Match the make variable, not a substring: MIMO_CUDA_OBJ is
+                # dense-only and promises no planner-managed expert tier.
+                has_backend = any(f"$({obj})" in rule for obj in BACKEND_OBJECTS)
                 self.assertEqual(
                     has_backend, family.supports_accelerator,
                     f"{family.id}: the build rule "

@@ -1423,8 +1423,31 @@ ifneq ($(EXE),)
 .PHONY: mimo
 mimo: mimo$(EXE)
 endif
-mimo$(EXE): mimo.c $(VK_OBJ) $(VK_SPV) .build-config
-	$(CC) $(CFLAGS) mimo.c $(VK_OBJ) -o mimo$(EXE) $(LDFLAGS)
+MIMO_CUDA_OBJ =
+MIMO_CUDA_FLAGS =
+ifeq ($(CUDA),1)
+MIMO_CUDA_OBJ = backend_cuda_mimo.o
+MIMO_CUDA_FLAGS = -DCOLI_MIMO_CUDA
+endif
+ifneq ($(IS_WIN),)
+ifeq ($(CUDA_DLL),1)
+MIMO_CUDA_OBJ = backend_cuda_mimo_loader.o
+MIMO_CUDA_FLAGS = -DCOLI_MIMO_CUDA
+endif
+endif
+backend_cuda_mimo_loader.o: backend_cuda_mimo_loader.c backend_cuda_mimo.h .build-config
+	$(CC) $(CFLAGS) -c $< -o $@
+backend_cuda_mimo.o: backend_cuda_mimo.cu backend_cuda_mimo.h .build-config
+	"$(NVCC)" $(NVCCFLAGS) -c $< -o $@
+.PHONY: cuda-mimo-test
+cuda-mimo-test:
+	"$(NVCC)" $(NVCCFLAGS) tests/test_mimo_cuda.cu backend_cuda_mimo.cu -o tests/test_mimo_cuda$(EXE)
+	./tests/test_mimo_cuda$(EXE)
+.PHONY: cuda-mimo-dll
+cuda-mimo-dll: backend_cuda_mimo.cu backend_cuda_mimo.h
+	"$(NVCC)" $(NVCCFLAGS) -shared --cudart=static -DMIMO_CUDA_BUILDING_DLL backend_cuda_mimo.cu -o coli_cuda_mimo.dll
+mimo$(EXE): mimo.c backend_cuda_mimo.h $(MIMO_CUDA_OBJ) $(VK_OBJ) $(VK_SPV) .build-config
+	$(CC) $(CFLAGS) $(MIMO_CUDA_FLAGS) mimo.c $(MIMO_CUDA_OBJ) $(VK_OBJ) -o mimo$(EXE) $(LDFLAGS)
 
 # Tiny MiMo fixture + vendor oracle, the Kimi K3 pattern: the generator is numpy (and
 # Pillow for the test picture) and deterministic; ref.json is committed and comes from

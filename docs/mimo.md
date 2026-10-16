@@ -23,6 +23,9 @@ The checkpoint is read as it is released, **no conversion**:
 
 ## Running it
 
+For native CUDA dense offload on an RTX 4090, see [MiMo CUDA](mimo-cuda.md)
+for the build, memory budget, launch profile and reproducible benchmark.
+
 ```sh
 hf download XiaomiMiMo/MiMo-V2.6-Flash-MOPD --local-dir ~/Models/MiMo-V2.6-Flash
 make -C c mimo

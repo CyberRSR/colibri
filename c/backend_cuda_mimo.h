@@ -1,0 +1,28 @@
+/* MiMo resident dense matrices. The format numbers are MiMo DW_* values,
+ * NOT the generic backend's QT formats. All activations stay float32.
+ * Single host thread; opaque handles never cross an allocator boundary.
+ * Every operation returns 1 on success, 0 on failure; matmul leaves y alone
+ * on failure so the caller can recompute with its canonical host weights. */
+#ifndef COLIBRI_BACKEND_CUDA_MIMO_H
+#define COLIBRI_BACKEND_CUDA_MIMO_H
+#include <stddef.h>
+#if defined(_WIN32) && defined(MIMO_CUDA_BUILDING_DLL)
+#define MIMO_CUDA_API __declspec(dllexport)
+#else
+#define MIMO_CUDA_API
+#endif
+#ifdef __cplusplus
+extern "C" {
+#endif
+typedef struct MimoCudaTensor MimoCudaTensor;
+MIMO_CUDA_API int mimo_cuda_init(int device);
+MIMO_CUDA_API size_t mimo_cuda_free_bytes(void);
+MIMO_CUDA_API MimoCudaTensor *mimo_cuda_upload(const void *w, const float *scales,
+                                             int fmt, int I, int O);
+MIMO_CUDA_API int mimo_cuda_matmul(MimoCudaTensor *t, float *y, const float *x, int S);
+MIMO_CUDA_API void mimo_cuda_report(void);
+MIMO_CUDA_API void mimo_cuda_shutdown(void);
+#ifdef __cplusplus
+}
+#endif
+#endif

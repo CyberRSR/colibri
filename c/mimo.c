@@ -62,6 +62,10 @@
 #include "serve_codec.h"
 #include "serve_poll.h"
 #include "stop_ids.h"
+#ifdef COLI_MIMO_CUDA
+#include "backend_cuda_mimo.h"
+static int g_mimo_cuda;
+#endif
 #if defined(__AVX2__)
 #include <immintrin.h>
 #endif
@@ -271,6 +275,9 @@ typedef struct {
      * holds it alone (COLI_VK_DENSE_HOST, the host copy dropped) */
     char *vk_name;
     int vk_kind, vk_bits, vk_li, vk_gone;
+#ifdef COLI_MIMO_CUDA
+    MimoCudaTensor *cuda; /* resident native dense matrix; host stays canonical */
+#endif
 } DW;
 
 /* 0 (default): the checkpoint's own FP8 and BF16 bytes, exact.
@@ -377,6 +384,15 @@ static void dw_reload(DW *d);   /* below, beside the loaders it re-runs */
 #endif
 
 static void dw_matmul(float *y, const float *x, int S, const DW *d) {
+#ifdef COLI_MIMO_CUDA
+    /* Vision may call dw_matmul inside an OpenMP region. The CUDA scratch is
+     * main-thread only; those callers keep the ordinary CPU path. */
+    int cuda_thread = 1;
+#ifdef _OPENMP
+    cuda_thread = !omp_in_parallel();
+#endif
+    if (g_mimo_cuda && cuda_thread && d->cuda && mimo_cuda_matmul(d->cuda, y, x, S)) return;
+#endif
 #ifdef COLI_VULKAN
     if (dw_matmul_vk(y, x, S, d)) return;
     if (d->vk_gone) dw_reload((DW *)d);   /* the CPU needs a matrix the device held alone (a lost device) */
@@ -2477,6 +2493,57 @@ static int is_dir(const char *path) {
     return stat(path, &sb) == 0 && S_ISDIR(sb.st_mode);
 }
 
+#ifdef COLI_MIMO_CUDA
+static double mimo_cuda_gb(const char *key, double fallback) {
+    const char *v = getenv(key);
+    if (!v || !*v) return fallback;
+    char *end; double n = strtod(v, &end);
+    if (*end || !isfinite(n) || n < 0 || n > 1048576) {
+        fprintf(stderr, "[mimo] %s must be a finite nonnegative GiB value\n", key); exit(2);
+    }
+    return n;
+}
+static void mimo_cuda_place(DW *d, size_t *budget, int *count) {
+    if (!d->w || d->O < 1 || d->I < 1) return;
+    size_t e = (size_t)d->O * d->I;
+    size_t b = d->fmt == DW_F32 ? e * 4 : d->fmt == DW_BF16 ? e * 2 :
+               d->fmt == DW_FP8 ? e + (size_t)d->O * d->nblk * 4 : e + (size_t)d->O * 4;
+    if (b > *budget) return;
+    d->cuda = mimo_cuda_upload(d->w, d->s, d->fmt, d->I, d->O);
+    if (d->cuda) { *budget -= b; (*count)++; }
+}
+static void mimo_cuda_start(Model *m) {
+    if (!env_int("MIMO_CUDA", env_int("COLI_CUDA", 0))) return;
+    double gb = mimo_cuda_gb("MIMO_CUDA_DENSE_GB", 20);
+    double reserve = mimo_cuda_gb("MIMO_CUDA_RESERVE_GB", 2);
+    if (!gb) return;
+    if (!mimo_cuda_init(env_int("COLI_GPU", 0))) {
+        fprintf(stderr, "[CUDA] mimo unavailable; using existing CPU/Vulkan path\n"); return;
+    }
+    atexit(mimo_cuda_shutdown);
+    atexit(mimo_cuda_report);
+    size_t fr = mimo_cuda_free_bytes(), headroom = (size_t)(reserve * 1073741824.0);
+    size_t budget = (size_t)(gb * 1073741824.0);
+    size_t available = fr > headroom ? fr - headroom : 0;
+    if (budget > available) budget = available;
+    size_t start = budget; int count = 0;
+    /* All QKV first: expensive CPU FP8 decoding, and much smaller than the
+     * BF16 output projections. Then the head and layer-0 MLP; use the rest
+     * for output projections. A 24-GiB card need not fit complete layers. */
+    for (int i = 0; i < m->c.n_layers; i++) mimo_cuda_place(&m->L[i].qkv, &budget, &count);
+    mimo_cuda_place(&m->head, &budget, &count);
+    for (int i = 0; i < m->c.n_layers; i++) if (!m->c.moe[i]) {
+        mimo_cuda_place(&m->L[i].gate, &budget, &count);
+        mimo_cuda_place(&m->L[i].up, &budget, &count);
+        mimo_cuda_place(&m->L[i].down, &budget, &count);
+    }
+    for (int i = 0; i < m->c.n_layers; i++) mimo_cuda_place(&m->L[i].o, &budget, &count);
+    g_mimo_cuda = count > 0;
+    fprintf(stderr, "[CUDA] mimo placed %d dense matrices: %.3f / %.3f GiB budget; CPU host copies retained\n",
+            count, (start - budget) / 1073741824.0, start / 1073741824.0);
+}
+#endif
+
 int main(int argc, char **argv) {
     coli_omp_tune_threads("mimo");
     /* Two ways in. The gateway: SNAP=<dir> mimo <cap>, SERVE=1. By hand and in
@@ -2515,12 +2582,20 @@ int main(int argc, char **argv) {
     model_load(m, dir, cap);
     Cfg *c = &m->c;
     g_vision = vision_load(m, dir);
+#ifdef COLI_MIMO_CUDA
+    mimo_cuda_start(m);
+#endif
 #ifdef COLI_VULKAN
     /* after the weights, so a missing device costs one line and nothing else; the
      * routed-expert tier first, then the dense matrices where coli_vk_dense() puts
      * them (on a device that shares the CPU's RAM they stay on the CPU while the
      * tier is on; COLI_VK_DENSE decides when set) */
     {
+#ifdef COLI_MIMO_CUDA
+        /* One backend owns dense placement. Do not double-allocate VRAM or
+         * free host weights beneath CUDA's CPU recovery path. */
+        if (!g_mimo_cuda) {
+#endif
         int any_moe = 0;
         for (int i = 0; i < c->n_layers; i++) any_moe |= c->moe[i];
         const char *mx = getenv("MIMO_VK_EXPERTS");
@@ -2555,6 +2630,9 @@ int main(int argc, char **argv) {
             if (!tier) atexit(coli_vk_shutdown);
             atexit(vkc_shutdown_all);
         }
+#ifdef COLI_MIMO_CUDA
+        }
+#endif
     }
     if (g_vk_ready && (coli_vk_dense() || g_vk_chain) && !(g_mc_fit.L && !g_mc_fit.n)) {   /* COLI_VK_DENSE=0: the trunk stays on the CPU */
         int up = vk_dense_upload(m, coli_vk_dense());
