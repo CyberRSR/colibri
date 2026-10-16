@@ -1,5 +1,6 @@
 # cmd.exe finds labels unreliably in LF-only batch files: keep CRLF on checkout.
 START-HERE.bat text eol=crlf
 c/build_mimo_cuda.bat text eol=crlf
-# Experiment checksums describe exact recorded bytes, including native log EOLs.
-docs/experiments/mimo-cuda-4090-2026-10-16/** -text
+# Experiment checksums describe exact recorded bytes, including native log EOLs
+# and output whitespace. Keep source-code whitespace checks separate from data.
+docs/experiments/mimo-cuda-4090-2026-10-16/** -text -whitespace
