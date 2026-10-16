@@ -340,7 +340,7 @@ photo equal to the same prompt computed cold) are the CPU's, and hold with
 | `MIMO_LARGE_PAGES` | 0 | Windows: 1 keeps each layer's expert cache in 2 MiB locked pages (needs the "Lock pages in memory" right); ordinary pages when they cannot be had. |
 | `MIMO_ROUTE_TRACE` | unset | Write every MoE step's routing, and the router's ranking at the prefetcher's two points, to this file for `tools/mimo_route_sim.py`. |
 | `MIMO_READ_THREADS` | -- | No longer read: the readers are `MIMO_IO_PER_DRIVE` per device (`MIMO_IO_THREADS` for one shared queue). |
-| `MIMO_CHUNK` | 64 | Prompt tokens per prefill block. |
+| `MIMO_CHUNK` | 512 | Prompt tokens per prefill block. Each block computes an expert once for all its rows, so larger blocks read and stream fewer experts: a 2260-token prompt took 498 s in blocks of 64 and 213 s in blocks of 512 (RTX 4090 profile; the logits do not depend on the blocks). |
 | `MIMO_CTX` / `CTX` | 8192 | Context the KV cache is sized for (capped by the checkpoint). |
 | `MIMO_CAP` | 64 | Expert cache slots per layer when no argument gives one. |
 | `MIMO_MAX_IMAGE_TOKENS` | unset | Gateway: ceiling on what one picture costs in prompt tokens. |

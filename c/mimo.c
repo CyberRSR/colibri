@@ -316,7 +316,16 @@ static void matmul_bf16(float *y, const float *x, const uint16_t *W, int S, int 
     if (S >= 4 && I % 8 == 0) {
         /* A prompt block: 4 rows x 2 outputs at a time, eight independent chains
          * instead of one, each (row, output) summed in the one-row loop's order
-         * below (the same lanes, the same hsum256), so the bits do not move. */
+         * below (the same lanes, the same hsum256), so the bits do not move. The
+         * rows go in tiles of 64, whose activations stay in cache while every
+         * output reads them (a 1024-row block's would not). */
+        const float *x_all = x;
+        float *y_all = y;
+        int S_all = S;
+        for (int t0 = 0; t0 < S_all; t0 += 64) {
+        S = S_all - t0 < 64 ? S_all - t0 : 64;
+        x = x_all + (int64_t)t0 * I;
+        y = y_all + (int64_t)t0 * O;
         #pragma omp parallel for schedule(static)
         for (int o2 = 0; o2 < (O + 1) / 2; o2++) {
             int o = o2 * 2, two = o + 1 < O;
@@ -349,6 +358,7 @@ static void matmul_bf16(float *y, const float *x, const uint16_t *W, int S, int 
                     for (int i = 0; i < I; i += 8) acc = _mm256_fmadd_ps(_mm256_loadu_ps(xs + i), bf16_decode8(w + i), acc);
                     y[(int64_t)s * O + o + k] = hsum256(acc);
                 }
+        }
         }
         return;
     }
@@ -2307,13 +2317,17 @@ static void echo_frame(const Echo *e, int pos, int token, const float *lo, int v
     fflush(stdout);
 }
 
-/* A prompt in blocks of MIMO_CHUNK rows (default 64): the last block's last
+/* A prompt in blocks of MIMO_CHUNK rows (default 512): the last block's last
  * row (or every row, for the teacher-forcing dump) comes back in `logits`.
  * With `echo`, every row of every block goes through the head and is read out
- * as it comes; only one block of logits is ever held, not the prompt's. */
+ * as it comes; only one block of logits is ever held, not the prompt's. A block
+ * computes each expert once for all of its rows that chose it, so a long prompt
+ * in blocks of 64 read and streamed most of a layer's experts for every 64 rows:
+ * 2260 tokens took 498 s in blocks of 64 and 213 s in blocks of 512 (the logits
+ * are the same bytes whatever the blocks). */
 static void prefill(Model *m, const int *ids, int n, float *logits, float *all_logits,
                     const ImageRows *img, const Echo *echo) {
-    int chunk = env_int("MIMO_CHUNK", 64);
+    int chunk = env_int("MIMO_CHUNK", 512);
 #ifdef COLI_VULKAN
     /* the dense chain with a chunk from the budget (vkc_chunk_auto): blocks of its chunk,
      * so a long prompt's MoE steps are big ones the tier can stream (not with a read-out,
