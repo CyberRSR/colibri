@@ -413,6 +413,16 @@ static inline void pk_group(PkRow *r, int i, uint64_t *lo, uint64_t *hi) {
     *hi = (sm & 0x8080808080808080ull) | ((e >> 1) & 0x7F7F7F7F7F7F7F7Full);
     *lo = (sm & 0x7F7F7F7F7F7F7F7Full) | ((e << 7) & 0x8080808080808080ull);
 }
+/* A whole row back to its bf16 words. */
+static void pk_unpack_row(const DW *d, int o, uint16_t *out) {
+    PkRow r = pk_row(d, o);
+    for (int i = 0; i < d->I; i += 8) {
+        uint64_t lo, hi;
+        pk_group(&r, i, &lo, &hi);
+        for (int k = 0; k < 8; k++)
+            out[i + k] = (uint16_t)(((lo >> (8 * k)) & 0xFF) | ((hi >> (8 * k)) & 0xFF) << 8);
+    }
+}
 #ifdef __AVX2__
 static inline __m256 pk_decode8(PkRow *r, int i) {   /* = bf16_decode8 of the 8 words */
     uint64_t lo, hi;
@@ -424,7 +434,7 @@ static inline __m256 pk_decode8(PkRow *r, int i) {   /* = bf16_decode8 of the 8 
 static void matmul_bf16p(float *y, const float *x, const DW *d, int S) {
     int I = d->I, O = d->O;
 #ifdef __AVX2__
-    if (S >= 4) {   /* matmul_bf16's prompt block, decoding each group once for 4 rows */
+    if (S >= 4) {   /* matmul_bf16's prompt block on the two outputs' rows unpacked once a tile */
         const float *x_all = x;
         float *y_all = y;
         int S_all = S;
@@ -432,16 +442,21 @@ static void matmul_bf16p(float *y, const float *x, const DW *d, int S) {
         S = S_all - t0 < 64 ? S_all - t0 : 64;
         x = x_all + (int64_t)t0 * I;
         y = y_all + (int64_t)t0 * O;
-        #pragma omp parallel for schedule(static)
+        #pragma omp parallel
+        {
+        uint16_t *ua = xmalloc((size_t)I * 2 * sizeof(uint16_t), "unpacked rows"), *ub = ua + I;
+        #pragma omp for schedule(static)
         for (int o2 = 0; o2 < (O + 1) / 2; o2++) {
             int o = o2 * 2, two = o + 1 < O;
+            pk_unpack_row(d, o, ua);
+            if (two) pk_unpack_row(d, o + 1, ub);
+            const uint16_t *wa = ua, *wb = two ? ub : ua;
             int s = 0;
             for (; s + 4 <= S; s += 4) {
-                PkRow ra = pk_row(d, o), rb = pk_row(d, two ? o + 1 : o);
                 const float *x0 = x + (int64_t)s * I, *x1 = x0 + I, *x2 = x1 + I, *x3 = x2 + I;
                 __m256 a0 = _mm256_setzero_ps(), a1 = a0, a2 = a0, a3 = a0, b0 = a0, b1 = a0, b2 = a0, b3 = a0;
                 for (int i = 0; i < I; i += 8) {
-                    __m256 va = pk_decode8(&ra, i), vb = pk_decode8(&rb, i);
+                    __m256 va = bf16_decode8(wa + i), vb = bf16_decode8(wb + i);
                     __m256 v0 = _mm256_loadu_ps(x0 + i), v1 = _mm256_loadu_ps(x1 + i);
                     __m256 v2 = _mm256_loadu_ps(x2 + i), v3 = _mm256_loadu_ps(x3 + i);
                     a0 = _mm256_fmadd_ps(v0, va, a0); b0 = _mm256_fmadd_ps(v0, vb, b0);
@@ -458,12 +473,14 @@ static void matmul_bf16p(float *y, const float *x, const DW *d, int S) {
             }
             for (; s < S; s++)
                 for (int k = 0; k < 1 + two; k++) {
-                    PkRow r = pk_row(d, o + k);
+                    const uint16_t *w = k ? wb : wa;
                     const float *xs = x + (int64_t)s * I;
                     __m256 acc = _mm256_setzero_ps();
-                    for (int i = 0; i < I; i += 8) acc = _mm256_fmadd_ps(_mm256_loadu_ps(xs + i), pk_decode8(&r, i), acc);
+                    for (int i = 0; i < I; i += 8) acc = _mm256_fmadd_ps(_mm256_loadu_ps(xs + i), bf16_decode8(w + i), acc);
                     y[(int64_t)s * O + o + k] = hsum256(acc);
                 }
+        }
+        free(ua);
         }
         }
         return;
@@ -790,15 +807,13 @@ static void dw_load_fp8(DW *d, shards *S, const char *name, int O, int I,
  * [Q | K | V] rows. Two scale grids are legal (vLLM accepts the same two): one
  * tiled per chunk, ceil(rows_per_chunk / 128) rows each, or one continuous grid;
  * they coincide when a chunk is a whole number of blocks. */
-static void load_qkv(DW *d, shards *S, const Cfg *c, int li) {
-    int k = c->swa[li];
+static void load_qkv_named(DW *d, shards *S, const Cfg *c, int k, const char *name) {
     int T = c->chunks, hd = c->head_dim[k], vd = c->v_dim[k];
     int q_rows = (c->heads[k] / T) * hd, k_rows = (c->kv_heads[k] / T) * hd,
         v_rows = (c->kv_heads[k] / T) * vd;
     int rpc = q_rows + k_rows + v_rows, O = T * rpc;
     int per_chunk = (rpc + 127) / 128, continuous = (O + 127) / 128;
-    char name[512], sname[600];
-    snprintf(name, sizeof(name), "model.layers.%d.self_attn.qkv_proj.weight", li);
+    char sname[600];
     snprintf(sname, sizeof(sname), "%s_scale_inv", name);
     st_tensor *st = st_find(S, sname);
     if (!st) st_die_missing(S, sname);
@@ -820,6 +835,11 @@ static void load_qkv(DW *d, shards *S, const Cfg *c, int li) {
     for (int ch = 0; ch < T; ch++) for (int r = 0; r < v_rows; r++) order[w++] = ch * rpc + q_rows + k_rows + r;
     dw_load_fp8(d, S, name, O, c->hidden, row_block, scale_rows, order);
     free(row_block); free(order);
+}
+static void load_qkv(DW *d, shards *S, const Cfg *c, int li) {
+    char name[512];
+    snprintf(name, sizeof(name), "model.layers.%d.self_attn.qkv_proj.weight", li);
+    load_qkv_named(d, S, c, c->swa[li], name);
 #if defined(COLI_VULKAN) || defined(COLI_MIMO_CUDA)
     d->vk_kind = DWK_QKV; d->vk_li = li;   /* read back through this function: the de-interleave */
 #endif
@@ -905,6 +925,7 @@ typedef struct {
     float *K, *V;
     int *ring_pos;
     int rows;
+    int kv_lo;                   /* a window's first position held: 0, or where the MTP block began */
 } Layer;
 
 /* One conversation's caches for a multiplexed serve (KV_SLOTS>1, serve_mux below):
@@ -962,6 +983,36 @@ typedef struct {
      * of mux_rows[t].seq; NULL in every other forward. */
     const MimoRow *mux_rows;
 } Model;
+
+/* ---- MTP drafts (MIMO_MTP=1) ---------------------------------------------------------
+ * The checkpoint's first multi-token-prediction layer (model.mtp.layers.0) drafts the
+ * token after the next one: from the trunk's final hidden state at position p, normed
+ * by the trunk's final norm (what vLLM hands it), and the embedding of the token at
+ * p + 1, through eh_proj ([enorm(embedding) | hnorm(hidden)]), one sliding-window
+ * attention block with a dense MLP of its own (m->L[n_layers], its own K/V ring), its
+ * final norm and the shared lm_head. A decode step then runs the next token and the
+ * draft as two rows. Every kernel computes a row's bytes whatever rows are beside it,
+ * so the first row's logits are the plain step's, and so is the token they give
+ * (sample_draft: the argmax, or a draw that keeps the draft at the probability the
+ * sampler gives it). When it is the draft, both tokens stand and the second row's
+ * logits predict the next; otherwise the draft's row is dropped -- the position goes
+ * back and the next step overwrites its K/V. Two tokens a step when the draft holds. */
+typedef struct {
+    int on, li;                   /* the block: m->L[li], li = n_layers, a sliding-window layer */
+    DW eh;                        /* eh_proj [H, 2H] */
+    float *enorm, *hnorm, *fnorm;
+    float *keep;                  /* the trunk's final hidden rows of the last keep_rows positions */
+    int keep_rows;
+    uint64_t drafts, kept;
+    double t;
+} Mtp;
+static Mtp g_mtp;
+
+static void mtp_keep(Model *m, const float *hc, int n, int p0) {
+    int H = m->c.hidden;
+    for (int t = n > g_mtp.keep_rows ? n - g_mtp.keep_rows : 0; t < n; t++)
+        memcpy(g_mtp.keep + (size_t)((p0 + t) % g_mtp.keep_rows) * H, hc + (size_t)t * H, (size_t)H * sizeof(float));
+}
 
 static void expert_table_init(Model *m) {
     Cfg *c = &m->c;
@@ -1383,6 +1434,7 @@ static int slot_entry_global(Model *m, int li) {
             atomic_load_explicit(&lc->s[k].state, memory_order_acquire) != SLOT_LOADING) idx = k;
     if (idx < 0 && lc->n < lc->max) idx = lc->n++;
     if (idx >= 0 && lc->s[idx].base) return idx;
+    if (m->bulk && lc->nbuf >= lc->cap) return -1;   /* a prompt block: the layer's own LRU */
     if (idx >= 0 && g_slots_used < g_slots_total) {
         if (posix_memalign((void **)&lc->s[idx].base, 4096, (size_t)m->e_bytes + 8192)) {
             fprintf(stderr, "[mimo] out of memory for an expert slot\n"); exit(1);
@@ -1390,7 +1442,6 @@ static int slot_entry_global(Model *m, int li) {
         g_slots_used++; lc->nbuf++;
         return idx;
     }
-    if (m->bulk && lc->nbuf >= lc->cap) return -1;   /* a prompt block: the layer's own LRU */
     if (idx < 0) return -1;                /* the layer holds its most: its own LRU (slot_take) */
     Slot *v = NULL; int vl = -1, vk = -1;
     uint64_t oldest = UINT64_MAX;
@@ -1506,7 +1557,7 @@ static void experts_ensure(Model *m, int li, const int *want, int n, Slot **out)
 static void kv_alloc(Model *m, int ctx) {
     Cfg *c = &m->c;
     m->ctx = ctx;
-    for (int li = 0; li < c->n_layers; li++) {
+    for (int li = 0; li < c->n_layers + g_mtp.on; li++) {   /* the MTP block's ring too */
         Layer *l = &m->L[li];
         int k = c->swa[li];
         l->rows = k ? (c->window < ctx ? c->window : ctx) : ctx;
@@ -1521,10 +1572,76 @@ static void kv_alloc(Model *m, int ctx) {
 
 static void model_reset(Model *m) {
     Cfg *c = &m->c;
-    for (int li = 0; li < c->n_layers; li++)
+    for (int li = 0; li < c->n_layers + g_mtp.on; li++)
         for (int r = 0; r < m->L[li].rows; r++) m->L[li].ring_pos[r] = -1;
     m->pos = 0;
     kv_prefix_clear(&m->kvp);
+}
+
+/* MIMO_MTP (default 1; 0 in a VK=1 build, whose dense chain keeps the trunk's hidden
+ * states on the device): the first MTP layer, a sliding-window block at m->L[n_layers],
+ * when the checkpoint has one in the layout this reads (Pro's: fused qkv, a dense MLP of
+ * the trunk's width). */
+#ifdef COLI_VULKAN
+#define MIMO_MTP_DEFAULT 0
+#else
+#define MIMO_MTP_DEFAULT 1
+#endif
+static int mtp_tensor(shards *S, const char *name, int O, int I) {
+    st_tensor *t = st_find(S, name);
+    return t && (I > 0 ? t->rank == 2 && t->shape[0] == O && t->shape[1] == I : t->rank == 1 && t->shape[0] == O);
+}
+static void mtp_load(Model *m) {
+    Cfg *c = &m->c;
+    int want = env_int("MIMO_MTP", MIMO_MTP_DEFAULT) > 0, explicit = getenv("MIMO_MTP") != NULL;
+    if (!want) return;
+    int H = c->hidden, F = c->dense_inter;
+    int qkv_o = c->heads[1] * c->head_dim[1] + c->kv_heads[1] * (c->head_dim[1] + c->v_dim[1]);
+    const char *why = NULL;
+    if (!st_find(&m->S, "model.mtp.layers.0.eh_proj.weight")) why = "the checkpoint has no MTP layer";
+    else if (!mtp_tensor(&m->S, "model.mtp.layers.0.eh_proj.weight", H, 2 * H) ||
+             !mtp_tensor(&m->S, "model.mtp.layers.0.self_attn.qkv_proj.weight", qkv_o, H) ||
+             !st_find(&m->S, "model.mtp.layers.0.self_attn.qkv_proj.weight_scale_inv") ||
+             !mtp_tensor(&m->S, "model.mtp.layers.0.self_attn.o_proj.weight", H, c->heads[1] * c->v_dim[1]) ||
+             !mtp_tensor(&m->S, "model.mtp.layers.0.self_attn.attention_sink_bias", c->heads[1], 0) ||
+             !mtp_tensor(&m->S, "model.mtp.layers.0.mlp.gate_proj.weight", F, H) ||
+             !mtp_tensor(&m->S, "model.mtp.layers.0.mlp.up_proj.weight", F, H) ||
+             !mtp_tensor(&m->S, "model.mtp.layers.0.mlp.down_proj.weight", H, F) ||
+             !st_find(&m->S, "model.mtp.layers.0.mlp.gate_proj.weight_scale_inv") ||
+             !st_find(&m->S, "model.mtp.layers.0.mlp.up_proj.weight_scale_inv") ||
+             !st_find(&m->S, "model.mtp.layers.0.mlp.down_proj.weight_scale_inv") ||
+             !mtp_tensor(&m->S, "model.mtp.layers.0.enorm.weight", H, 0) ||
+             !mtp_tensor(&m->S, "model.mtp.layers.0.hnorm.weight", H, 0) ||
+             !mtp_tensor(&m->S, "model.mtp.layers.0.final_layernorm.weight", H, 0) ||
+             !mtp_tensor(&m->S, "model.mtp.layers.0.input_layernorm.weight", H, 0) ||
+             !mtp_tensor(&m->S, "model.mtp.layers.0.pre_mlp_layernorm.weight", H, 0))
+        why = "its MTP layer is not in the layout this engine reads";
+    else if (c->n_layers + 1 > MIMO_MAX_LAYERS) why = "no room for its layer";
+    else if (g_mimo_mux_slots > 1) why = "KV_SLOTS > 1 decodes several conversations a step";
+    else if (!c->window || !c->sink[1]) why = "the checkpoint has no sliding window with sinks";
+    if (why) { if (explicit) fprintf(stderr, "[mimo] MIMO_MTP off: %s\n", why); return; }
+    int li = c->n_layers;
+    c->swa[li] = 1; c->moe[li] = 0;
+    Layer *l = &m->L[li];
+    char nm[512];
+#define MTP_NAME(t) (snprintf(nm, sizeof nm, "model.mtp.layers.0.%s", t), nm)
+    l->ln1 = load_vec(&m->S, MTP_NAME("input_layernorm.weight"), H);
+    l->ln2 = load_vec(&m->S, MTP_NAME("pre_mlp_layernorm.weight"), H);
+    load_qkv_named(&l->qkv, &m->S, c, 1, MTP_NAME("self_attn.qkv_proj.weight"));
+    dw_load_bf16(&l->o, &m->S, MTP_NAME("self_attn.o_proj.weight"), H, c->heads[1] * c->v_dim[1]);
+    l->sink = load_vec(&m->S, MTP_NAME("self_attn.attention_sink_bias"), c->heads[1]);
+    dw_load_fp8(&l->gate, &m->S, MTP_NAME("mlp.gate_proj.weight"), c->dense_inter, H, NULL, 0, NULL);
+    dw_load_fp8(&l->up, &m->S, MTP_NAME("mlp.up_proj.weight"), c->dense_inter, H, NULL, 0, NULL);
+    dw_load_fp8(&l->down, &m->S, MTP_NAME("mlp.down_proj.weight"), H, c->dense_inter, NULL, 0, NULL);
+    dw_load_bf16(&g_mtp.eh, &m->S, MTP_NAME("eh_proj.weight"), H, 2 * H);
+    g_mtp.enorm = load_vec(&m->S, MTP_NAME("enorm.weight"), H);
+    g_mtp.hnorm = load_vec(&m->S, MTP_NAME("hnorm.weight"), H);
+    g_mtp.fnorm = load_vec(&m->S, MTP_NAME("final_layernorm.weight"), H);
+#undef MTP_NAME
+    g_mtp.li = li; g_mtp.on = 1;
+    g_mtp.keep_rows = c->window + 2;
+    g_mtp.keep = xmalloc((size_t)g_mtp.keep_rows * H * sizeof(float), "mtp hidden rows");
+    fprintf(stderr, "[mimo] MTP: decode steps verify a draft of the checkpoint's first MTP layer (MIMO_MTP=0: off)\n");
 }
 
 static void model_load(Model *m, const char *dir, int cap) {
@@ -1574,6 +1691,7 @@ static void model_load(Model *m, const char *dir, int cap) {
             l->bias = load_vec(&m->S, nm, c->n_experts);
         }
     }
+    mtp_load(m);
     expert_table_init(m);
     g_cache_global = env_int("MIMO_CACHE_GLOBAL", MIMO_CACHE_GLOBAL_DEFAULT) != 0;
     if (g_cache_global && env_int("MIMO_LARGE_PAGES", 0))
@@ -1830,6 +1948,7 @@ static void attention(Model *m, int li, const float *xn, int n, int p0, float *o
      * and the block is written in first. */
     int window = k ? c->window : 0;
     int lo = k ? (p0 - (window - 1) > 0 ? p0 - (window - 1) : 0) : 0;
+    if (k && lo < l->kv_lo) lo = l->kv_lo;
     int nkeys = p0 + n - lo;
     /* key and value rows lo.. read where they are: a window's ring for the positions
      * before the block and the block's own rows of qkv (the ring is rewritten after
@@ -2456,6 +2575,7 @@ static void forward(Model *m, const int *ids, int n, float *logits, int all_rows
     float *hc = h + (size_t)done * H, *lc = logits && all_rows ? logits + (size_t)done * c->vocab : logits;
     int nc = n - done, pc = m->pos + done;
     layers_cpu(m, hc, nc, pc, 0, xn, tmp, trace);
+    if (g_mtp.on && nc > 0) mtp_keep(m, hc, nc, pc);
     if (trace) { fclose(trace); trace = NULL; }
     traced = 1;
     if (lc && nc > 0) head_cpu(m, hc, nc, lc, all_rows, xn);
@@ -2465,6 +2585,63 @@ static void forward(Model *m, const int *ids, int n, float *logits, int all_rows
     free(h); free(xn); free(tmp);
 }
 
+/* The MTP block over rows at positions p0.., row t from the token at p0 + t + 1 and the
+ * trunk's hidden state at p0 + t; the last row's draft when asked (else -1). The
+ * trunk's attention counters stay as they were: the block's time is g_mtp.t. */
+static int mtp_run(Model *m, const int *tok, int p0, int n, int draft) {
+    Cfg *c = &m->c;
+    int H = c->hidden;
+    double t0 = now_s(), ta = m->t_attn, tq = m->t_qkv, to = m->t_oproj;
+    float *cat = xmalloc((size_t)n * 2 * H * sizeof(float), "mtp input");
+    float *h = xmalloc((size_t)n * H * sizeof(float), "mtp residual");
+    float *xn = xmalloc((size_t)n * H * sizeof(float), "mtp normed");
+    float *tmp = xmalloc((size_t)n * H * sizeof(float), "mtp block out");
+    embed_rows(m, tok, n, tmp);
+    for (int t = 0; t < n; t++) {
+        const float *hid = g_mtp.keep + (size_t)((p0 + t) % g_mtp.keep_rows) * H;
+        float *e = cat + (size_t)t * 2 * H;
+        rmsnorm(e, tmp + (size_t)t * H, g_mtp.enorm, H, c->eps);
+        rmsnorm(xn + (size_t)t * H, hid, m->norm, H, c->eps);
+        rmsnorm(e + H, xn + (size_t)t * H, g_mtp.hnorm, H, c->eps);
+    }
+    dw_matmul(h, cat, n, &g_mtp.eh);
+    Layer *l = &m->L[g_mtp.li];
+    for (int t = 0; t < n; t++) rmsnorm(xn + (size_t)t * H, h + (size_t)t * H, l->ln1, H, c->eps);
+    attention(m, g_mtp.li, xn, n, p0, tmp);
+    for (size_t i = 0; i < (size_t)n * H; i++) h[i] += tmp[i];
+    for (int t = 0; t < n; t++) rmsnorm(xn + (size_t)t * H, h + (size_t)t * H, l->ln2, H, c->eps);
+    dense_mlp(m, l, xn, n, tmp);
+    for (size_t i = 0; i < (size_t)n * H; i++) h[i] += tmp[i];
+    int d = -1;
+    if (draft) {
+        float *lg = xmalloc((size_t)c->vocab * sizeof(float), "mtp logits");
+        rmsnorm(xn, h + (size_t)(n - 1) * H, g_mtp.fnorm, H, c->eps);
+        dw_matmul(lg, xn, 1, &m->head);
+        d = 0;
+        for (int i = 1; i < c->vocab; i++) if (lg[i] > lg[d]) d = i;
+        free(lg);
+    }
+    free(cat); free(h); free(xn); free(tmp);
+    m->t_attn = ta; m->t_qkv = tq; m->t_oproj = to;
+    g_mtp.t += now_s() - t0;
+    return d;
+}
+/* After a prompt whose positions a..b-1 were computed (ids from position 0): the block's
+ * window filled from the last of them, so the first draft sees what it would later. */
+static void mtp_warm(Model *m, const int *ids, int a, int b) {
+    Layer *l = &m->L[g_mtp.li];
+    for (int r = 0; r < l->rows; r++) l->ring_pos[r] = -1;
+    int lo = b - 1 - m->c.window;
+    if (lo < a) lo = a;
+    l->kv_lo = lo;
+    if (b - 1 > lo) mtp_run(m, ids + lo + 1, lo, b - 1 - lo, 0);
+}
+/* A dropped draft: the trunk's state goes back to `pos` (its K/V rows beyond are rewritten
+ * before they are read again). */
+static void mtp_back(Model *m, int pos) {
+    m->pos = pos;
+    if (m->kvp.len > pos) m->kvp.len = pos;
+}
 /* ---- several conversations at once (KV_SLOTS>1, serve_mux) -------------------
  * Each conversation owns a MimoSeq. The Model's layers hold the conversation a
  * prefill runs on (mimo_seq_swap trades it for a parked one); a decode step parks
@@ -2935,6 +3112,40 @@ static int sample(const float *logits, int vocab, float temperature, float top_p
     return pick;
 }
 
+/* A draft d against the distribution sample() draws from (speculative sampling with a
+ * draft that is one token): d stands with the probability sample() gives it, its share
+ * of the nucleus; otherwise the token is drawn from the nucleus without d. Either way it
+ * has sample()'s distribution. Greedy: the argmax, kept when it is d. */
+static int sample_draft(const float *logits, int vocab, float temperature, float top_p, int d, int *kept) {
+    if (temperature <= 0.0f) { int y = argmax(logits, vocab); *kept = y == d; return y; }
+    SampleProb *rank = xmalloc((size_t)vocab * sizeof(SampleProb), "sampling");
+    float top = logits[0];
+    for (int i = 1; i < vocab; i++) if (logits[i] > top) top = logits[i];
+    double total = 0.0;
+    for (int i = 0; i < vocab; i++) {
+        float p = expf((logits[i] - top) / temperature);
+        total += p; rank[i].p = p; rank[i].id = i;
+    }
+    qsort(rank, (size_t)vocab, sizeof(SampleProb), sample_desc);
+    double cut = (top_p > 0.0f && top_p < 1.0f) ? top_p * total : total, nucleus = 0.0, pd = 0.0;
+    int n = 0;
+    while (n < vocab && nucleus < cut) nucleus += rank[n++].p;
+    for (int i = 0; i < n; i++) if (rank[i].id == d) { pd = rank[i].p; break; }
+    int pick = d;
+    *kept = ((double)rand() / RAND_MAX) * nucleus < pd;
+    if (!*kept) {
+        double draw = ((double)rand() / RAND_MAX) * (nucleus - pd), acc = 0.0;
+        for (int i = 0; i < n; i++) {
+            if (rank[i].id == d) continue;
+            pick = rank[i].id;
+            acc += rank[i].p;
+            if (acc >= draw) break;
+        }
+    }
+    free(rank);
+    return pick;
+}
+
 /* ---------------------------------------------------------------- photos ---- */
 
 /* SUBMIT pin=1: a photo of the state at the end of this prompt, so that the
@@ -3145,13 +3356,41 @@ static int serve_budget(int prompt, int requested, int context, int logprobs) {
     return budget < room ? budget : room;
 }
 
+/* One verified step from `token` at m->pos: the draft from the block (with the row of an
+ * earlier kept draft still to run, `*pend`), the two rows through the trunk into `two`,
+ * then the next token from the first row's distribution (sample_draft). Returns it:
+ * the draft, computed already (*done, and `logits` predicts what follows it), or the
+ * token drawn instead, still to run (the draft's row dropped). */
+static int mtp_step(Model *m, int token, int *pend, float *logits, float *two,
+                    float temperature, float top_p, int *done) {
+    int V = m->c.vocab, P = m->pos, mt[2], mn = 0;
+    if (*pend >= 0) mt[mn++] = *pend;
+    mt[mn++] = token;
+    int d = mtp_run(m, mt, P - mn, mn, 1);
+    int pair[2] = {token, d};
+    prefill(m, pair, 2, NULL, two, NULL, NULL);
+    g_mtp.drafts++;
+    int kept, y = sample_draft(two, V, temperature, top_p, d, &kept);
+    if (kept) {
+        g_mtp.kept++;
+        memcpy(logits, two + V, (size_t)V * sizeof(float));
+        *pend = d; *done = 1;
+        return d;
+    }
+    mtp_back(m, P + 1);
+    memcpy(logits, two, (size_t)V * sizeof(float));
+    *pend = -1; *done = 0;
+    return y;
+}
+
 /* When a request was accepted, and the counters then: DONE and PROF report its share. */
 typedef struct {
     double started, disk0, expert0, attn0, pred0, qkv0, oproj0;
     double prefilled, pdisk, pexpert, pattn;   /* the counters when the prompt was in */
     uint64_t pmiss, ppfi, waves0, wexp0;
     uint64_t hits0, miss0, fw0, pfi0, pfu0, pfw0, pp0, pph0, br0;
-    int n_prompt, budget;
+    uint64_t mtpd0, mtpk0; double mtpt0;   /* MTP drafts, kept ones, drafting time */
+    int n_prompt, budget, reuse;
 } MimoReq;
 
 /* The streaming's share of a request, on stderr: demand reads (the stalls PROF
@@ -3168,6 +3407,10 @@ static void mimo_stream_report(const Model *m, const MimoReq *rq) {
             (m->bytes_read - rq->br0) / 1e9, m->t_disk - rq->disk0, m->t_pred - rq->pred0,
             m->t_qkv - rq->qkv0, m->t_oproj - rq->oproj0,
             m->waves > rq->waves0 ? (double)(m->wave_experts - rq->wexp0) / (double)(m->waves - rq->waves0) : 0.0);
+    if (g_mtp.drafts > rq->mtpd0)
+        fprintf(stderr, "[mimo] MTP: %llu drafts, %llu kept (%.1f%%), %.2fs drafting\n",
+                (unsigned long long)(g_mtp.drafts - rq->mtpd0), (unsigned long long)(g_mtp.kept - rq->mtpk0),
+                100.0 * (double)(g_mtp.kept - rq->mtpk0) / (double)(g_mtp.drafts - rq->mtpd0), g_mtp.t - rq->mtpt0);
     if (rq->prefilled > 0)
         fprintf(stderr, "[mimo] prompt %.2fs (stalled %.2fs, experts %.2fs, attention %.2fs, %llu demand reads); "
                         "generation %.2fs (stalled %.2fs, experts %.2fs, attention %.2fs, %llu demand reads, %llu prefetched)\n",
@@ -3191,6 +3434,7 @@ static int mimo_serve_start(Model *m, Tok *tokenizer, ColiServeCommand *cmd, int
     rq->pred0 = m->t_pred; rq->pfi0 = m->pf_issued; rq->pfu0 = m->pf_used; rq->pfw0 = m->pf_wasted;
     rq->pp0 = m->pf_pred; rq->pph0 = m->pf_pred_hit; rq->br0 = m->bytes_read;
     rq->qkv0 = m->t_qkv; rq->oproj0 = m->t_oproj; rq->waves0 = m->waves; rq->wexp0 = m->wave_experts;
+    rq->mtpd0 = g_mtp.drafts; rq->mtpk0 = g_mtp.kept; rq->mtpt0 = g_mtp.t;
     int n_prompt = tok_encode(tokenizer, (const char *)cmd->payload, (int)cmd->payload_bytes,
                               ids, m->ctx + 1);
     int budget = serve_budget(n_prompt, cmd->max_tokens, m->ctx, cmd->logprobs);
@@ -3273,6 +3517,7 @@ static int mimo_serve_start(Model *m, Tok *tokenizer, ColiServeCommand *cmd, int
     free(image);
     rq->started = started; rq->disk0 = disk0; rq->expert0 = expert0; rq->attn0 = attn0;
     rq->hits0 = hits0; rq->miss0 = miss0; rq->fw0 = fw0; rq->n_prompt = n_prompt; rq->budget = budget;
+    rq->reuse = reuse;
     rq->prefilled = now_s(); rq->pdisk = m->t_disk; rq->pexpert = m->t_expert; rq->pattn = m->t_attn;
     rq->pmiss = m->miss; rq->ppfi = m->pf_issued;
     return 1;
@@ -3493,8 +3738,14 @@ static void serve_loop(Model *m, Tok *tokenizer, const char *dir) {
         int n_prompt = rq.n_prompt, budget = rq.budget;
         int emitted = 0, limited = 1, cancelled = 0, done_early = 0;
         char piece[512];
+        /* MIMO_MTP: a turn without a read-out verifies a draft each step; `next` is the token
+         * the step chose, a kept draft already computed (next_done) or one still to run */
+        int spec = g_mtp.on && command.logprobs <= 0, pend = -1, next = -1, next_done = 0, warm = 0;
+        float *two = spec ? xmalloc((size_t)2 * c->vocab * sizeof(float), "verified logits") : NULL;
         while (emitted < budget && !cancelled && !done_early) {
-            int token = sample(logits, c->vocab, command.temperature, command.top_p);
+            int token = next >= 0 ? next : sample(logits, c->vocab, command.temperature, command.top_p);
+            int done = next >= 0 && next_done;
+            next = -1;
             int stop = 0;
             for (int i = 0; i < n_eos; i++) if (token == eos[i]) stop = 1;
             if (stop) { limited = 0; break; }
@@ -3518,8 +3769,13 @@ static void serve_loop(Model *m, Tok *tokenizer, const char *dir) {
                 coli_serve_command_dispose(&control);
             }
             if (cancelled || done_early || emitted >= budget) break;
-            prefill(m, &token, 1, logits, NULL, NULL, NULL);
+            if (!spec) prefill(m, &token, 1, logits, NULL, NULL, NULL);
+            else if (!done) {
+                if (!warm++) mtp_warm(m, ids, rq.reuse, n_prompt);   /* after the first token is out */
+                next = mtp_step(m, token, &pend, logits, two, command.temperature, command.top_p, &next_done);
+            }
         }
+        free(two);
         if (cancelled) {
             coli_serve_write_error(stdout, command.id, "CANCELLED");
             coli_serve_command_dispose(&command);
@@ -3736,6 +3992,7 @@ static void mimo_bf16_pack(Model *m) {
     if (!m->head.cuda)
 #endif
     n += dw_pack_bf16(&m->head, &from, &to);
+    if (g_mtp.on) { n += dw_pack_bf16(&m->L[g_mtp.li].o, &from, &to); n += dw_pack_bf16(&g_mtp.eh, &from, &to); }
     if (n) fprintf(stderr, "[mimo] %d bf16 matrices packed without loss for the CPU: %.2f GB for %.2f GB\n",
                    n, to / 1e9, from / 1e9);
 }
@@ -3913,8 +4170,12 @@ int main(int argc, char **argv) {
     double td = now_s();
     int produced = 0;
     char piece[512];
+    int spec = g_mtp.on, pend = -1, next = -1, next_done = 0, warm = 0;   /* MIMO_MTP: as in serve_loop */
+    float *two = spec ? xmalloc((size_t)2 * c->vocab * sizeof(float), "verified logits") : NULL;
     for (int g = 0; g < ngen; g++) {
-        int token = sample(logits, c->vocab, temperature, 1.0f);
+        int token = next >= 0 ? next : sample(logits, c->vocab, temperature, 1.0f);
+        int done = next >= 0 && next_done;
+        next = -1;
         int stop = 0;
         for (int i = 0; i < n_eos; i++) stop |= token == eos[i];
         if (have_tok && !ids_text) {
@@ -3924,8 +4185,13 @@ int main(int argc, char **argv) {
         fflush(stdout);
         produced++;
         if (stop && have_tok && !ids_text) break;
-        if (g + 1 < ngen) prefill(m, &token, 1, logits, NULL, NULL, NULL);
+        if (g + 1 < ngen && !spec) prefill(m, &token, 1, logits, NULL, NULL, NULL);
+        else if (g + 1 < ngen && !done) {
+            if (!warm++) mtp_warm(m, ids, 0, n);
+            next = mtp_step(m, token, &pend, logits, two, temperature, 1.0f, &next_done);
+        }
     }
+    free(two);
     printf("\n");
     fflush(stdout);
     double decode_s = now_s() - td;
@@ -3940,6 +4206,8 @@ int main(int argc, char **argv) {
             total - m->t_disk - m->t_expert - m->t_attn);
     MimoReq none = {0};
     mimo_stream_report(m, &none);
+    if (g_mtp.on && g_mtp.drafts) fprintf(stderr, "[mimo] decode %d tokens in %llu verified steps\n", produced,
+                                          (unsigned long long)g_mtp.drafts);
     vk_report(m);
     return 0;
 }
