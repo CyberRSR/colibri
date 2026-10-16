@@ -1,0 +1,5 @@
+[SPLIT] +C:\AI\MiMoPro-Shards -> 88 shard(s)
+[SPLIT] model across 2 dir(s): 130 shard(s) total (primary D:\AI\Models\MiMo-V2.6-Pro-MOPD -> 42 shard(s)), no duplication
+[mimo] 70 layers (60 sliding window 128, 10 full), 384 experts top-8, cache 88/layer, dense native, ctx 16384, vision -- loaded in 9.97s
+[mimo] prefill 17 tokens 13.02s, decode 32 tokens 38.14s (0.84 tok/s), experts 11641 hits 10444 misses 209444.1 MB read, rss 150.74 GB
+[mimo] time: expert reads 20.93s (10.01 GB/s), expert matmuls 10.40s, attention 17.95s, the rest (dense MLP, router, head) 1.88s

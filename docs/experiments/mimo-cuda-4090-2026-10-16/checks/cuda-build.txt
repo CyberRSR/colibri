@@ -1,0 +1,3 @@
+backend_cuda_mimo.cu
+tmpxft_00003948_00000000-7_backend_cuda_mimo.cudafe1.cpp
+   Создается библиотека coli_cuda_mimo.lib и объект coli_cuda_mimo.exp

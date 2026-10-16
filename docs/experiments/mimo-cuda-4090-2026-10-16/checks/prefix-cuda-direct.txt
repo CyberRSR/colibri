@@ -1,0 +1,17 @@
+........C:\Users\Cyber\AppData\Local\Programs\Python\Python313\Lib\unittest\case.py:606: ResourceWarning: unclosed file <_io.FileIO name=4 mode='rb' closefd=True>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Cyber\AppData\Local\Programs\Python\Python313\Lib\unittest\case.py:606: ResourceWarning: unclosed file <_io.FileIO name=5 mode='rb' closefd=True>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Cyber\AppData\Local\Programs\Python\Python313\Lib\unittest\case.py:606: ResourceWarning: unclosed file <_io.FileIO name=6 mode='rb' closefd=True>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Cyber\AppData\Local\Programs\Python\Python313\Lib\unittest\case.py:606: ResourceWarning: unclosed file <_io.FileIO name=7 mode='rb' closefd=True>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+......
+----------------------------------------------------------------------
+Ran 14 tests in 7.228s
+
+OK

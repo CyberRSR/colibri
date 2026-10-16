@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "hypothesis": "Use the RAM saved by CUDA host-copy release to cache more routed experts and reduce disk-read time.",
+  "commit": "17ae94762b491d153d17774d035194838e6c07c2",
+  "model": "XiaomiMiMo/MiMo-V2.6-Pro-MOPD, all70 layers, native MXFP4 experts and FP8/BF16 dense",
+  "command": "Baseline:\ngit checkout 17ae94762b491d153d17774d035194838e6c07c2\nc/build_mimo_cuda.bat\nmingw32-make -C c mimo CUDA_DLL=1 ARCH=native VK=0\npython c/tools/benchmark_mimo_cuda.py --engine c/mimo.exe --model D:/AI/Models/MiMo-V2.6-Pro-MOPD --shards C:/AI/MiMoPro-Shards --backend cuda --tokens 64 --runs 3 --cap 88 --threads 24 --read-threads 16 --context 16384 --dense-gb 20 --release-host --output c/build/mimo-cuda/reproduce-release-cuda-cap88\n\nTrial:\ngit checkout 17ae94762b491d153d17774d035194838e6c07c2\nc/build_mimo_cuda.bat\nmingw32-make -C c mimo CUDA_DLL=1 ARCH=native VK=0\npython c/tools/benchmark_mimo_cuda.py --engine c/mimo.exe --model D:/AI/Models/MiMo-V2.6-Pro-MOPD --shards C:/AI/MiMoPro-Shards --backend cuda --tokens 64 --runs 3 --cap 104 --threads 24 --read-threads 16 --context 16384 --dense-gb 20 --release-host --output c/build/mimo-cuda/reproduce-release-cuda-cap104",
+  "prompt_hash": "c9d8ef2ce7780c8288730a94fa44438917740cd9f6581534780506dada6e006f",
+  "hardware": {
+    "cpu": "AMD Ryzen 9 7950X3D, 16 cores / 32 logical processors",
+    "ram": "192 GiB installed (4 x 48 GiB), DDR5 configured at 5400 MT/s; 191.08 GiB OS-visible",
+    "storage": "Two model volumes: C: ~4 TB NVMe and D: ~12.29 TB volume; 88 and 42 shards respectively. Native Windows direct reads, 16 readers.",
+    "os": "Windows 11 Pro for Workstations 10.0.26300; MinGW-w64 GCC 14.2 MSVCRT, MSVC 14.44; RTX4090 24 GiB WDDM, driver617.42, CUDA Toolkit13.1, sm_89"
+  },
+  "warmup_runs": 1,
+  "changed_variables": [
+    "cap"
+  ],
+  "baseline": {
+    "config": {
+      "SNAP": "d:/ai/models/mimo-v2.6-pro-mopd",
+      "SERVE": "1",
+      "KV_SLOTS": "1",
+      "CTX": "16384",
+      "COLI_NO_OMP_TUNE": "1",
+      "COLI_KV_PREFIX": "0",
+      "OMP_NUM_THREADS": "24",
+      "MIMO_READ_THREADS": "16",
+      "MIMO_DENSE_BITS": "0",
+      "MIMO_IDOT": "0",
+      "MIMO_DIRECT": "1",
+      "MIMO_CHUNK": "64",
+      "MIMO_DIRS": "c:/ai/mimopro-shards",
+      "MIMO_CUDA": "1",
+      "MIMO_CUDA_DENSE_GB": "20",
+      "MIMO_CUDA_RESERVE_GB": "2",
+      "MIMO_CUDA_RELEASE_HOST": "1",
+      "COLI_VULKAN": "0",
+      "COLI_VK_CHAIN": "1",
+      "COLI_VK_DENSE": "1",
+      "COLI_VK_TIER_RESERVE_GB": "2",
+      "COLI_VK_CHAIN_LAYERS": "32",
+      "cap": 88,
+      "engine_sha256": "41c8b2aa61cb167506449c5b9eb0f0ce4989a7f21776e6c1cc79ba2a3403b70a"
+    },
+    "samples": {
+      "tok_s": [
+        1.0621868828662402,
+        1.0659447307258512,
+        1.0681200647597227
+      ]
+    },
+    "median_tok_s": 1.0659447307258512,
+    "quality": {
+      "passed": true,
+      "method": "Full70-layer CPU/CUDA logit gate17/17 argmax, KL<1e-5, matching32-token greedy reply; all measured64-token replies also byte-identical."
+    },
+    "evidence": {
+      "uri": "https://github.com/CyberRSR/colibri/blob/perf/mimo-cuda-4090/docs/experiments/mimo-cuda-4090-2026-10-16/release-cuda-cap88/samples.json",
+      "sha256": "c3fe7ade3ac24539e08cf224be16fdb9648a1543276c030b5f99ade904d528dc"
+    }
+  },
+  "trial": {
+    "config": {
+      "SNAP": "d:/ai/models/mimo-v2.6-pro-mopd",
+      "SERVE": "1",
+      "KV_SLOTS": "1",
+      "CTX": "16384",
+      "COLI_NO_OMP_TUNE": "1",
+      "COLI_KV_PREFIX": "0",
+      "OMP_NUM_THREADS": "24",
+      "MIMO_READ_THREADS": "16",
+      "MIMO_DENSE_BITS": "0",
+      "MIMO_IDOT": "0",
+      "MIMO_DIRECT": "1",
+      "MIMO_CHUNK": "64",
+      "MIMO_DIRS": "c:/ai/mimopro-shards",
+      "MIMO_CUDA": "1",
+      "MIMO_CUDA_DENSE_GB": "20",
+      "MIMO_CUDA_RESERVE_GB": "2",
+      "MIMO_CUDA_RELEASE_HOST": "1",
+      "COLI_VULKAN": "0",
+      "COLI_VK_CHAIN": "1",
+      "COLI_VK_DENSE": "1",
+      "COLI_VK_TIER_RESERVE_GB": "2",
+      "COLI_VK_CHAIN_LAYERS": "32",
+      "cap": 104,
+      "engine_sha256": "41c8b2aa61cb167506449c5b9eb0f0ce4989a7f21776e6c1cc79ba2a3403b70a"
+    },
+    "samples": {
+      "tok_s": [
+        1.1159975373277968,
+        1.1194892520595714,
+        1.1204150591594095
+      ]
+    },
+    "median_tok_s": 1.1194892520595714,
+    "quality": {
+      "passed": true,
+      "method": "Full70-layer CPU/CUDA logit gate17/17 argmax, KL<1e-5, matching32-token greedy reply; all measured64-token replies also byte-identical."
+    },
+    "evidence": {
+      "uri": "https://github.com/CyberRSR/colibri/blob/perf/mimo-cuda-4090/docs/experiments/mimo-cuda-4090-2026-10-16/release-cuda-cap104/samples.json",
+      "sha256": "2be5598ffd6c93a3aef7cc37ba580ceb102c3b94bae99d785da6c435c3cf1165"
+    }
+  },
+  "outcome": "improvement"
+}

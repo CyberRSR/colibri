@@ -62,9 +62,14 @@ hardware validation target; Linux is not covered by those local results.
 The example profile expects the model in `D:\AI\Models\MiMo-V2.6-Pro-MOPD`
 and additional shards in `C:\AI\MiMoPro-Shards`; both paths are parameters.
 It serves localhost port 18080. Existing launchers and model files are untouched.
-The expert-cache default is 88 entries per MoE layer. Host dense copies are
-retained, so do not reuse a Vulkan host-offload memory calculation for CUDA.
+The expert-cache default is 104 entries per MoE layer, with 16 CPU workers and
+16 readers. The profile enables host-copy release, freeing about 20 GiB of RAM
+on this checkpoint. Its nominal RAM budget is 174 GiB; the cap is explicitly
+bounded at 104 so recovery has headroom on the validated machine. Plain
+`MIMO_CUDA=1` still retains host copies unless release is explicitly enabled.
 The 192-GiB profile is not appropriate for smaller-RAM machines.
+The launcher clears stale layer-truncation, trace and fault-injection settings
+and sets the requested context explicitly.
 
 | Variable | Default | Meaning |
 |---|---:|---|
@@ -108,3 +113,7 @@ It compares all vocabulary logits at every prompt position, requires the same
 argmax, bounds KL divergence, and compares the generated response bytes. Both
 backends use the entire model and the same checkpoint, context and precision.
 `--prompt-file` supplies another fully rendered chat prompt.
+
+See the [RTX 4090 experiment](experiments/mimo-cuda-4090-2026-10-16/README.md)
+for raw samples, actual GPU work, numerical checks, rejected tuning and the
+limitations of the general Windows test suite.

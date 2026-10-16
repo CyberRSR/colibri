@@ -1,0 +1,18 @@
+ok greedy short: 12/12 tokens
+ok greedy window: 6/6 tokens
+ok greedy long: 6/6 tokens
+ok native dense, cache 4, prefill blocks of 3: identical in 3 cases
+ok prefill one token at a time: identical in 3 cases
+ok buffered expert reads: identical in 3 cases
+ok determinism: two identical runs, identical tokens
+ok block invariance: 4 cases x 3 variants, bit-identical logits
+ok teacher forcing short: 20/20 positions
+ok teacher forcing window: 46/46 positions
+ok teacher forcing long: 78/78 positions
+ok oracle bites: corrupted expert scales diverge in 3/3 cases
+ok qkv scale grid bites: 3/3 cases
+ok image greedy (f32): 8/8 tokens
+ok image greedy (native BF16 tower): 8/8 tokens
+ok image teacher forcing: 40/40 positions
+ok image bites: the negated picture gives the reference's other answer
+mimo-tiny-check: all checks passed
