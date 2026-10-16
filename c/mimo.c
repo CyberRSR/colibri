@@ -65,6 +65,12 @@
 #ifdef COLI_MIMO_CUDA
 #include "backend_cuda_mimo.h"
 static int g_mimo_cuda;
+static int g_mimo_cuda_release, g_mimo_cuda_dropped, g_mimo_cuda_reloaded;
+static size_t g_mimo_cuda_host_bytes, g_mimo_cuda_reload_bytes;
+static unsigned long long g_mimo_cuda_fault, g_mimo_cuda_calls;
+#endif
+#if defined(COLI_VULKAN) || defined(COLI_MIMO_CUDA)
+#include <pthread.h>
 #endif
 #if defined(__AVX2__)
 #include <immintrin.h>
@@ -380,7 +386,20 @@ static int dw_matmul_vk(float *y, const float *x, int S, const DW *d) {
     int fmt = dw_vk_fmt(d, &gs, &sc);
     return coli_vk_matmul((ColiVkTensor **)&dev->vk, y, x, d->w, sc, fmt, S, d->I, d->O, gs);
 }
+#endif
+#if defined(COLI_VULKAN) || defined(COLI_MIMO_CUDA)
 static void dw_reload(DW *d);   /* below, beside the loaders it re-runs */
+static size_t dw_bytes(const DW *d) {
+    if (!d->w) return 0;
+    size_t e = (size_t)d->O * d->I;
+    switch (d->fmt) {
+    case DW_F32:  return e * 4;
+    case DW_BF16: return e * 2;
+    case DW_FP8:  return e + (size_t)d->O * d->nblk * 4;
+    case DW_I8:   return e + (size_t)d->O * 4;
+    }
+    return 0;
+}
 #endif
 
 static void dw_matmul(float *y, const float *x, int S, const DW *d) {
@@ -391,11 +410,18 @@ static void dw_matmul(float *y, const float *x, int S, const DW *d) {
 #ifdef _OPENMP
     cuda_thread = !omp_in_parallel();
 #endif
-    if (g_mimo_cuda && cuda_thread && d->cuda && mimo_cuda_matmul(d->cuda, y, x, S)) return;
+    if (g_mimo_cuda && cuda_thread && d->cuda) {
+        if (g_mimo_cuda_fault && ++g_mimo_cuda_calls == g_mimo_cuda_fault) {
+            fprintf(stderr, "[CUDA] mimo fault injection: returning to CPU at matmul %llu\n", g_mimo_cuda_calls);
+            g_mimo_cuda = 0;
+        } else if (mimo_cuda_matmul(d->cuda, y, x, S)) return;
+    }
 #endif
 #ifdef COLI_VULKAN
     if (dw_matmul_vk(y, x, S, d)) return;
-    if (d->vk_gone) dw_reload((DW *)d);   /* the CPU needs a matrix the device held alone (a lost device) */
+#endif
+#if defined(COLI_VULKAN) || defined(COLI_MIMO_CUDA)
+    if (d->vk_gone) dw_reload((DW *)d);   /* the CPU needs a matrix the device held alone */
 #endif
     switch (d->fmt) {
     case DW_F32:  matmul(y, x, (const float *)d->w, S, d->I, d->O); break;
@@ -446,7 +472,7 @@ static void dw_from_f32(DW *d, float *w, int O, int I) {
     }
 }
 
-#ifdef COLI_VULKAN
+#if defined(COLI_VULKAN) || defined(COLI_MIMO_CUDA)
 enum { DWK_NONE = 0, DWK_BF16, DWK_FP8, DWK_QKV };
 /* What dw_reload needs to read the matrix back exactly as it was loaded: its name,
  * its loader, the MIMO_DENSE_BITS it was loaded under (the tower forces its own). */
@@ -555,13 +581,13 @@ static void load_qkv(DW *d, shards *S, const Cfg *c, int li) {
     for (int ch = 0; ch < T; ch++) for (int r = 0; r < v_rows; r++) order[w++] = ch * rpc + q_rows + k_rows + r;
     dw_load_fp8(d, S, name, O, c->hidden, row_block, scale_rows, order);
     free(row_block); free(order);
-#ifdef COLI_VULKAN
+#if defined(COLI_VULKAN) || defined(COLI_MIMO_CUDA)
     d->vk_kind = DWK_QKV; d->vk_li = li;   /* read back through this function: the de-interleave */
 #endif
 }
 
-#ifdef COLI_VULKAN
-/* A matrix whose host copy was dropped (COLI_VK_DENSE_HOST) and that the CPU needs
+#if defined(COLI_VULKAN) || defined(COLI_MIMO_CUDA)
+/* A matrix whose host copy was dropped by CUDA or Vulkan and that the CPU needs
  * after all: read it back from the checkpoint with the loader and the MIMO_DENSE_BITS
  * it was first read with, the same bytes, and keep it from there on. */
 static size_t dw_bytes(const DW *d);
@@ -586,7 +612,12 @@ static void dw_reload(DW *d) {
         d->w = t.w; d->s = t.s; d->nblk = t.nblk;
         free(t.vk_name);
         d->vk_gone = 0;
-        coli_vk_dense_host_reloaded(dw_bytes(d));
+#ifdef COLI_MIMO_CUDA
+        if (d->cuda) { g_mimo_cuda_reloaded++; g_mimo_cuda_reload_bytes += dw_bytes(d); }
+#endif
+#ifdef COLI_VULKAN
+        if (g_vk_ready) coli_vk_dense_host_reloaded(dw_bytes(d));
+#endif
     }
     pthread_mutex_unlock(&g_dw_dho_mx);
 }
@@ -1568,18 +1599,6 @@ static int vk_dense_upload(Model *m, int vision) {
     return n;
 }
 
-/* What vk_dense_upload will place, in bytes (the tier's budget leaves it room). */
-static size_t dw_bytes(const DW *d) {
-    if (!d->w) return 0;
-    size_t e = (size_t)d->O * d->I;
-    switch (d->fmt) {
-    case DW_F32:  return e * 4;
-    case DW_BF16: return e * 2;
-    case DW_FP8:  return e + (size_t)d->O * d->nblk * 4;
-    case DW_I8:   return e + (size_t)d->O * 4;
-    }
-    return 0;
-}
 static size_t vk_dense_bytes(const Model *m, int vision) {
     size_t b = dw_bytes(&m->head);
     for (int li = 0; li < m->c.n_layers; li++) {
@@ -2505,12 +2524,21 @@ static double mimo_cuda_gb(const char *key, double fallback) {
 }
 static void mimo_cuda_place(DW *d, size_t *budget, int *count) {
     if (!d->w || d->O < 1 || d->I < 1) return;
-    size_t e = (size_t)d->O * d->I;
-    size_t b = d->fmt == DW_F32 ? e * 4 : d->fmt == DW_BF16 ? e * 2 :
-               d->fmt == DW_FP8 ? e + (size_t)d->O * d->nblk * 4 : e + (size_t)d->O * 4;
+    size_t b = dw_bytes(d);
     if (b > *budget) return;
     d->cuda = mimo_cuda_upload(d->w, d->s, d->fmt, d->I, d->O);
-    if (d->cuda) { *budget -= b; (*count)++; }
+    if (d->cuda) {
+        *budget -= b; (*count)++;
+        if (g_mimo_cuda_release && d->vk_name && d->vk_kind != DWK_NONE) {
+            free(d->w); free(d->s); d->w = NULL; d->s = NULL; d->vk_gone = 1;
+            g_mimo_cuda_host_bytes += b; g_mimo_cuda_dropped++;
+        }
+    }
+}
+static void mimo_cuda_host_report(void) {
+    fprintf(stderr, "[CUDA] mimo host copies: %d released (%.3f GiB), %d restored from checkpoint (%.3f GiB)\n",
+            g_mimo_cuda_dropped, g_mimo_cuda_host_bytes / 1073741824.0,
+            g_mimo_cuda_reloaded, g_mimo_cuda_reload_bytes / 1073741824.0);
 }
 static void mimo_cuda_start(Model *m) {
     if (!env_int("MIMO_CUDA", env_int("COLI_CUDA", 0))) return;
@@ -2522,6 +2550,11 @@ static void mimo_cuda_start(Model *m) {
     }
     atexit(mimo_cuda_shutdown);
     atexit(mimo_cuda_report);
+    atexit(mimo_cuda_host_report);
+    g_dw_dho_S = &m->S; g_dw_dho_c = &m->c;
+    g_mimo_cuda_release = env_int("MIMO_CUDA_RELEASE_HOST", 0) != 0;
+    int fault = env_int("MIMO_CUDA_FAULT", 0);
+    g_mimo_cuda_fault = fault > 0 ? (unsigned)fault : 0;
     size_t fr = mimo_cuda_free_bytes(), headroom = (size_t)(reserve * 1073741824.0);
     size_t budget = (size_t)(gb * 1073741824.0);
     size_t available = fr > headroom ? fr - headroom : 0;
@@ -2539,8 +2572,8 @@ static void mimo_cuda_start(Model *m) {
     }
     for (int i = 0; i < m->c.n_layers; i++) mimo_cuda_place(&m->L[i].o, &budget, &count);
     g_mimo_cuda = count > 0;
-    fprintf(stderr, "[CUDA] mimo placed %d dense matrices: %.3f / %.3f GiB budget; CPU host copies retained\n",
-            count, (start - budget) / 1073741824.0, start / 1073741824.0);
+    fprintf(stderr, "[CUDA] mimo placed %d dense matrices: %.3f / %.3f GiB budget; CPU host copies %s\n",
+            count, (start - budget) / 1073741824.0, start / 1073741824.0, g_mimo_cuda_release ? "released" : "retained");
 }
 #endif
 

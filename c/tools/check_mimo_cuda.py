@@ -24,6 +24,7 @@ def main():
     p.add_argument("--tokens", type=int, default=32)
     p.add_argument("--cap", type=int, default=88)
     p.add_argument("--threads", type=int, default=24)
+    p.add_argument("--release-host", action="store_true")
     p.add_argument("--prompt-file", type=Path, help="UTF-8 fully rendered chat prompt")
     a = p.parse_args()
     if a.tokens < 1:
@@ -37,6 +38,7 @@ def main():
               "OMP_NUM_THREADS": str(a.threads), "COLI_NO_OMP_TUNE": "1", "COLI_TEMP": "0",
               "MIMO_CTX": "16384", "COLI_VULKAN": "0", "MIMO_CUDA_DENSE_GB": "20",
               "MIMO_CUDA_RESERVE_GB": "2", "SERVE": "0"}
+    config["MIMO_CUDA_RELEASE_HOST"] = "1" if a.release_host else "0"
     for backend in ("cpu", "cuda"):
         env = {k: v for k, v in os.environ.items() if not k.startswith(("MIMO_", "COLI_", "CUDA_"))}
         env.update(config)

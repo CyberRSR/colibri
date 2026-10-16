@@ -12,7 +12,7 @@ import tempfile
 import unittest
 
 C = Path(__file__).resolve().parents[1]
-ENGINE = C / ("mimo.exe" if os.name == "nt" else "mimo")
+ENGINE = Path(os.environ.get("MIMO_BINARY", C / ("mimo.exe" if os.name == "nt" else "mimo")))
 
 
 @unittest.skipUnless(os.environ.get("MIMO_CUDA_TEST") == "1", "explicit CUDA hardware test")
@@ -48,6 +48,18 @@ class FallbackTest(unittest.TestCase):
         self.assertIn("placed 1 dense matrices", log)
         self.assertRegex(log, r"[1-9][0-9]* matmuls")
         self.assertIn("0 scratch/compute fallbacks", log)
+
+    def test_released_weights(self):
+        log = self.run_case(MIMO_CUDA_RELEASE_HOST="1", MIMO_DENSE_BITS="0")
+        self.assertRegex(log, r"host copies: [1-9][0-9]* released")
+        self.assertIn("0 restored from checkpoint", log)
+
+    def test_released_weights_recover_after_failure(self):
+        for fmt in ("0", "32"):
+            with self.subTest(dense_bits=fmt):
+                log = self.run_case(MIMO_CUDA_RELEASE_HOST="1", MIMO_CUDA_FAULT="13", MIMO_DENSE_BITS=fmt)
+                self.assertIn("fault injection", log)
+                self.assertRegex(log, r"[1-9][0-9]* restored from checkpoint")
 
 
 if __name__ == "__main__":

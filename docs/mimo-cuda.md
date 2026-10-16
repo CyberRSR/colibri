@@ -13,7 +13,12 @@ Pinned activation staging is reused between calls. The same kernel reduction
 is used for decode and prefill so chunk sizes do not change the arithmetic.
 
 Routing, streamed MXFP4 experts, attention/KV state and vision remain on CPU.
-All CPU weight copies are retained for fallback. CUDA and Vulkan placement are
+CPU weight copies are retained by default. `MIMO_CUDA_RELEASE_HOST=1` releases
+successfully uploaded host matrices so RAM can hold more experts. If CUDA
+cannot compute a matrix, the engine reads it back through its original loader,
+including QKV deinterleaving and the selected dense format. Recovered host
+weights stay in RAM. Leave enough host-memory headroom for this recovery when
+choosing an expert-cache size. CUDA and Vulkan placement are
 mutually exclusive when CUDA successfully places a matrix. A missing DLL or
 device leaves the existing CPU/Vulkan path available. Allocation failures leave
 unplaced matrices on CPU; a compute failure disables further CUDA computation.
@@ -66,11 +71,15 @@ The 192-GiB profile is not appropriate for smaller-RAM machines.
 | `MIMO_CUDA` | `COLI_CUDA`, else 0 | Enable this path; explicit 0 disables it |
 | `MIMO_CUDA_DENSE_GB` | 20 | Maximum resident dense GiB; 0 disables placement |
 | `MIMO_CUDA_RESERVE_GB` | 2 | Free VRAM left for scratch and other applications |
+| `MIMO_CUDA_RELEASE_HOST` | 0 | Release uploaded host matrices; reload from checkpoint for CPU fallback |
 | `COLI_GPU` | 0 | CUDA device ordinal |
 
 The actual budget is the smaller of the requested budget and free VRAM minus
 the reserve. Check `[CUDA] mimo placed` at startup and `[CUDA] mimo dense` at
 exit: the latter reports actual matmul calls, not just device discovery.
+The host-copy report counts released and restored matrices. For recovery tests,
+`MIMO_CUDA_FAULT=N` switches to CPU at the Nth eligible matmul; it is never set
+by the production profile or benchmark.
 Large prefill scratch allocations can fall back to CPU without changing output
 ownership. A 16K context allocation is not a performance claim at 16K tokens.
 

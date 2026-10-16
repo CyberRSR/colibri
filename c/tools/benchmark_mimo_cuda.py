@@ -74,6 +74,7 @@ def main():
     p.add_argument("--tokens", type=int, default=64)
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--dense-gb", type=float, default=20)
+    p.add_argument("--release-host", action="store_true")
     p.add_argument("--chain-layers", type=int, default=32)
     p.add_argument("--timeout", type=float, default=1800)
     args = p.parse_args()
@@ -90,6 +91,7 @@ def main():
               "MIMO_DENSE_BITS": "0", "MIMO_IDOT": "0", "MIMO_DIRECT": "1", "MIMO_CHUNK": "64",
               "MIMO_DIRS": args.shards, "MIMO_CUDA": "1" if args.backend == "cuda" else "0",
               "MIMO_CUDA_DENSE_GB": str(args.dense_gb), "MIMO_CUDA_RESERVE_GB": "2",
+              "MIMO_CUDA_RELEASE_HOST": "1" if args.release_host else "0",
               "COLI_VULKAN": "1" if args.backend == "vulkan" else "0",
               "COLI_VK_CHAIN": "1", "COLI_VK_DENSE": "1", "COLI_VK_TIER_RESERVE_GB": "2",
               "COLI_VK_CHAIN_LAYERS": str(args.chain_layers)}
