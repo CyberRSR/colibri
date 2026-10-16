@@ -73,6 +73,9 @@ hardware validation target; Linux is not covered by those local results.
 The example profile expects the model in `D:\AI\Models\MiMo-V2.6-Pro-MOPD`
 and additional shards in `C:\AI\MiMoPro-Shards`; both paths are parameters.
 It serves localhost port 18080. Existing launchers and model files are untouched.
+`-DenseGB 21 -ReserveGB 1` places five more o_proj (115 matrices, 20.9 GiB) and
+measured +2% (1.81 to 1.85 tok/s), leaving about 1 GiB of the card free while it
+runs; the default keeps 2 GiB for other programs.
 The expert-cache default is 104 entries per MoE layer, with 16 CPU workers, two
 expert readers per drive and the next layer's prefetch (`-IoPerDrive`, `-Prefetch`;
 see [expert streaming](mimo.md#expert-streaming)). The profile enables host-copy release, freeing about 20 GiB of RAM
@@ -90,6 +93,7 @@ and sets the requested context explicitly.
 | `MIMO_CUDA_RESERVE_GB` | 2 | Free VRAM left for scratch and other applications |
 | `MIMO_CUDA_RELEASE_HOST` | 0 | Release uploaded host matrices; reload from checkpoint for CPU fallback |
 | `MIMO_CUDA_OPROJ_INT8` | 0 | 1: every o_proj on the GPU as int8 per 128 columns -- **not exact**, see below |
+| `MIMO_CUDA_OPROJ_SPREAD` | 1 | The o_proj that fit go up even layers first, so the CPU's are every other layer rather than the second half (the disks catch up during a slow attention: +1%); 0: in layer order |
 | `COLI_GPU` | 0 | CUDA device ordinal |
 
 The actual budget is the smaller of the requested budget and free VRAM minus

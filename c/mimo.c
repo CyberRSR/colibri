@@ -3441,10 +3441,17 @@ static void mimo_cuda_start(Model *m) {
         mimo_cuda_place(&m->L[i].down, &budget, &count);
     }
     g_mimo_cuda_oproj_i8 = env_int("MIMO_CUDA_OPROJ_INT8", 0) != 0;
-    for (int i = 0; i < m->c.n_layers; i++) {
-        if (g_mimo_cuda_oproj_i8) mimo_cuda_place_i8(&m->L[i].o, &budget, &count);
-        else mimo_cuda_place(&m->L[i].o, &budget, &count);
-    }
+    /* MIMO_CUDA_OPROJ_SPREAD (default 1): the even layers' o_proj first, then the odd
+     * ones, so the layers whose o_proj stays on the CPU (the slow attentions) are spread
+     * through the model instead of being its second half. The next layer's experts are
+     * read during this layer's MLP and the next attention: a run of fast attentions left
+     * the disks behind, a slow one every other layer lets them catch up. 0: in order. */
+    int spread = env_int("MIMO_CUDA_OPROJ_SPREAD", 1) != 0;
+    for (int pass = 0; pass < (spread ? 2 : 1); pass++)
+        for (int i = spread ? pass : 0; i < m->c.n_layers; i += spread ? 2 : 1) {
+            if (g_mimo_cuda_oproj_i8) mimo_cuda_place_i8(&m->L[i].o, &budget, &count);
+            else mimo_cuda_place(&m->L[i].o, &budget, &count);
+        }
     g_mimo_cuda = count > 0;
     fprintf(stderr, "[CUDA] mimo placed %d dense matrices: %.3f / %.3f GiB budget; CPU host copies %s\n",
             count, (start - budget) / 1073741824.0, start / 1073741824.0, g_mimo_cuda_release ? "released" : "retained");

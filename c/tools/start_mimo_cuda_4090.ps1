@@ -7,6 +7,9 @@ param(
     [ValidateRange(1,8)][int]$IoPerDrive = 2,
     [ValidateRange(0,2)][int]$Prefetch = 1,
     [ValidateRange(1,21)][double]$DenseGB = 20,
+    # VRAM left free for scratch and other programs; -DenseGB 21 -ReserveGB 1 puts
+    # five more o_proj on the GPU (+2% measured) and leaves about 1 GiB free
+    [ValidateRange(0.5,8)][double]$ReserveGB = 2,
     [ValidateRange(512,32768)][int]$Context = 16384,
     [ValidateRange(1,65535)][int]$Port = 18080,
     # Faster and NOT exact: every o_proj on the GPU as int8 (docs/mimo-cuda.md)
@@ -30,7 +33,7 @@ $env:MIMO_CUDA = '1'
 if ($OprojInt8 -and -not $PSBoundParameters.ContainsKey('DenseGB')) { $DenseGB = 20.2 }
 $env:MIMO_CUDA_DENSE_GB = [string]$DenseGB
 $env:MIMO_CUDA_OPROJ_INT8 = $(if ($OprojInt8) { '1' } else { '0' })
-$env:MIMO_CUDA_RESERVE_GB = '2'
+$env:MIMO_CUDA_RESERVE_GB = [string]$ReserveGB
 $env:MIMO_CUDA_RELEASE_HOST = '1'
 $env:MIMO_CHUNK = '512'
 $env:MIMO_CTX = [string]$Context

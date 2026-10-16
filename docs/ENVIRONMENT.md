@@ -612,6 +612,7 @@ Read **only** by `c/mimo.c` (and `MIMO_MAX_IMAGE_TOKENS` by the gateway). See [m
 | `MIMO_IO_PIECE_MB` | unset | MiMo: cut each expert read into pieces of this size; unset, one read per expert. |
 | `MIMO_CACHE_DECAY` | 0 | MiMo: 0 is an LRU expert cache; 0 < d < 1 reuses the slot whose expert has the lowest use count decayed by d per step of its layer. |
 | `MIMO_CUDA_OPROJ_INT8` | 0 | MiMo, CUDA: 1 puts every o_proj on the GPU as int8 per 128 columns (not exact; see mimo-cuda.md). |
+| `MIMO_CUDA_OPROJ_SPREAD` | 1 | MiMo, CUDA: the o_proj that fit go up even layers first, so the CPU's are spread through the model; 0 places them in layer order. |
 | `MIMO_LARGE_PAGES` | 0 | MiMo, Windows: 1 keeps the expert cache in 2 MiB locked pages when the account has the lock-pages right. |
 | `MIMO_ROUTE_TRACE` | unset | MiMo: write every MoE step's routing for `tools/mimo_route_sim.py`. |
 | `MIMO_READ_THREADS` | -- | MiMo: no longer read; see `MIMO_IO_PER_DRIVE`. |
