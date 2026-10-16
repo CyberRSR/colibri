@@ -1,0 +1,19 @@
+[CUDA] mimo device 0: NVIDIA GeForce RTX 4090; native dense weights, float32 activations
+[SPLIT] +C:/AI/MiMoPro-Shards -> 88 shard(s)
+[SPLIT] model across 2 dir(s): 130 shard(s) total (primary D:\AI\Models\MiMo-V2.6-Pro-MOPD -> 42 shard(s)), no duplication
+[mimo] expert readers: 4 on 2 device(s)
+[CUDA] mimo placed 125 dense matrices (52 bf16 packed): 19.983 / 20.000 GiB budget; CPU host copies released
+[mimo] 19 bf16 matrices packed without loss for the CPU: 2.87 GB for 3.83 GB
+[mimo] 70 layers (60 sliding window 128, 10 full), 384 experts top-8, cache 104/layer, dense native, ctx 16384, vision -- loaded in 15.04s
+[mimo] streaming: 5611 demand reads, 12563 prefetched (9085 used, 3478 unused), predicted 79.6% of 44160 choices, 364.46 GB read, 11.28s stalled, 0.81s predicting; attention matmuls: qkv 1.42s, o_proj 4.51s; 2.66 experts a wave
+[mimo] prompt 7.62s (stalled 4.09s, experts 2.89s, attention 0.47s, 2866 demand reads); generation 31.08s (stalled 7.19s, experts 15.64s, attention 6.55s, 2745 demand reads, 10194 prefetched)
+[mimo] streaming: 4328 demand reads, 12102 prefetched (8587 used, 3515 unused), predicted 79.6% of 44160 choices, 329.49 GB read, 7.86s stalled, 0.75s predicting; attention matmuls: qkv 1.38s, o_proj 4.27s; 3.09 experts a wave
+[mimo] prompt 5.23s (stalled 1.99s, experts 2.64s, attention 0.45s, 1649 demand reads); generation 28.54s (stalled 5.87s, experts 14.84s, attention 6.23s, 2679 demand reads, 9887 prefetched)
+[mimo] streaming: 4283 demand reads, 12085 prefetched (8577 used, 3508 unused), predicted 79.6% of 44160 choices, 328.24 GB read, 7.77s stalled, 0.74s predicting; attention matmuls: qkv 1.40s, o_proj 4.24s; 3.11 experts a wave
+[mimo] prompt 5.19s (stalled 1.94s, experts 2.64s, attention 0.45s, 1625 demand reads); generation 28.48s (stalled 5.83s, experts 14.81s, attention 6.24s, 2658 demand reads, 9825 prefetched)
+[mimo] streaming: 4297 demand reads, 12019 prefetched (8516 used, 3503 unused), predicted 79.6% of 44160 choices, 327.20 GB read, 7.74s stalled, 0.75s predicting; attention matmuls: qkv 1.44s, o_proj 4.28s; 3.12 experts a wave
+[mimo] prompt 5.19s (stalled 1.92s, experts 2.65s, attention 0.46s, 1650 demand reads); generation 28.50s (stalled 5.82s, experts 14.78s, attention 6.31s, 2647 demand reads, 9795 prefetched)
+[CUDA] mimo dense: 125 matrices, 19.983 GiB resident, 32000 matmuls, 39936 rows, 0 scratch/compute fallbacks
+[CUDA] mimo matmul wall time (copies + compute): f32 0.000s, bf16 0.000s, fp8 5.752s, int8 0.000s, int8 blocks 0.000s, bf16 packed 3.039s
+[CUDA] mimo bf16 packed without loss: 52 matrices, 8.485 GiB for 11.309 GiB of bf16, 1110340 exceptions
+[CUDA] mimo host copies: 125 released (22.807 GiB), 0 restored from checkpoint (0.000 GiB)

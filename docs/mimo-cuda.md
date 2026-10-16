@@ -129,7 +129,9 @@ token instead of 34. The CPU packs its own the same way (`MIMO_BF16_PACK`,
 [mimo.md](mimo.md#environment)). Measured with the profile above, in one series:
 1.791 tok/s for the engine before them, 1.824 with the CPU's packing alone, 1.918
 with the GPU's alone, 1.936 with both (+8.1%; decode 2.032 to 2.226) -- every reply
-the same bytes.
+the same bytes ([the packing experiment](experiments/mimo-pack-4090-2026-10-17/README.md),
+which also measures the pooled expert cache of [mimo.md](mimo.md#environment): 1.990
+tok/s with both, 1.809 over eight different prompts).
 
 ## The faster, inexact o_proj (`MIMO_CUDA_OPROJ_INT8=1`)
 

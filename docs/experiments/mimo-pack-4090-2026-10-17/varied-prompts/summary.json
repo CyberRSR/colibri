@@ -1,0 +1,185 @@
+{
+  "note": "Eight different prompts (prompts.txt), one request of up to 64 greedy tokens each, one cold engine process per run, drive_mimo.py over the SERVE pipe with the benchmark profile. Runs of one series ran back to back; B-stream is the engine before the packing, whose replies are the release engine's.",
+  "runs": {
+    "A-pack": {
+      "series": "A",
+      "binary": "commit 71f5a0c4, defaults",
+      "overall_tok_s": 1.7728414850481868,
+      "mean_decode_tok_s": 2.165738005562545,
+      "mean_ttft_s": 6.493014750005386,
+      "tokens": 466,
+      "seconds": 262.85485980001977,
+      "texts_sha256": [
+        "95bc4387d16ae931b5528ace5a896467f3968bc1c5dce219881b6dd70693dcc8",
+        "0d806d9b074f3e369e4928775d652d23ce66d2f07c7ae1cf99a9bc3591392af6",
+        "8ccbc709584089938c1044447e6ba5f1a03c85bda42e368fd230b5f3e1034508",
+        "9adee34196c8ac093190566232b61c475f6d9c5d81a0234e41fbc54b829615aa",
+        "65790ac58d480310e67630bec2acbc478cb5c8eeed53d387a41bc421b8698834",
+        "c4ac514083771db6ede06def91b1869e649f5d540abaea825f5fd6cb8f98ea90",
+        "f418e1327e50563b1fcb0e43cc639aa2dd978cce32b23cdbb5e46ea2dba4ac73",
+        "fcac510ddcead57b12ec8c425d258af10ced9a904744147a18ef487c6c176b24"
+      ],
+      "replies_equal_to_B_stream": 8
+    },
+    "A-pack-global-v1": {
+      "series": "A",
+      "binary": "commit 71f5a0c4, MIMO_CACHE_GLOBAL=1 (first version)",
+      "overall_tok_s": 1.7929153071672495,
+      "mean_decode_tok_s": 2.260609836421155,
+      "mean_ttft_s": 7.222042900000815,
+      "tokens": 466,
+      "seconds": 259.911886600079,
+      "texts_sha256": [
+        "95bc4387d16ae931b5528ace5a896467f3968bc1c5dce219881b6dd70693dcc8",
+        "0d806d9b074f3e369e4928775d652d23ce66d2f07c7ae1cf99a9bc3591392af6",
+        "8ccbc709584089938c1044447e6ba5f1a03c85bda42e368fd230b5f3e1034508",
+        "9adee34196c8ac093190566232b61c475f6d9c5d81a0234e41fbc54b829615aa",
+        "65790ac58d480310e67630bec2acbc478cb5c8eeed53d387a41bc421b8698834",
+        "c4ac514083771db6ede06def91b1869e649f5d540abaea825f5fd6cb8f98ea90",
+        "f418e1327e50563b1fcb0e43cc639aa2dd978cce32b23cdbb5e46ea2dba4ac73",
+        "fcac510ddcead57b12ec8c425d258af10ced9a904744147a18ef487c6c176b24"
+      ],
+      "replies_equal_to_B_stream": 8
+    },
+    "B-stream": {
+      "series": "B",
+      "binary": "commit 10313e4f (before the packing)",
+      "overall_tok_s": 1.6506090120656693,
+      "mean_decode_tok_s": 1.9788111699432178,
+      "mean_ttft_s": 6.436652324991883,
+      "tokens": 466,
+      "seconds": 282.3200386000681,
+      "texts_sha256": [
+        "95bc4387d16ae931b5528ace5a896467f3968bc1c5dce219881b6dd70693dcc8",
+        "0d806d9b074f3e369e4928775d652d23ce66d2f07c7ae1cf99a9bc3591392af6",
+        "8ccbc709584089938c1044447e6ba5f1a03c85bda42e368fd230b5f3e1034508",
+        "9adee34196c8ac093190566232b61c475f6d9c5d81a0234e41fbc54b829615aa",
+        "65790ac58d480310e67630bec2acbc478cb5c8eeed53d387a41bc421b8698834",
+        "c4ac514083771db6ede06def91b1869e649f5d540abaea825f5fd6cb8f98ea90",
+        "f418e1327e50563b1fcb0e43cc639aa2dd978cce32b23cdbb5e46ea2dba4ac73",
+        "fcac510ddcead57b12ec8c425d258af10ced9a904744147a18ef487c6c176b24"
+      ],
+      "replies_equal_to_B_stream": 8
+    },
+    "B-hybrid": {
+      "series": "B",
+      "binary": "the pool with its prompt-block rule, off (= 0369c3b1 with MIMO_CACHE_GLOBAL=0)",
+      "overall_tok_s": 1.770927747501591,
+      "mean_decode_tok_s": 2.168193081195197,
+      "mean_ttft_s": 6.545991187500476,
+      "tokens": 466,
+      "seconds": 263.13891160010826,
+      "texts_sha256": [
+        "95bc4387d16ae931b5528ace5a896467f3968bc1c5dce219881b6dd70693dcc8",
+        "0d806d9b074f3e369e4928775d652d23ce66d2f07c7ae1cf99a9bc3591392af6",
+        "8ccbc709584089938c1044447e6ba5f1a03c85bda42e368fd230b5f3e1034508",
+        "9adee34196c8ac093190566232b61c475f6d9c5d81a0234e41fbc54b829615aa",
+        "65790ac58d480310e67630bec2acbc478cb5c8eeed53d387a41bc421b8698834",
+        "c4ac514083771db6ede06def91b1869e649f5d540abaea825f5fd6cb8f98ea90",
+        "f418e1327e50563b1fcb0e43cc639aa2dd978cce32b23cdbb5e46ea2dba4ac73",
+        "fcac510ddcead57b12ec8c425d258af10ced9a904744147a18ef487c6c176b24"
+      ],
+      "replies_equal_to_B_stream": 8
+    },
+    "B-hybrid-global": {
+      "series": "B",
+      "binary": "the same build, MIMO_CACHE_GLOBAL=1 (= 0369c3b1 defaults)",
+      "overall_tok_s": 1.7973041653974422,
+      "mean_decode_tok_s": 2.2391818759434496,
+      "mean_ttft_s": 6.892994550005824,
+      "tokens": 466,
+      "seconds": 259.27720470004715,
+      "texts_sha256": [
+        "95bc4387d16ae931b5528ace5a896467f3968bc1c5dce219881b6dd70693dcc8",
+        "0d806d9b074f3e369e4928775d652d23ce66d2f07c7ae1cf99a9bc3591392af6",
+        "8ccbc709584089938c1044447e6ba5f1a03c85bda42e368fd230b5f3e1034508",
+        "9adee34196c8ac093190566232b61c475f6d9c5d81a0234e41fbc54b829615aa",
+        "65790ac58d480310e67630bec2acbc478cb5c8eeed53d387a41bc421b8698834",
+        "c4ac514083771db6ede06def91b1869e649f5d540abaea825f5fd6cb8f98ea90",
+        "f418e1327e50563b1fcb0e43cc639aa2dd978cce32b23cdbb5e46ea2dba4ac73",
+        "fcac510ddcead57b12ec8c425d258af10ced9a904744147a18ef487c6c176b24"
+      ],
+      "replies_equal_to_B_stream": 8
+    },
+    "B-hybrid-rows64": {
+      "series": "B",
+      "binary": "the same build, MIMO_PREFETCH_ROWS=64",
+      "overall_tok_s": 1.7483474307741123,
+      "mean_decode_tok_s": 2.16601475697654,
+      "mean_ttft_s": 6.940891500002181,
+      "tokens": 466,
+      "seconds": 266.5374123000656,
+      "texts_sha256": [
+        "95bc4387d16ae931b5528ace5a896467f3968bc1c5dce219881b6dd70693dcc8",
+        "0d806d9b074f3e369e4928775d652d23ce66d2f07c7ae1cf99a9bc3591392af6",
+        "8ccbc709584089938c1044447e6ba5f1a03c85bda42e368fd230b5f3e1034508",
+        "9adee34196c8ac093190566232b61c475f6d9c5d81a0234e41fbc54b829615aa",
+        "65790ac58d480310e67630bec2acbc478cb5c8eeed53d387a41bc421b8698834",
+        "c4ac514083771db6ede06def91b1869e649f5d540abaea825f5fd6cb8f98ea90",
+        "f418e1327e50563b1fcb0e43cc639aa2dd978cce32b23cdbb5e46ea2dba4ac73",
+        "fcac510ddcead57b12ec8c425d258af10ced9a904744147a18ef487c6c176b24"
+      ],
+      "replies_equal_to_B_stream": 8
+    },
+    "B-hybrid-global-rows64": {
+      "series": "B",
+      "binary": "the same build, MIMO_CACHE_GLOBAL=1 MIMO_PREFETCH_ROWS=64",
+      "overall_tok_s": 1.8138764574983974,
+      "mean_decode_tok_s": 2.249649630206463,
+      "mean_ttft_s": 6.738166937495407,
+      "tokens": 466,
+      "seconds": 256.9083456999506,
+      "texts_sha256": [
+        "95bc4387d16ae931b5528ace5a896467f3968bc1c5dce219881b6dd70693dcc8",
+        "0d806d9b074f3e369e4928775d652d23ce66d2f07c7ae1cf99a9bc3591392af6",
+        "8ccbc709584089938c1044447e6ba5f1a03c85bda42e368fd230b5f3e1034508",
+        "9adee34196c8ac093190566232b61c475f6d9c5d81a0234e41fbc54b829615aa",
+        "65790ac58d480310e67630bec2acbc478cb5c8eeed53d387a41bc421b8698834",
+        "c4ac514083771db6ede06def91b1869e649f5d540abaea825f5fd6cb8f98ea90",
+        "f418e1327e50563b1fcb0e43cc639aa2dd978cce32b23cdbb5e46ea2dba4ac73",
+        "fcac510ddcead57b12ec8c425d258af10ced9a904744147a18ef487c6c176b24"
+      ],
+      "replies_equal_to_B_stream": 8
+    },
+    "C-pool": {
+      "series": "C",
+      "binary": "commit 0369c3b1, defaults",
+      "overall_tok_s": 1.8087665650576623,
+      "mean_decode_tok_s": 2.2529848102778627,
+      "mean_ttft_s": 6.838397500010615,
+      "tokens": 466,
+      "seconds": 257.63412980001885,
+      "texts_sha256": [
+        "95bc4387d16ae931b5528ace5a896467f3968bc1c5dce219881b6dd70693dcc8",
+        "0d806d9b074f3e369e4928775d652d23ce66d2f07c7ae1cf99a9bc3591392af6",
+        "8ccbc709584089938c1044447e6ba5f1a03c85bda42e368fd230b5f3e1034508",
+        "9adee34196c8ac093190566232b61c475f6d9c5d81a0234e41fbc54b829615aa",
+        "65790ac58d480310e67630bec2acbc478cb5c8eeed53d387a41bc421b8698834",
+        "c4ac514083771db6ede06def91b1869e649f5d540abaea825f5fd6cb8f98ea90",
+        "f418e1327e50563b1fcb0e43cc639aa2dd978cce32b23cdbb5e46ea2dba4ac73",
+        "fcac510ddcead57b12ec8c425d258af10ced9a904744147a18ef487c6c176b24"
+      ],
+      "replies_equal_to_B_stream": 8
+    },
+    "C-pool-off": {
+      "series": "C",
+      "binary": "commit 0369c3b1, MIMO_CACHE_GLOBAL=0",
+      "overall_tok_s": 1.777737700093215,
+      "mean_decode_tok_s": 2.174125647306666,
+      "mean_ttft_s": 6.492923425001209,
+      "tokens": 466,
+      "seconds": 262.13090939994436,
+      "texts_sha256": [
+        "95bc4387d16ae931b5528ace5a896467f3968bc1c5dce219881b6dd70693dcc8",
+        "0d806d9b074f3e369e4928775d652d23ce66d2f07c7ae1cf99a9bc3591392af6",
+        "8ccbc709584089938c1044447e6ba5f1a03c85bda42e368fd230b5f3e1034508",
+        "9adee34196c8ac093190566232b61c475f6d9c5d81a0234e41fbc54b829615aa",
+        "65790ac58d480310e67630bec2acbc478cb5c8eeed53d387a41bc421b8698834",
+        "c4ac514083771db6ede06def91b1869e649f5d540abaea825f5fd6cb8f98ea90",
+        "f418e1327e50563b1fcb0e43cc639aa2dd978cce32b23cdbb5e46ea2dba4ac73",
+        "fcac510ddcead57b12ec8c425d258af10ced9a904744147a18ef487c6c176b24"
+      ],
+      "replies_equal_to_B_stream": 8
+    }
+  }
+}
