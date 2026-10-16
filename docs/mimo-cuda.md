@@ -190,3 +190,7 @@ measures the same profile with the expert streaming and the wide kernels:
 CPU's prompt kernels, 512-row prompt blocks and the spread o_proj: 1.159 to 1.814
 tok/s for the benchmark, 1.061 to 1.679 over eight different prompts, a 2260-token
 prompt 4.4x faster, every reply the release engine's bytes.
+[The MTP experiment](experiments/mimo-mtp-4090-2026-10-17/README.md) adds the
+drafts of the checkpoint's MTP layer, verified two rows a step: 2.206 tok/s for the
+benchmark (1.999 without), 1.941 over the eight prompts sampled at temperature 0.7
+(1.770), the greedy replies the same bytes.

@@ -1,0 +1,55 @@
+{
+ "note": "Runs on the way to ed62c9af, from working-tree builds that were not committed.",
+ "long_prompt": [
+  {
+   "run": "ev2long-stream",
+   "prefill_seconds": 205.43,
+   "line": "[mimo] prefill 2260 tokens 205.43s, decode 8 tokens 4.07s (1.97 tok/s), experts 25665 hits 78026 misses 1597763.6 MB read, rss 151.80 GB",
+   "build": "10313e4f (round 2)"
+  },
+  {
+   "run": "s19long-pool",
+   "prefill_seconds": 218.34,
+   "line": "[mimo] prefill 2260 tokens 218.34s, decode 8 tokens 3.93s (2.04 tok/s), experts 22397 hits 81294 misses 1664142.4 MB read, rss 147.92 GB",
+   "build": "0369c3b1: the packed bf16 prompt kernel decoded a group per 4 rows; the pool grew layers past the cap in prompt blocks"
+  },
+  {
+   "run": "s20long",
+   "prefill_seconds": 211.07,
+   "line": "[mimo] prefill 2260 tokens 211.07s, decode 8 tokens 3.93s (2.04 tok/s), experts 22436 hits 81255 misses 1663360.3 MB read, rss 147.92 GB",
+   "build": "+ an output row unpacked once a 64-row tile"
+  },
+  {
+   "run": "s20long-nopool",
+   "prefill_seconds": 207.73,
+   "line": "[mimo] prefill 2260 tokens 207.73s, decode 8 tokens 3.82s (2.09 tok/s), experts 25657 hits 78034 misses 1597904.0 MB read, rss 147.92 GB",
+   "build": "the same, MIMO_CACHE_GLOBAL=0"
+  },
+  {
+   "run": "s21long",
+   "prefill_seconds": 206.73,
+   "line": "[mimo] prefill 2260 tokens 206.73s, decode 8 tokens 3.88s (2.06 tok/s), experts 25726 hits 77965 misses 1597141.9 MB read, rss 147.92 GB",
+   "build": "+ a prompt block grows a layer only to the cap"
+  },
+  {
+   "run": "s22long",
+   "prefill_seconds": 202.87,
+   "line": "[mimo] prefill 2260 tokens 202.87s, decode 8 tokens 4.21s (1.90 tok/s), experts 25725 hits 77971 misses 1601032.4 MB read, rss 148.66 GB",
+   "build": "ed62c9af's code (MTP on; a prompt is not drafted)"
+  }
+ ],
+ "first_mtp_build": {
+  "note": "the first MTP build (greedy only; its warm-up before the first token), one series",
+  "benchmark": {
+   "mtp-off": 1.9909,
+   "mtp": 2.221,
+   "decode_mtp-off": 2.3159,
+   "decode_mtp": 2.6477
+  },
+  "varied_greedy": {
+   "mtp-off": 1.816,
+   "mtp": 1.9812
+  }
+ },
+ "mtp_hidden_state": "the trunk's hidden state before its final norm instead of after: the same 30 of 34 drafts kept on the benchmark prompt (CLI); the switch was dropped"
+}
