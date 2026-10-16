@@ -32,7 +32,9 @@ mingw32-make mimo CUDA_DLL=1 ARCH=native VK=0
 python tools/make_mimo_tiny.py --output mimo_tiny --force --vision
 $env:MIMO_CUDA = '1'
 python tests/mimo_tiny_harness.py --binary ./mimo.exe --fixture ./mimo_tiny
-python -m unittest tests.test_mimo_prefix_serve
+python tests/test_mimo_prefix_serve.py
+$env:MIMO_CUDA_TEST = '1'
+python tests/test_mimo_cuda_fallback.py
 ```
 
 The DLL script discovers Visual Studio, uses `CUDA_PATH` or `nvcc` on PATH,
@@ -86,3 +88,14 @@ prefix reuse disabled. It saves raw replies, profile counters, GPU telemetry,
 binary hashes and timings. Overall throughput includes prefill; decode speed
 uses `(completion_tokens - 1) / (last_token_time - first_token_time)`.
 Early EOS is rejected so a shorter answer cannot masquerade as an improvement.
+
+For a full-model correctness comparison (numpy required):
+
+```powershell
+python c/tools/check_mimo_cuda.py --engine c/mimo.exe --model D:/AI/Models/MiMo-V2.6-Pro-MOPD --shards C:/AI/MiMoPro-Shards --output c/build/mimo-cuda/my-correctness-run
+```
+
+It compares all vocabulary logits at every prompt position, requires the same
+argmax, bounds KL divergence, and compares the generated response bytes. Both
+backends use the entire model and the same checkpoint, context and precision.
+`--prompt-file` supplies another fully rendered chat prompt.
