@@ -73,6 +73,8 @@ int main() {
         rc |= check(f, 129, 13, 7);
         rc |= check(f, 6144, 33, 3);
         rc |= check(f, 257, 129, 17);
+        rc |= check(f, 512, 9, 17);      /* the wide kernels: FP8 and BF16, row tiles of 8 */
+        rc |= check(f, 1024, 6, 9);
     }
     mimo_cuda_report(); mimo_cuda_shutdown();
     if (!mimo_cuda_init(0)) return 1;
