@@ -335,6 +335,7 @@ photo equal to the same prompt computed cold) are the CPU's, and hold with
 | `MIMO_PREFETCH_EXTRA` | 0 | Experts predicted beyond each point's size for each row. |
 | `MIMO_PREFETCH_ROWS` | 4 | The largest step a prediction is made for (a decode step, the conversations of a multiplexed one). |
 | `MIMO_PREFETCH_LIMIT` | 64 | Prefetches waiting in the queues at once. |
+| `MIMO_IO_PIECE_MB` | unset | Cut each expert read into pieces of this size (a demand then waits behind a piece, and an expert arrives through several readers). Unset: one read per expert; 4 MB pieces with two readers a drive doubled the stalls on the measured NVMe drives. |
 | `MIMO_CACHE_DECAY` | 0 | 0: the expert cache reuses its least recently used slot. 0 < d < 1: the slot whose expert has the lowest use count, decayed by d at each of the layer's steps. 0.97 read 17% less on a benchmark that repeats one prompt (it keeps what the last identical request used) and was no faster on eight different prompts, so LRU stays the default. |
 | `MIMO_LARGE_PAGES` | 0 | Windows: 1 keeps each layer's expert cache in 2 MiB locked pages (needs the "Lock pages in memory" right); ordinary pages when they cannot be had. |
 | `MIMO_ROUTE_TRACE` | unset | Write every MoE step's routing, and the router's ranking at the prefetcher's two points, to this file for `tools/mimo_route_sim.py`. |

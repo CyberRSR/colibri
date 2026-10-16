@@ -1271,6 +1271,76 @@ static inline float mx4_scale(uint8_t s){
 static void matmul_mxfp4(float *y, const float *x, const uint8_t *q4, const uint8_t *e8s,
                          int S, int I, int O){
     int rb=(I+1)/2, ng=(I+31)/32;
+#ifdef __AVX2__
+    if(I%32==0 && S>=2){
+        /* Several rows (a prompt's): each group of 32 weights is decoded once and
+         * applied to up to 8 rows, every row's products and sums in exactly the
+         * one-row loop's order below, so a row's bits do not depend on S. */
+        const __m128i lut2=_mm_setr_epi8(0,1,2,3,4,6,8,12,0,-1,-2,-3,-4,-6,-8,-12);
+        const __m128i m4=_mm_set1_epi8(0x0F);
+        #pragma omp parallel for schedule(static)
+        for(int o=0;o<O;o++){
+            const uint8_t *w=q4+(int64_t)o*rb;
+            const uint8_t *scl=e8s+(int64_t)o*ng;
+            int s0=0;
+            /* full blocks of 8 rows: the accumulators named, in registers */
+            for(;s0+8<=S;s0+=8){
+                const float *x0=x+(int64_t)s0*I;
+                __m256 a0=_mm256_setzero_ps(),a1=a0,a2=a0,a3=a0,a4=a0,a5=a0,a6=a0,a7=a0;
+                for(int g=0;g<ng;g++){
+                    __m128i by=_mm_loadu_si128((const __m128i*)(w+g*16));
+                    __m128i lo=_mm_and_si128(by,m4), hi=_mm_and_si128(_mm_srli_epi16(by,4),m4);
+                    __m128i n0=_mm_shuffle_epi8(lut2,_mm_unpacklo_epi8(lo,hi));
+                    __m128i n1=_mm_shuffle_epi8(lut2,_mm_unpackhi_epi8(lo,hi));
+                    __m256 w0=_mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(n0));
+                    __m256 w1=_mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_srli_si128(n0,8)));
+                    __m256 w2=_mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(n1));
+                    __m256 w3=_mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_srli_si128(n1,8)));
+                    __m256 sc=_mm256_set1_ps(mx4_scale(scl[g])*0.5f);
+#define MX4_ROW(acc,r) { const float *xg=x0+(int64_t)(r)*I+g*32; \
+                    __m256 ga=_mm256_mul_ps(_mm256_loadu_ps(xg),w0); \
+                    ga=_mm256_fmadd_ps(_mm256_loadu_ps(xg+8),w1,ga); \
+                    ga=_mm256_fmadd_ps(_mm256_loadu_ps(xg+16),w2,ga); \
+                    ga=_mm256_fmadd_ps(_mm256_loadu_ps(xg+24),w3,ga); \
+                    acc=_mm256_fmadd_ps(ga,sc,acc); }
+                    MX4_ROW(a0,0) MX4_ROW(a1,1) MX4_ROW(a2,2) MX4_ROW(a3,3)
+                    MX4_ROW(a4,4) MX4_ROW(a5,5) MX4_ROW(a6,6) MX4_ROW(a7,7)
+#undef MX4_ROW
+                }
+                y[(int64_t)(s0+0)*O+o]=hsum256(a0); y[(int64_t)(s0+1)*O+o]=hsum256(a1);
+                y[(int64_t)(s0+2)*O+o]=hsum256(a2); y[(int64_t)(s0+3)*O+o]=hsum256(a3);
+                y[(int64_t)(s0+4)*O+o]=hsum256(a4); y[(int64_t)(s0+5)*O+o]=hsum256(a5);
+                y[(int64_t)(s0+6)*O+o]=hsum256(a6); y[(int64_t)(s0+7)*O+o]=hsum256(a7);
+            }
+            for(;s0<S;s0+=8){
+                int R=S-s0<8?S-s0:8;
+                __m256 acc[8];
+                for(int r=0;r<8;r++) acc[r]=_mm256_setzero_ps();
+                for(int g=0;g<ng;g++){
+                    __m128i by=_mm_loadu_si128((const __m128i*)(w+g*16));
+                    __m128i lo=_mm_and_si128(by,m4), hi=_mm_and_si128(_mm_srli_epi16(by,4),m4);
+                    __m128i n0=_mm_shuffle_epi8(lut2,_mm_unpacklo_epi8(lo,hi));
+                    __m128i n1=_mm_shuffle_epi8(lut2,_mm_unpackhi_epi8(lo,hi));
+                    __m256 w0=_mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(n0));
+                    __m256 w1=_mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_srli_si128(n0,8)));
+                    __m256 w2=_mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(n1));
+                    __m256 w3=_mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_srli_si128(n1,8)));
+                    __m256 sc=_mm256_set1_ps(mx4_scale(scl[g])*0.5f);
+                    for(int r=0;r<R;r++){
+                        const float *xg=x+(int64_t)(s0+r)*I+g*32;
+                        __m256 ga=_mm256_mul_ps(_mm256_loadu_ps(xg),w0);
+                        ga=_mm256_fmadd_ps(_mm256_loadu_ps(xg+8),w1,ga);
+                        ga=_mm256_fmadd_ps(_mm256_loadu_ps(xg+16),w2,ga);
+                        ga=_mm256_fmadd_ps(_mm256_loadu_ps(xg+24),w3,ga);
+                        acc[r]=_mm256_fmadd_ps(ga,sc,acc[r]);
+                    }
+                }
+                for(int r=0;r<R;r++) y[(int64_t)(s0+r)*O+o]=hsum256(acc[r]);
+            }
+        }
+        return;
+    }
+#endif
     #pragma omp parallel for schedule(static)
     for(int o=0;o<O;o++){
         const uint8_t *w=q4+(int64_t)o*rb;

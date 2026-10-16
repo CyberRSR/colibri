@@ -312,6 +312,47 @@ static void matmul_router(float *y, const float *x, const uint16_t *W, int S, in
 }
 
 static void matmul_bf16(float *y, const float *x, const uint16_t *W, int S, int I, int O) {
+#ifdef __AVX2__
+    if (S >= 4 && I % 8 == 0) {
+        /* A prompt block: 4 rows x 2 outputs at a time, eight independent chains
+         * instead of one, each (row, output) summed in the one-row loop's order
+         * below (the same lanes, the same hsum256), so the bits do not move. */
+        #pragma omp parallel for schedule(static)
+        for (int o2 = 0; o2 < (O + 1) / 2; o2++) {
+            int o = o2 * 2, two = o + 1 < O;
+            const uint16_t *wa = W + (int64_t)o * I, *wb = two ? wa + I : wa;
+            int s = 0;
+            for (; s + 4 <= S; s += 4) {
+                const float *x0 = x + (int64_t)s * I, *x1 = x0 + I, *x2 = x1 + I, *x3 = x2 + I;
+                __m256 a0 = _mm256_setzero_ps(), a1 = a0, a2 = a0, a3 = a0, b0 = a0, b1 = a0, b2 = a0, b3 = a0;
+                for (int i = 0; i < I; i += 8) {
+                    __m256 va = bf16_decode8(wa + i), vb = bf16_decode8(wb + i);
+                    __m256 v0 = _mm256_loadu_ps(x0 + i), v1 = _mm256_loadu_ps(x1 + i);
+                    __m256 v2 = _mm256_loadu_ps(x2 + i), v3 = _mm256_loadu_ps(x3 + i);
+                    a0 = _mm256_fmadd_ps(v0, va, a0); b0 = _mm256_fmadd_ps(v0, vb, b0);
+                    a1 = _mm256_fmadd_ps(v1, va, a1); b1 = _mm256_fmadd_ps(v1, vb, b1);
+                    a2 = _mm256_fmadd_ps(v2, va, a2); b2 = _mm256_fmadd_ps(v2, vb, b2);
+                    a3 = _mm256_fmadd_ps(v3, va, a3); b3 = _mm256_fmadd_ps(v3, vb, b3);
+                }
+                y[(int64_t)(s + 0) * O + o] = hsum256(a0); y[(int64_t)(s + 1) * O + o] = hsum256(a1);
+                y[(int64_t)(s + 2) * O + o] = hsum256(a2); y[(int64_t)(s + 3) * O + o] = hsum256(a3);
+                if (two) {
+                    y[(int64_t)(s + 0) * O + o + 1] = hsum256(b0); y[(int64_t)(s + 1) * O + o + 1] = hsum256(b1);
+                    y[(int64_t)(s + 2) * O + o + 1] = hsum256(b2); y[(int64_t)(s + 3) * O + o + 1] = hsum256(b3);
+                }
+            }
+            for (; s < S; s++)
+                for (int k = 0; k < 1 + two; k++) {
+                    const uint16_t *w = k ? wb : wa;
+                    const float *xs = x + (int64_t)s * I;
+                    __m256 acc = _mm256_setzero_ps();
+                    for (int i = 0; i < I; i += 8) acc = _mm256_fmadd_ps(_mm256_loadu_ps(xs + i), bf16_decode8(w + i), acc);
+                    y[(int64_t)s * O + o + k] = hsum256(acc);
+                }
+        }
+        return;
+    }
+#endif
     #pragma omp parallel for schedule(static)
     for (int o = 0; o < O; o++) {
         const uint16_t *w = W + (int64_t)o * I;
@@ -654,8 +695,8 @@ typedef struct {
     _Atomic int state;
     int pin;           /* uses still to come in the MoE step being computed */
     int pref;          /* read ahead by the prefetcher and not asked for yet */
-    int queued;        /* its read still waits in the prefetch queue of drive qdrive, at qpos */
-    int qdrive;
+    _Atomic int pending;   /* pieces of its read not done yet (the readers count down) */
+    int qdrive, qn;        /* a prefetch's pieces: qn jobs from qpos in drive qdrive's queue */
     unsigned qpos;
 } Slot;
 typedef struct { Slot *s; int n, cap; int *by_expert; uint8_t *arena; } LCache;
@@ -804,7 +845,7 @@ static void mimo_trace_close(void);
 
 #define MIMO_IOQ 4096
 #define MIMO_IO_DRIVES 8
-typedef struct { Slot *s; int li, eid; } IoJob;
+typedef struct { Slot *s; int li, eid, part; } IoJob;   /* part: a piece of the read, -1 the whole */
 static struct {
     pthread_t th[64];
     int nth, started, quit;
@@ -831,9 +872,40 @@ static int io_fd(Model *m, int *own, int fi, int direct) {
 #endif
 }
 
-static void expert_read(Model *m, int li, int eid, Slot *s, int *own) {
+/* An expert's read, optionally cut into pieces of MIMO_IO_PIECE_MB so that a demand
+ * waits behind at most a piece of each reader's current read and one expert arrives
+ * through several readers at once. Unset, an expert is one read: with two readers
+ * a drive, 4 MB pieces kept too few bytes in flight for the NVMe drives measured and
+ * doubled the stalls. The pieces tile [start, start + len) of the shard, into the
+ * slot from base; buf is base + pad. Direct reads are aligned to 4 KiB: an expert
+ * whose aligned range runs past its shard's end is read buffered. An expert not
+ * stored in one run (six tensors apart) is one piece. */
+static int64_t g_io_piece = (int64_t)1 << 40;
+typedef struct { int64_t start, len, pad; int direct, whole; } ExpertSpan;
+static int expert_span(const Model *m, int li, int eid, ExpertSpan *sp) {
+    const ERef *er = &m->eref[(int64_t)li * m->c.n_experts + eid];
+    memset(sp, 0, sizeof *sp);
+    if (!er->contig) { sp->whole = 1; return 1; }
+    int64_t a0 = er->off[0] & ~4095LL, pad = er->off[0] - a0;
+    int64_t dlen = (pad + m->e_bytes + 4095) & ~4095LL, size = m->S.sizes[er->fi[0]];
+    if (m->direct && a0 + dlen <= size) { sp->start = a0; sp->len = dlen; sp->pad = pad; sp->direct = 1; }
+    else { sp->start = er->off[0]; sp->len = m->e_bytes; sp->pad = 0; }
+    return (int)((sp->len + g_io_piece - 1) / g_io_piece);
+}
+
+static void expert_read(Model *m, int li, int eid, Slot *s, int *own, int part) {
     ERef *er = &m->eref[(int64_t)li * m->c.n_experts + eid];
     if (er->fd[0] < 0) { fprintf(stderr, "[mimo] expert L%d E%d missing on disk\n", li, eid); exit(1); }
+    ExpertSpan sp;
+    expert_span(m, li, eid, &sp);
+    if (part >= 0 && !sp.whole) {
+        int64_t at = (int64_t)part * g_io_piece, n = sp.len - at < g_io_piece ? sp.len - at : g_io_piece;
+        int fd = sp.direct ? io_fd(m, own, er->fi[0], 1) : -1;
+        if (fd < 0) fd = io_fd(m, own, er->fi[0], 0);   /* no unbuffered handle: the same bytes buffered */
+        if (fd < 0) fd = er->fd[0];
+        st_pread_full(fd, s->base + at, n, sp.start + at, "pread expert piece");
+        return;
+    }
     if (er->contig) {
         int dfd = m->direct ? io_fd(m, own, er->fi[0], 1) : -1;
         int bfd = io_fd(m, own, er->fi[0], 0);
@@ -880,13 +952,14 @@ static void *io_main(void *arg) {
         int p = g_io.head[d][0] != g_io.tail[d][0] ? 0 : 1;
         IoJob j = g_io.q[d][p][g_io.head[d][p]++ % MIMO_IOQ];
         if (!j.s) continue;                 /* a prefetch a demand moved to the front */
-        j.s->queued = 0;
         pthread_mutex_unlock(&g_io.mx);
-        expert_read(m, j.li, j.eid, j.s, own);
+        expert_read(m, j.li, j.eid, j.s, own, j.part);
         pthread_mutex_lock(&g_io.mx);
-        atomic_store_explicit(&j.s->state, SLOT_READY, memory_order_release);
-        g_io.finished++;
-        pthread_cond_broadcast(&g_io.done);
+        if (atomic_fetch_sub_explicit(&j.s->pending, 1, memory_order_acq_rel) == 1) {
+            atomic_store_explicit(&j.s->state, SLOT_READY, memory_order_release);
+            g_io.finished++;
+            pthread_cond_broadcast(&g_io.done);
+        }
     }
     pthread_mutex_unlock(&g_io.mx);
     for (int i = 0; i < nh; i++) if (own[i] >= 0) close(own[i]);
@@ -919,6 +992,8 @@ static void io_start(Model *m) {
     pthread_cond_init(&g_io.job, NULL);
     pthread_cond_init(&g_io.done, NULL);
     int per = env_int("MIMO_IO_PER_DRIVE", 2), total = env_int("MIMO_IO_THREADS", -1);
+    const char *pm = getenv("MIMO_IO_PIECE_MB");
+    if (pm && *pm && atof(pm) > 0) g_io_piece = ((int64_t)(atof(pm) * 1048576.0) + 4095) & ~4095LL;
     long long dev[MIMO_IO_DRIVES];
     g_io.ndrive = 0;
     for (int i = 0; i < m->S.nfd && i < ST_MAX_SHARDS; i++) {
@@ -958,21 +1033,26 @@ static void io_start(Model *m) {
 
 static void io_submit(Model *m, Slot *s, int li, int eid, int prefetch) {
     if (!g_io.started) io_start(m);
+    ExpertSpan sp;
+    int parts = expert_span(m, li, eid, &sp);
+    s->buf = s->base + sp.pad;
     if (!g_io.nth) {                        /* no reader thread: read it now */
         int nh = 2 * ST_MAX_SHARDS;
         static int *own;
         if (!own) { own = xmalloc((size_t)nh * sizeof(int), "reader handles"); for (int i = 0; i < nh; i++) own[i] = -2; }
         double t0 = now_s();
-        expert_read(m, li, eid, s, own);
+        expert_read(m, li, eid, s, own, -1);
         if (!prefetch) m->t_disk += now_s() - t0;
         atomic_store_explicit(&s->state, SLOT_READY, memory_order_release);
         return;
     }
     int d = io_drive(m, li, eid), p = prefetch ? 1 : 0;
+    atomic_store_explicit(&s->pending, parts, memory_order_relaxed);
     pthread_mutex_lock(&g_io.mx);
-    if (g_io.tail[d][p] - g_io.head[d][p] >= MIMO_IOQ) { fprintf(stderr, "[mimo] reader queue overflow\n"); exit(1); }
-    s->queued = p; s->qpos = g_io.tail[d][p]; s->qdrive = d;
-    g_io.q[d][p][g_io.tail[d][p]++ % MIMO_IOQ] = (IoJob){s, li, eid};
+    if (g_io.tail[d][p] - g_io.head[d][p] + (unsigned)parts > MIMO_IOQ) { fprintf(stderr, "[mimo] reader queue overflow\n"); exit(1); }
+    s->qdrive = d; s->qpos = g_io.tail[d][p]; s->qn = p ? parts : 0;
+    for (int k = 0; k < parts; k++)
+        g_io.q[d][p][g_io.tail[d][p]++ % MIMO_IOQ] = (IoJob){s, li, eid, sp.whole ? -1 : k};
     pthread_cond_broadcast(&g_io.job);
     pthread_mutex_unlock(&g_io.mx);
 }
@@ -981,17 +1061,18 @@ static void io_submit(Model *m, Slot *s, int li, int eid, int prefetch) {
 static void io_promote(Slot *s) {
     if (!g_io.nth) return;
     pthread_mutex_lock(&g_io.mx);
-    if (s->queued) {
-        int d = s->qdrive;
-        IoJob *j = &g_io.q[d][1][s->qpos % MIMO_IOQ];
-        if (j->s == s) {
-            IoJob moved = *j;
-            j->s = NULL;
-            s->queued = 0;
-            g_io.q[d][0][g_io.tail[d][0]++ % MIMO_IOQ] = moved;
-            pthread_cond_broadcast(&g_io.job);
-        }
+    int d = s->qdrive, moved = 0;
+    for (int k = 0; k < s->qn; k++) {
+        unsigned pos = s->qpos + (unsigned)k;
+        if (pos - g_io.head[d][1] >= g_io.tail[d][1] - g_io.head[d][1]) continue;   /* taken already */
+        IoJob *j = &g_io.q[d][1][pos % MIMO_IOQ];
+        if (j->s != s) continue;
+        g_io.q[d][0][g_io.tail[d][0]++ % MIMO_IOQ] = *j;
+        j->s = NULL;
+        moved = 1;
     }
+    s->qn = 0;
+    if (moved) pthread_cond_broadcast(&g_io.job);
     pthread_mutex_unlock(&g_io.mx);
 }
 
@@ -1339,6 +1420,55 @@ static void rope_row(const Cfg *c, int k, float *q, int pos) {
     for (int i = 0; i < kvh * c->v_dim[k]; i++) vv[i] *= c->v_scale;
 }
 
+#if defined(__AVX2__)
+/* A product the compiler may not fuse into the add that follows: the scores' sum
+ * below is the one gcc makes of `s += q[i] * k[i]` -- products rounded, then
+ * added one after the other (an in-order reduction, never an fma) -- and only an
+ * opaque product keeps -ffp-contract from changing that. */
+static inline __m256 mul_apart(__m256 a, __m256 b) {
+    __m256 r = _mm256_mul_ps(a, b);
+    __asm__("" : "+x"(r));
+    return r;
+}
+/* The scores of one row's G heads that share key/value head kh, eight heads a
+ * vector: qT [hd][lanes] holds the heads' queries by dimension (lanes = G rounded up
+ * to 8, the spare lanes zero), sc [lanes][..] receives score j - first of head g.
+ * Each head's sum is the scalar loop's: products rounded, added in dimension order
+ * from zero, times the scale -- the same bits, eight heads and two keys at a time. */
+static void scores_by_head(const float *qT, int lanes, int hd, const float *const *Kr, int lo, int first,
+                           int last, size_t koff, float scale, float *sc, int stride) {
+    const __m256 vs = _mm256_set1_ps(scale);
+    for (int g0 = 0; g0 < lanes; g0 += 8) {
+        int j = first;
+        for (; j + 1 <= last; j += 2) {
+            const float *k0 = Kr[j - lo] + koff, *k1 = Kr[j + 1 - lo] + koff;
+            __m256 a0 = _mm256_setzero_ps(), a1 = _mm256_setzero_ps();
+            for (int i = 0; i < hd; i++) {
+                __m256 q = _mm256_loadu_ps(qT + (size_t)i * lanes + g0);
+                a0 = _mm256_add_ps(a0, mul_apart(q, _mm256_set1_ps(k0[i])));
+                a1 = _mm256_add_ps(a1, mul_apart(q, _mm256_set1_ps(k1[i])));
+            }
+            float t0[8], t1[8];
+            _mm256_storeu_ps(t0, _mm256_mul_ps(a0, vs));
+            _mm256_storeu_ps(t1, _mm256_mul_ps(a1, vs));
+            for (int g = 0; g < 8; g++) {
+                sc[(size_t)(g0 + g) * stride + (j - first)] = t0[g];
+                sc[(size_t)(g0 + g) * stride + (j + 1 - first)] = t1[g];
+            }
+        }
+        for (; j <= last; j++) {
+            const float *k0 = Kr[j - lo] + koff;
+            __m256 a0 = _mm256_setzero_ps();
+            for (int i = 0; i < hd; i++)
+                a0 = _mm256_add_ps(a0, mul_apart(_mm256_loadu_ps(qT + (size_t)i * lanes + g0), _mm256_set1_ps(k0[i])));
+            float t0[8];
+            _mm256_storeu_ps(t0, _mm256_mul_ps(a0, vs));
+            for (int g = 0; g < 8; g++) sc[(size_t)(g0 + g) * stride + (j - first)] = t0[g];
+        }
+    }
+}
+#endif
+
 /* Attention of `n` rows at positions p0.. of layer li. `xn` is the normed input
  * [n, H], `out` receives o_proj's output [n, H]. */
 /* A multiplexed decode step's attention (KV_SLOTS, m->mux_rows): row t is the next
@@ -1483,6 +1613,51 @@ static void attention(Model *m, int li, const float *xn, int n, int p0, float *o
     float *ctxv = xmalloc((size_t)n * nh * vd * sizeof(float), "attention output");
     float scale = 1.0f / sqrtf((float)hd);
     int group = nh / kvh;
+    int vec = 0;
+#if defined(__AVX2__)
+    vec = hd % 16 == 0;
+    if (vec) {
+        /* The heads of a key/value head at once (scores_by_head); the softmax and the
+         * values per head as below. The sums gcc vectorizes in blocks of 16 are the ones
+         * this path reproduces, hence hd % 16 (MiMo's 192, the tiny fixture's 48). */
+        int lanes = (group + 7) / 8 * 8;
+        #pragma omp parallel
+        {
+            float *qT = xmalloc((size_t)hd * lanes * sizeof(float), "queries by head");
+            float *sc = xmalloc((size_t)lanes * nkeys * sizeof(float), "scores by head");
+            #pragma omp for collapse(2) schedule(static)
+            for (int t = 0; t < n; t++) {
+                for (int kh = 0; kh < kvh; kh++) {
+                    int p = p0 + t;
+                    int first = window ? (p - (window - 1) > lo ? p - (window - 1) : lo) : 0;
+                    for (int g = 0; g < lanes; g++)
+                        for (int i = 0; i < hd; i++)
+                            qT[(size_t)i * lanes + g] = g < group ? qkv[(size_t)t * rows + (size_t)(kh * group + g) * hd + i] : 0.0f;
+                    scores_by_head(qT, lanes, hd, Kr, lo, first, p, (size_t)kh * hd, scale, sc, nkeys);
+                    for (int g = 0; g < group; g++) {
+                        int h = kh * group + g;
+                        float *score = sc + (size_t)g * nkeys;
+                        float best = -INFINITY;
+                        for (int j = first; j <= p; j++) if (score[j - first] > best) best = score[j - first];
+                        float sink = l->sink ? l->sink[h] : -INFINITY;
+                        if (sink > best) best = sink;
+                        float den = l->sink ? expf(sink - best) : 0.0f;
+                        for (int j = first; j <= p; j++) { score[j - first] = expf(score[j - first] - best); den += score[j - first]; }
+                        float *o = ctxv + ((size_t)t * nh + h) * vd;
+                        for (int i = 0; i < vd; i++) o[i] = 0;
+                        for (int j = first; j <= p; j++) {
+                            const float *vr = Vr[j - lo] + (size_t)kh * vd;
+                            float w = score[j - first] / den;
+                            for (int i = 0; i < vd; i++) o[i] += w * vr[i];
+                        }
+                    }
+                }
+            }
+            free(qT); free(sc);
+        }
+    }
+#endif
+    if (!vec) {
     #pragma omp parallel
     {
         float stack_score[1024];
@@ -1516,6 +1691,7 @@ static void attention(Model *m, int li, const float *xn, int n, int p0, float *o
             }
         }
         if (score != stack_score) free(score);
+    }
     }
     if (k) {
         /* the ring keeps the last `window` positions of the block */
@@ -1575,10 +1751,24 @@ static void mimo_vk_release(void *ctx, void *h) { (void)ctx; (void)h; }
 
 static void mimo_prefetch_pending(Model *m);   /* below: the next layer's reads, behind this step's */
 
+/* A worker's scratch for one task's kernel output, kept between tasks. */
+static _Thread_local float *t_scratch;
+static _Thread_local size_t t_scratch_n;
+static float *task_scratch(size_t n) {
+    if (n > t_scratch_n) {
+        free(t_scratch);
+        t_scratch = xmalloc(n * sizeof(float), "expert scratch");
+        t_scratch_n = n;
+    }
+    return t_scratch;
+}
+
 /* One wave of moe_cpu: the experts wave[0..nw) (indices into the step's union),
- * resident in sl[], over the pairs [first[j], first[j+1]) of each. */
+ * resident in sl[], over the pairs [first[j], first[j+1]) of each. A first-pass
+ * task computes a block of gate rows and the same block of up rows and applies
+ * silu(gate) * up to them at once, in every worker; the second pass is down. */
 static void moe_wave(Model *m, const int *wave, int nw, Slot *const *sl, const int *first,
-                     const float *xg, float *g, float *u, float *y, int base) {
+                     const float *xg, float *g, float *y, int base) {
     Cfg *c = &m->c;
     int H = c->hidden, MI = c->moe_inter;
     void (*mm)(float *, const float *, const uint8_t *, const uint8_t *, int, int, int)
@@ -1590,32 +1780,27 @@ static void moe_wave(Model *m, const int *wave, int nw, Slot *const *sl, const i
     threads = omp_get_max_threads();
 #endif
     int BLOCK_ROWS = 256;
-    while (BLOCK_ROWS > 64 && nw * 2 * ((MI + BLOCK_ROWS - 1) / BLOCK_ROWS) < 4 * threads) BLOCK_ROWS /= 2;
+    while (BLOCK_ROWS > 64 && nw * ((MI + BLOCK_ROWS - 1) / BLOCK_ROWS) < 4 * threads) BLOCK_ROWS /= 2;
     int up_blocks = (MI + BLOCK_ROWS - 1) / BLOCK_ROWS, down_blocks = (H + BLOCK_ROWS - 1) / BLOCK_ROWS;
     int rb_mi = MI / 2, gb_mi = MI / 32, rb_h = H / 2, gb_h = H / 32;
     #pragma omp parallel for schedule(dynamic, 1)
-    for (int task = 0; task < nw * 2 * up_blocks; task++) {
-        int j = wave[task / (2 * up_blocks)], which = (task / up_blocks) % 2, blk = task % up_blocks;
+    for (int task = 0; task < nw * up_blocks; task++) {
+        int j = wave[task / up_blocks], blk = task % up_blocks;
         int r = first[j + 1] - first[j];
         if (!r) continue;
         int o0 = blk * BLOCK_ROWS, rows = MI - o0 < BLOCK_ROWS ? MI - o0 : BLOCK_ROWS;
-        const uint8_t *buf = sl[j]->buf;
-        const uint8_t *q = buf + m->part[0] + m->part[1] + (which ? m->part[2] + m->part[3] : 0);
-        const uint8_t *sc = q + m->part[2];
-        float *dst = (which ? u : g) + (size_t)first[j] * MI;
-        /* rows [o0, o0+rows) of this expert's gate or up, for its r inputs; the
-         * kernel writes [r, rows] contiguously, so it goes through a scratch */
-        float tmp[4 * 256];
-        float *scratch = r * rows <= (int)(sizeof(tmp) / sizeof(tmp[0])) ? tmp
-                       : xmalloc((size_t)r * rows * sizeof(float), "expert scratch");
-        mm(scratch, xg + (size_t)first[j] * H, q + (size_t)o0 * rb_h, sc + (size_t)o0 * gb_h, r, H, rows);
+        const uint8_t *gq = sl[j]->buf + m->part[0] + m->part[1], *gs = gq + m->part[2];
+        const uint8_t *uq = gs + m->part[3], *us = uq + m->part[4];
+        /* rows [o0, o0+rows) of this expert's gate and up for its r inputs, written
+         * [r, rows] by the kernel, then silu(gate) * up into g */
+        float *sg = task_scratch((size_t)2 * r * rows), *su = sg + (size_t)r * rows;
+        const float *xr = xg + (size_t)first[j] * H;
+        mm(sg, xr, gq + (size_t)o0 * rb_h, gs + (size_t)o0 * gb_h, r, H, rows);
+        mm(su, xr, uq + (size_t)o0 * rb_h, us + (size_t)o0 * gb_h, r, H, rows);
+        float *dst = g + (size_t)first[j] * MI + o0;
         for (int i = 0; i < r; i++)
-            memcpy(dst + (size_t)i * MI + o0, scratch + (size_t)i * rows, (size_t)rows * sizeof(float));
-        if (scratch != tmp) free(scratch);
-    }
-    for (int w = 0; w < nw; w++) {
-        int j = wave[w];
-        for (size_t i = (size_t)first[j] * MI; i < (size_t)first[j + 1] * MI; i++) g[i] = silu(g[i]) * u[i];
+            for (int k = 0; k < rows; k++)
+                dst[(size_t)i * MI + k] = silu(sg[(size_t)i * rows + k]) * su[(size_t)i * rows + k];
     }
     #pragma omp parallel for schedule(dynamic, 1)
     for (int task = 0; task < nw * down_blocks; task++) {
@@ -1624,14 +1809,11 @@ static void moe_wave(Model *m, const int *wave, int nw, Slot *const *sl, const i
         if (!r) continue;
         int o0 = blk * BLOCK_ROWS, rows = H - o0 < BLOCK_ROWS ? H - o0 : BLOCK_ROWS;
         const uint8_t *dq = sl[j]->buf, *ds = dq + m->part[0];
-        float tmp[4 * 256];
-        float *scratch = r * rows <= (int)(sizeof(tmp) / sizeof(tmp[0])) ? tmp
-                       : xmalloc((size_t)r * rows * sizeof(float), "expert scratch");
+        float *scratch = task_scratch((size_t)r * rows);
         mm(scratch, g + (size_t)first[j] * MI, dq + (size_t)o0 * rb_mi, ds + (size_t)o0 * gb_mi, r, MI, rows);
         float *dst = y + (size_t)(base + first[j]) * H;
         for (int i = 0; i < r; i++)
             memcpy(dst + (size_t)i * H + o0, scratch + (size_t)i * rows, (size_t)rows * sizeof(float));
-        if (scratch != tmp) free(scratch);
     }
 }
 
@@ -1685,7 +1867,6 @@ static int moe_cpu(Model *m, int li, const float *xn, int n, const int *sel,
     double t0 = now_s(), waited = m->t_disk;
     float *xg = xmalloc((size_t)(total - base ? total - base : 1) * H * sizeof(float), "expert inputs");
     float *g = xmalloc((size_t)(total - base ? total - base : 1) * MI * sizeof(float), "expert gate");
-    float *u = xmalloc((size_t)(total - base ? total - base : 1) * MI * sizeof(float), "expert up");
     for (int i = base; i < total; i++) memcpy(xg + (size_t)(i - base) * H, xn + (size_t)row[i - base] * H, (size_t)H * sizeof(float));
     int *wave = xmalloc((size_t)(nu ? nu : 1) * sizeof(int), "expert wave");
     uint8_t *done = xcalloc((size_t)(nu ? nu : 1), 1, "experts done");
@@ -1696,7 +1877,7 @@ static int moe_cpu(Model *m, int li, const float *xn, int n, const int *sel,
         if (!nw) {
             io_wait_any(m, seen_io);
         } else {
-            moe_wave(m, wave, nw, sl, first, xg, g, u, y, base);
+            moe_wave(m, wave, nw, sl, first, xg, g, y, base);
             m->waves++; m->wave_experts += (uint64_t)nw;
             for (int w = 0; w < nw; w++) {
                 int j = wave[w];
@@ -1715,7 +1896,7 @@ static int moe_cpu(Model *m, int li, const float *xn, int n, const int *sel,
     }
     m->t_expert += now_s() - t0 - (m->t_disk - waited);
     free(done); free(wave); free(sl);
-    free(first); free(xg); free(g); free(u); free(row); free(uni);
+    free(first); free(xg); free(g); free(row); free(uni);
     return total;
 }
 
