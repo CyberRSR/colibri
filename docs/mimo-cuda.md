@@ -194,3 +194,7 @@ prompt 4.4x faster, every reply the release engine's bytes.
 drafts of the checkpoint's MTP layer, verified two rows a step: 2.206 tok/s for the
 benchmark (1.999 without), 1.941 over the eight prompts sampled at temperature 0.7
 (1.770), the greedy replies the same bytes.
+[Its second round](experiments/mimo-mtp2-4090-2026-10-17/README.md) drafts with two
+MTP layers and verifies the drafts they are sure of: 2.414 tok/s for the benchmark
+against 2.258 with one draft a step in the same series, 2.071 and 1.977 over the eight
+prompts greedy and sampled (2.002 and 1.888), every greedy reply unchanged.

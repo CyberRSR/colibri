@@ -1,0 +1,162 @@
+[
+ {
+  "i": 0,
+  "tokens": 64,
+  "seconds": 40.29624210001202,
+  "ttft": 9.94899990002159,
+  "decode_tok_s": 2.0759711734208213,
+  "hit": 78.2,
+  "prof": [
+   "40.185",
+   "22",
+   "64",
+   "8.711",
+   "0.000",
+   "21.714",
+   "5.265",
+   "0.000",
+   "36"
+  ],
+  "text": "TCP (Transmission Control Protocol) is a connection-oriented protocol that prioritizes reliability and accuracy. It establishes a connection before sending data and uses acknowledgments and retransmissions to ensure every packet arrives in the correct order, making it ideal for web browsing and file transfers. In contrast, UDP (User Datagram Protocol) is connection"
+ },
+ {
+  "i": 1,
+  "tokens": 64,
+  "seconds": 32.985790200007614,
+  "ttft": 8.070609699992929,
+  "decode_tok_s": 2.5285789119594324,
+  "hit": 81.0,
+  "prof": [
+   "32.853",
+   "32",
+   "64",
+   "5.070",
+   "0.000",
+   "19.260",
+   "4.858",
+   "0.000",
+   "36"
+  ],
+  "text": "Конечно! Вот краткая и понятная инструкция по завариванию зелёного чая.\n\n### **Как заварить идеальный зелёный чай**\n\nКлюч к вкусному зелёному чаю — это не кипяток, а горя"
+ },
+ {
+  "i": 2,
+  "tokens": 64,
+  "seconds": 33.266761799983215,
+  "ttft": 6.602113499946427,
+  "decode_tok_s": 2.3626788282038986,
+  "hit": 82.1,
+  "prof": [
+   "33.149",
+   "22",
+   "64",
+   "5.713",
+   "0.000",
+   "19.040",
+   "4.733",
+   "0.000",
+   "36"
+  ],
+  "text": "The capital of Australia is **Canberra**.\n\nIt was chosen as a compromise to settle a fierce rivalry between the country's two largest cities, Sydney and Melbourne.\n\nHere is the breakdown of why it was chosen:\n\n### 1. The Rivalry (The \"Capital Problem\")\nWhen the Australian colonies federated to"
+ },
+ {
+  "i": 3,
+  "tokens": 20,
+  "seconds": 16.142087000014726,
+  "ttft": 5.434986700012814,
+  "decode_tok_s": 1.7745233973381764,
+  "hit": 76.2,
+  "prof": [
+   "16.026",
+   "17",
+   "20",
+   "2.952",
+   "0.000",
+   "9.372",
+   "2.189",
+   "0.000",
+   "16"
+  ],
+  "text": "Crimson leaves fall down\nCool grey mist on windowpanes\nEarth drinks in the rain"
+ },
+ {
+  "i": 4,
+  "tokens": 64,
+  "seconds": 31.645567000028677,
+  "ttft": 6.18588850001106,
+  "decode_tok_s": 2.474501003614653,
+  "hit": 84.1,
+  "prof": [
+   "31.519",
+   "22",
+   "64",
+   "4.356",
+   "0.000",
+   "18.694",
+   "4.816",
+   "0.000",
+   "37"
+  ],
+  "text": "In the city of Verona, the children of two feuding noble families, Romeo Montague and Juliet Capulet, meet at a party and instantly fall in love. Despite the danger, they secretly marry with the help of Friar Laurence, but a series of tragic events—including a fatal duel and a miscommunic"
+ },
+ {
+  "i": 5,
+  "tokens": 62,
+  "seconds": 32.42007230001036,
+  "ttft": 6.8295898999786,
+  "decode_tok_s": 2.383698714484737,
+  "hit": 80.3,
+  "prof": [
+   "32.289",
+   "23",
+   "62",
+   "5.343",
+   "0.000",
+   "18.815",
+   "4.553",
+   "0.000",
+   "34"
+  ],
+  "text": "```python\nnumbers = [1, 2, 3, 4, 5, 6]\nsquares = [x**2 for x in numbers if x % 2 == 0]\n\nprint(squares) # Output: [4, 16, 36]\n```"
+ },
+ {
+  "i": 6,
+  "tokens": 64,
+  "seconds": 30.956365999998525,
+  "ttft": 6.794328700052574,
+  "decode_tok_s": 2.607396024512425,
+  "hit": 82.0,
+  "prof": [
+   "30.827",
+   "27",
+   "64",
+   "4.585",
+   "0.000",
+   "18.012",
+   "4.656",
+   "0.000",
+   "35"
+  ],
+  "text": "Из-за **рэлеевского рассеяния**. Солнечный свет состоит из всех цветов, но молекулы воздуха рассеивают короткие (синие и фиолетовые) волны намного сильнее, чем длинные ("
+ },
+ {
+  "i": 7,
+  "tokens": 64,
+  "seconds": 29.074545199982822,
+  "ttft": 5.366231899999548,
+  "decode_tok_s": 2.657295742757223,
+  "hit": 84.2,
+  "prof": [
+   "28.946",
+   "16",
+   "64",
+   "4.313",
+   "0.000",
+   "16.835",
+   "4.347",
+   "0.000",
+   "34"
+  ],
+  "text": "Here are four benefits of regular exercise:\n\n1.  **Weight Management:** Exercise helps burn calories and build muscle, which helps maintain a healthy weight and prevents obesity.\n2.  **Improved Mental Health:** Physical activity stimulates the release of endorphins (feel-good chemicals), which can reduce stress, anxiety, and symptoms"
+ }
+]

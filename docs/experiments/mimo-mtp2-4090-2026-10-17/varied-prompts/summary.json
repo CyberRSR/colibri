@@ -1,0 +1,285 @@
+{
+ "note": "Eight different prompts, one request of up to 64 tokens each, one cold engine per run, drive_mimo.py of ../mimo-mtp-4090-2026-10-17/varied-prompts over the SERVE pipe, SEED=20261017. Greedy replies compared with that experiment's (the release engine's bytes). Sampled runs draw differently by construction.",
+ "runs": [
+  {
+   "run": "greedy-mtp1",
+   "MIMO_MTP": "1",
+   "MIMO_MTP_MIN_P": "0",
+   "temperature": 0,
+   "top_p": 1,
+   "overall_tok_s": 2.0021801886145805,
+   "mean_decode_tok_s": 2.5602708463129678,
+   "mean_ttft_s": 6.875460787508928,
+   "tokens": 466,
+   "seconds": 232.74628460011445,
+   "per_prompt_decode_tok_s": [
+    2.2335,
+    2.7114,
+    2.6128,
+    2.2294,
+    2.4506,
+    2.6226,
+    2.8483,
+    2.7735
+   ],
+   "drafts_kept_by_depth": [
+    209
+   ],
+   "drafts_verified_by_depth": [
+    246
+   ],
+   "drafting_s": 6.05,
+   "replies_equal_to_recorded": 8
+  },
+  {
+   "run": "greedy-mtp2",
+   "MIMO_MTP": "2",
+   "MIMO_MTP_MIN_P": "0",
+   "temperature": 0,
+   "top_p": 1,
+   "overall_tok_s": 2.005221584958726,
+   "mean_decode_tok_s": 2.5444255679556633,
+   "mean_ttft_s": 6.923916237494268,
+   "tokens": 466,
+   "seconds": 232.39326939999592,
+   "per_prompt_decode_tok_s": [
+    2.2815,
+    2.8783,
+    2.6857,
+    1.67,
+    2.3261,
+    2.6386,
+    2.8911,
+    2.9841
+   ],
+   "drafts_kept_by_depth": [
+    154,
+    119
+   ],
+   "drafts_verified_by_depth": [
+    185,
+    151
+   ],
+   "drafting_s": 9.66,
+   "replies_equal_to_recorded": 8
+  },
+  {
+   "run": "greedy-mtp2-p04",
+   "MIMO_MTP": "2",
+   "MIMO_MTP_MIN_P": "0.4",
+   "temperature": 0,
+   "top_p": 1,
+   "overall_tok_s": 2.0541965418081163,
+   "mean_decode_tok_s": 2.6423462640336224,
+   "mean_ttft_s": 6.857469624999794,
+   "tokens": 466,
+   "seconds": 226.85268450010335,
+   "per_prompt_decode_tok_s": [
+    2.2712,
+    2.8579,
+    2.6489,
+    2.2221,
+    2.5501,
+    2.7606,
+    2.8688,
+    2.9592
+   ],
+   "drafts_kept_by_depth": [
+    157,
+    104
+   ],
+   "drafts_verified_by_depth": [
+    182,
+    119
+   ],
+   "drafting_s": 10.12,
+   "replies_equal_to_recorded": 8
+  },
+  {
+   "run": "greedy-mtp2-p06",
+   "MIMO_MTP": "2",
+   "MIMO_MTP_MIN_P": "0.6",
+   "temperature": 0,
+   "top_p": 1,
+   "overall_tok_s": 2.071023047529007,
+   "mean_decode_tok_s": 2.6716260317177487,
+   "mean_ttft_s": 6.8605232124900795,
+   "tokens": 466,
+   "seconds": 225.00956740003312,
+   "per_prompt_decode_tok_s": [
+    2.3151,
+    2.9254,
+    2.6305,
+    2.2789,
+    2.6505,
+    2.8418,
+    2.7629,
+    2.968
+   ],
+   "drafts_kept_by_depth": [
+    151,
+    95
+   ],
+   "drafts_verified_by_depth": [
+    162,
+    102
+   ],
+   "drafting_s": 10.8,
+   "replies_equal_to_recorded": 8
+  },
+  {
+   "run": "t07-mtp1",
+   "MIMO_MTP": "1",
+   "MIMO_MTP_MIN_P": "0",
+   "temperature": 0.7,
+   "top_p": 0.9,
+   "overall_tok_s": 1.8882647182585628,
+   "mean_decode_tok_s": 2.358080474536421,
+   "mean_ttft_s": 6.904093600001943,
+   "tokens": 466,
+   "seconds": 246.78743160003796,
+   "per_prompt_decode_tok_s": [
+    2.076,
+    2.5286,
+    2.3627,
+    1.7745,
+    2.4745,
+    2.3837,
+    2.6074,
+    2.6573
+   ],
+   "drafts_kept_by_depth": [
+    205
+   ],
+   "drafts_verified_by_depth": [
+    253
+   ],
+   "drafting_s": 6.29
+  },
+  {
+   "run": "t07-mtp2",
+   "MIMO_MTP": "2",
+   "MIMO_MTP_MIN_P": "0",
+   "temperature": 0.7,
+   "top_p": 0.9,
+   "overall_tok_s": 1.9465465707064566,
+   "mean_decode_tok_s": 2.4457185410165025,
+   "mean_ttft_s": 6.93147976250475,
+   "tokens": 467,
+   "seconds": 239.91206120001152,
+   "per_prompt_decode_tok_s": [
+    2.127,
+    2.7301,
+    2.7309,
+    1.6771,
+    2.4499,
+    2.5507,
+    2.6344,
+    2.6657
+   ],
+   "drafts_kept_by_depth": [
+    155,
+    120
+   ],
+   "drafts_verified_by_depth": [
+    185,
+    152
+   ],
+   "drafting_s": 9.75
+  },
+  {
+   "run": "t07-mtp2-p04",
+   "MIMO_MTP": "2",
+   "MIMO_MTP_MIN_P": "0.4",
+   "temperature": 0.7,
+   "top_p": 0.9,
+   "overall_tok_s": 1.9410839428688127,
+   "mean_decode_tok_s": 2.469614523463377,
+   "mean_ttft_s": 6.967070974991657,
+   "tokens": 469,
+   "seconds": 241.61757749994285,
+   "per_prompt_decode_tok_s": [
+    2.1306,
+    2.8915,
+    2.4277,
+    2.0273,
+    2.2387,
+    2.6693,
+    2.7763,
+    2.5955
+   ],
+   "drafts_kept_by_depth": [
+    154,
+    107
+   ],
+   "drafts_verified_by_depth": [
+    188,
+    125
+   ],
+   "drafting_s": 10.31
+  },
+  {
+   "run": "t07-mtp2-p06",
+   "MIMO_MTP": "2",
+   "MIMO_MTP_MIN_P": "0.6",
+   "temperature": 0.7,
+   "top_p": 0.9,
+   "overall_tok_s": 1.9765280625467962,
+   "mean_decode_tok_s": 2.514902590880275,
+   "mean_ttft_s": 6.937901875026,
+   "tokens": 469,
+   "seconds": 237.28476660011802,
+   "per_prompt_decode_tok_s": [
+    2.1416,
+    2.8382,
+    2.5644,
+    2.063,
+    2.5731,
+    2.6333,
+    2.6491,
+    2.6565
+   ],
+   "drafts_kept_by_depth": [
+    150,
+    99
+   ],
+   "drafts_verified_by_depth": [
+    166,
+    105
+   ],
+   "drafting_s": 10.88
+  },
+  {
+   "run": "confirmation-greedy-default",
+   "MIMO_MTP": "default (2)",
+   "MIMO_MTP_MIN_P": "default (0.6)",
+   "temperature": 0,
+   "top_p": 1,
+   "overall_tok_s": 2.069322419163134,
+   "mean_decode_tok_s": 2.666690849254751,
+   "mean_ttft_s": 6.855751037495793,
+   "tokens": 466,
+   "seconds": 225.19448669988196,
+   "per_prompt_decode_tok_s": [
+    2.3272,
+    2.9208,
+    2.6372,
+    2.2773,
+    2.6539,
+    2.8397,
+    2.7494,
+    2.928
+   ],
+   "drafts_kept_by_depth": [
+    151,
+    95
+   ],
+   "drafts_verified_by_depth": [
+    162,
+    102
+   ],
+   "drafting_s": 11.07,
+   "replies_equal_to_recorded": 8
+  }
+ ]
+}

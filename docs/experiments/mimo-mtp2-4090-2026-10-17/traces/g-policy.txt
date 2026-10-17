@@ -1,0 +1,64 @@
+273 steps, 271 with all 3 drafts verified
+depth 1: tried 271, kept 230 (84.9%)
+   p in [0.00,0.30):   11 tried,  27.3% kept
+   p in [0.30,0.50):   23 tried,  30.4% kept
+   p in [0.50,0.70):   45 tried,  71.1% kept
+   p in [0.70,0.80):   20 tried,  80.0% kept
+   p in [0.80,0.90):   20 tried, 100.0% kept
+   p in [0.90,0.95):   18 tried, 100.0% kept
+   p in [0.95,0.99):   31 tried, 100.0% kept
+   p in [0.99,1.01):  103 tried, 100.0% kept
+depth 2: tried 230, kept 172 (74.8%)
+   p in [0.00,0.30):   21 tried,  19.0% kept
+   p in [0.30,0.50):   35 tried,  42.9% kept
+   p in [0.50,0.70):   32 tried,  68.8% kept
+   p in [0.70,0.80):   15 tried,  80.0% kept
+   p in [0.80,0.90):   22 tried,  90.9% kept
+   p in [0.90,0.95):   15 tried,  73.3% kept
+   p in [0.95,0.99):   28 tried,  92.9% kept
+   p in [0.99,1.01):   62 tried, 100.0% kept
+depth 3: tried 172, kept 121 (70.3%)
+   p in [0.00,0.30):   16 tried,  37.5% kept
+   p in [0.30,0.50):   30 tried,  33.3% kept
+   p in [0.50,0.70):   21 tried,  66.7% kept
+   p in [0.70,0.80):   18 tried,  61.1% kept
+   p in [0.80,0.90):    9 tried,  88.9% kept
+   p in [0.90,0.95):   18 tried,  77.8% kept
+   p in [0.95,0.99):   16 tried,  93.8% kept
+   p in [0.99,1.01):   44 tried,  97.7% kept
+
+fixed depth K, K blocks (MIMO_MTP=K):
+  K=0: 1.000 tokens/step, 423 ms/step -> 2.364 tok/s
+  K=1: 1.849 tokens/step, 675 ms/step -> 2.739 tok/s
+  K=2: 2.483 tokens/step, 914 ms/step -> 2.717 tok/s
+  K=3: 2.930 tokens/step, 1159 ms/step -> 2.528 tok/s
+
+1 blocks, drafts verified while their probabilities multiply to >= theta:
+  theta 0.0: 1.849 tokens/step, 675 ms/step -> 2.739 tok/s; K mean 1.00
+  theta 0.3: 1.838 tokens/step, 666 ms/step -> 2.761 tok/s; K mean 0.96
+  theta 0.4: 1.827 tokens/step, 657 ms/step -> 2.780 tok/s; K mean 0.92
+  theta 0.5: 1.812 tokens/step, 646 ms/step -> 2.805 tok/s; K mean 0.87
+  theta 0.6: 1.764 tokens/step, 625 ms/step -> 2.821 tok/s; K mean 0.79
+  theta 0.7: 1.694 tokens/step, 607 ms/step -> 2.789 tok/s; K mean 0.71
+  theta 0.8: 1.635 tokens/step, 590 ms/step -> 2.769 tok/s; K mean 0.63
+  theta 0.9: 1.561 tokens/step, 573 ms/step -> 2.723 tok/s; K mean 0.56
+
+2 blocks, drafts verified while their probabilities multiply to >= theta:
+  theta 0.0: 2.483 tokens/step, 914 ms/step -> 2.717 tok/s; K mean 2.00
+  theta 0.3: 2.435 tokens/step, 862 ms/step -> 2.826 tok/s; K mean 1.76
+  theta 0.4: 2.391 tokens/step, 827 ms/step -> 2.893 tok/s; K mean 1.61
+  theta 0.5: 2.325 tokens/step, 796 ms/step -> 2.921 tok/s; K mean 1.47
+  theta 0.6: 2.232 tokens/step, 758 ms/step -> 2.943 tok/s; K mean 1.30
+  theta 0.7: 2.103 tokens/step, 724 ms/step -> 2.904 tok/s; K mean 1.15
+  theta 0.8: 1.978 tokens/step, 689 ms/step -> 2.869 tok/s; K mean 1.00
+  theta 0.9: 1.812 tokens/step, 651 ms/step -> 2.785 tok/s; K mean 0.82
+
+3 blocks, drafts verified while their probabilities multiply to >= theta:
+  theta 0.0: 2.930 tokens/step, 1159 ms/step -> 2.528 tok/s; K mean 3.00
+  theta 0.3: 2.815 tokens/step, 1009 ms/step -> 2.791 tok/s; K mean 2.33
+  theta 0.4: 2.734 tokens/step, 949 ms/step -> 2.882 tok/s; K mean 2.06
+  theta 0.5: 2.620 tokens/step, 902 ms/step -> 2.906 tok/s; K mean 1.85
+  theta 0.6: 2.480 tokens/step, 849 ms/step -> 2.921 tok/s; K mean 1.62
+  theta 0.7: 2.321 tokens/step, 803 ms/step -> 2.889 tok/s; K mean 1.41
+  theta 0.8: 2.159 tokens/step, 755 ms/step -> 2.859 tok/s; K mean 1.20
+  theta 0.9: 1.948 tokens/step, 705 ms/step -> 2.765 tok/s; K mean 0.97

@@ -1,0 +1,162 @@
+[
+ {
+  "i": 0,
+  "tokens": 64,
+  "seconds": 39.53465290000895,
+  "ttft": 9.915589500044007,
+  "decode_tok_s": 2.1270085130401037,
+  "hit": 78.1,
+  "prof": [
+   "39.430",
+   "22",
+   "64",
+   "8.506",
+   "0.000",
+   "21.832",
+   "4.294",
+   "0.000",
+   "27"
+  ],
+  "text": "TCP (Transmission Control Protocol) is a **connection-oriented** protocol that prioritizes reliability; it establishes a connection before sending data, ensures packets arrive in the correct order, and automatically retransmits lost data. In contrast, UDP (User Datagram Protocol) is **connectionless** and prioritizes speed; it sends data"
+ },
+ {
+  "i": 1,
+  "tokens": 64,
+  "seconds": 31.12919999996666,
+  "ttft": 8.053242599999066,
+  "decode_tok_s": 2.7301142443645037,
+  "hit": 80.1,
+  "prof": [
+   "30.983",
+   "32",
+   "64",
+   "4.681",
+   "0.000",
+   "18.602",
+   "3.816",
+   "0.000",
+   "25"
+  ],
+  "text": "Конечно! Вот краткая инструкция, как заварить идеальный зелёный чай.\n\n### **Как заварить зелёный чай: 5 простых шагов**\n\nГлавное правило: **не используйте кипяток!** Зелёный"
+ },
+ {
+  "i": 2,
+  "tokens": 64,
+  "seconds": 29.677963400026783,
+  "ttft": 6.609006299986504,
+  "decode_tok_s": 2.730942700478211,
+  "hit": 81.1,
+  "prof": [
+   "29.542",
+   "22",
+   "64",
+   "4.887",
+   "0.000",
+   "17.494",
+   "3.482",
+   "0.000",
+   "24"
+  ],
+  "text": "The capital of Australia is **Canberra**.\n\nIt was chosen as a compromise to resolve a long-standing rivalry between the country's two largest cities, **Sydney** and **Melbourne**.\n\nHere is the history behind the decision:\n\n**1. The Rivalry**\nWhen the six British colonies federated to"
+ },
+ {
+  "i": 3,
+  "tokens": 19,
+  "seconds": 16.046336800034624,
+  "ttft": 5.313512700027786,
+  "decode_tok_s": 1.677098201953066,
+  "hit": 76.5,
+  "prof": [
+   "15.898",
+   "17",
+   "19",
+   "2.913",
+   "0.000",
+   "9.480",
+   "1.821",
+   "0.000",
+   "12"
+  ],
+  "text": "Crimson leaves descend\nSoft grey rain begins to fall\nThe earth drinks it all."
+ },
+ {
+  "i": 4,
+  "tokens": 64,
+  "seconds": 31.871739999973215,
+  "ttft": 6.156394299992826,
+  "decode_tok_s": 2.4498990110814667,
+  "hit": 84.2,
+  "prof": [
+   "31.735",
+   "22",
+   "64",
+   "4.299",
+   "0.000",
+   "19.356",
+   "4.032",
+   "0.000",
+   "28"
+  ],
+  "text": "In the city of Verona, the children of two feuding families, Romeo Montague and Juliet Capulet, fall in love at a ball and secretly marry with the help of a friar. Their newfound happiness is shattered when Romeo kills Juliet's cousin in a duel and is banished, leading the Capulets"
+ },
+ {
+  "i": 5,
+  "tokens": 64,
+  "seconds": 31.763166300021112,
+  "ttft": 7.063844699994661,
+  "decode_tok_s": 2.5506773432972563,
+  "hit": 79.6,
+  "prof": [
+   "31.615",
+   "23",
+   "64",
+   "5.018",
+   "0.000",
+   "18.996",
+   "3.696",
+   "0.000",
+   "25"
+  ],
+  "text": "```python\nnumbers = [1, 2, 3, 4, 5, 6]\n\nsquared_evens = [n ** 2 for n in numbers if n % 2 == 0]\n\nprint(squared_evens)  # Output: [4, 16, "
+ },
+ {
+  "i": 6,
+  "tokens": 64,
+  "seconds": 30.96888519998174,
+  "ttft": 7.054095399973448,
+  "decode_tok_s": 2.634353073008325,
+  "hit": 82.1,
+  "prof": [
+   "30.839",
+   "27",
+   "64",
+   "4.143",
+   "0.000",
+   "18.748",
+   "3.973",
+   "0.000",
+   "27"
+  ],
+  "text": "Небо голубое из-за **рэлеевского рассеяния**.\n\nСолнечный свет состоит из всех цветов радуги. Молекулы воздуха рассеивают короткие волны (синий и фиолетовый) гораздо"
+ },
+ {
+  "i": 7,
+  "tokens": 64,
+  "seconds": 28.920116599998437,
+  "ttft": 5.2861526000197046,
+  "decode_tok_s": 2.665655240909087,
+  "hit": 85.1,
+  "prof": [
+   "28.782",
+   "16",
+   "64",
+   "3.802",
+   "0.000",
+   "17.457",
+   "3.719",
+   "0.000",
+   "27"
+  ],
+  "text": "Of course! Here are four key benefits of regular exercise:\n\n1.  **Improved Physical Health:** Exercise strengthens your heart and lungs, helps manage weight, and reduces the risk of chronic diseases like heart disease, type 2 diabetes, and certain cancers. It also improves muscle strength, bone density, and flexibility.\n\n2"
+ }
+]
