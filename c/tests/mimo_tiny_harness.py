@@ -12,7 +12,8 @@ What is checked, all token-exact (argmax, no tolerances):
   - teacher forcing at every position via the MIMO_LOGITS dump
   - the same tokens from every exact configuration: native FP8/BF16 dense
     weights, an expert cache that evicts at every layer, prefill in blocks of 3
-    and of 1 (the sliding-window ring across blocks), buffered expert reads
+    and of 1 (the sliding-window ring across blocks), buffered expert reads, a
+    slow disk whose stale prefetches leave the queue unread
   - determinism (two identical runs, identical tokens)
   - block invariance, BIT for bit: the logits of every position are the same
     bytes whatever the prefill blocks (64, 3, 1) and the expert cache (one that
@@ -106,6 +107,31 @@ def check_exact_variants(binary, fixture, reference):
                                      f"engine {got} vs reference "
                                      f"{case['greedy_new_ids']}")
         print(f"ok {label}: identical in {len(reference['cases'])} cases")
+
+
+def check_prefetch_cancel(binary, fixture, reference):
+    """A slow disk (MIMO_IO_DELAY_US, one reader): the prefetches a step did not ask for
+    are still queued when its routing comes, so they leave the queue unread, and the
+    layers that wait get the pool's cache bonus. Neither may change a token, and the
+    cancelling must have happened (the streaming line counts it)."""
+    env = dict(reference["engine_env"], MIMO_CAP="4", MIMO_IO_THREADS="1",
+               MIMO_IO_DELAY_US="1000")
+    cancelled = 0
+    for name, case in reference["cases"].items():
+        logs = []
+        got = run_engine(binary, fixture, case["prompt_ids"],
+                         case["max_new_tokens"], env, stderr=logs)
+        if got != case["greedy_new_ids"]:
+            raise AssertionError(f"slow reads: greedy mismatch in case '{name}': "
+                                 f"engine {got} vs reference {case['greedy_new_ids']}")
+        line = re.search(r"(\d+) of them cancelled unread", logs[0])
+        if not line:
+            raise AssertionError("no cancelled count in the streaming line")
+        cancelled += int(line.group(1))
+    if not cancelled:
+        raise AssertionError("slow reads: no prefetch was cancelled, the check proves nothing")
+    print(f"ok slow reads: identical in {len(reference['cases'])} cases, "
+          f"{cancelled} prefetches cancelled unread")
 
 
 def check_determinism(binary, fixture, reference):
@@ -385,6 +411,7 @@ def main():
 
     check_greedy(args.binary, fixture, reference)
     check_exact_variants(args.binary, fixture, reference)
+    check_prefetch_cancel(args.binary, fixture, reference)
     check_determinism(args.binary, fixture, reference)
     check_block_invariance(args.binary, fixture, reference)
     check_teacher_forcing(args.binary, fixture, reference, config["vocab_size"])

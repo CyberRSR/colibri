@@ -287,6 +287,25 @@ so the time they take overlaps the computation instead of adding to it:
   computation). Predicting only after the MLP (`MIMO_PREFETCH_ATTN=0
   MIMO_PREFETCH_MLP=8`) is more accurate (82%) and slower still: the reads start too
   late. What counts is the time a read gets, not the last points of accuracy.
+- **drop what the step did not ask for.** A prediction's reads are queued likeliest
+  first (a row's choice weighs top-k + 2 minus its rank, so one row keeps its rank
+  order and a row's first choice comes before another row's last). When the layer's own
+  routing comes, the predicted experts it did not choose whose read has not started
+  leave the queue (`MIMO_PREFETCH_CANCEL`); left there they were read before the next
+  layer's prefetches. On the RTX 4090 profile the disk is behind in the first half of
+  the layers: about 1,000 of a benchmark request's 2,900 unused prefetches were still
+  queued when their layer's routing came, and with the cancel about 650 a request (13 GB
+  of 296) are never read.
+- **keep the experts of the layers that wait.** The pooled cache evicts the least
+  recently used buffer of any layer, but a miss does not cost the same everywhere: on
+  Pro's RTX 4090 profile layers 1-32 read 8-13 experts a decode step (their routing
+  repeats less) behind a 1 ms GPU attention, and carry most of the stall with the `C:`
+  drive 96-97% busy, while layers 33-69 read about 4 and every second one computes its
+  o_proj on the CPU: the drives idle there. Each MoE layer keeps a running average of
+  how long its decode steps wait on the disk, and its buffers look `MIMO_CACHE_BONUS`
+  (4) steps younger times its share of that stall over the average layer's (at most
+  three times): the waiting layers keep their experts longer, and the reads move to the
+  layers where the drives have time.
 
 `MIMO_ROUTE_TRACE` records every step's routing and the router's ranking at both
 prediction points; `tools/mimo_route_sim.py` replays it through cache policies and
@@ -411,12 +430,15 @@ photo equal to the same prompt computed cold) are the CPU's, and hold with
 | `MIMO_PREFETCH_EXTRA` | 0 | Experts predicted beyond each point's size for each row. |
 | `MIMO_PREFETCH_ROWS` | 4 | The largest step a prediction is made for (a decode step, the conversations of a multiplexed one). |
 | `MIMO_PREFETCH_LIMIT` | 64 | Prefetches waiting in the queues at once. |
+| `MIMO_PREFETCH_CANCEL` | 1 | 1: a prefetch its layer's step did not ask for whose read has not started leaves the queue. 0: it is read anyway (its buffer is then the first to be reused). |
+| `MIMO_IO_DELAY_US` | 0 | Tests: every expert read waits this long first, so the queues fill as on a slow disk. |
 | `MIMO_IO_PIECE_MB` | unset | Cut each expert read into pieces of this size (a demand then waits behind a piece, and an expert arrives through several readers). Unset: one read per expert; 4 MB pieces with two readers a drive doubled the stalls on the measured NVMe drives. |
 | `MIMO_BF16_PACK` | 1 | The o_proj and the head the CPU computes (all of them without CUDA, the ones the GPU does not hold with it) are packed without loss at start-up: each weight's sign/mantissa byte and a 4-bit code for its exponent within its row's window of 15 (the rare others listed per row), 12 bits instead of 16, as `MIMO_CUDA_BF16_PACK` packs them for the GPU. The kernel rebuilds every bf16 and sums in the bf16 kernel's order, so the logits are the same bytes (the 70-layer CPU logits of the streaming experiments, SHA-256 `cebbf3a8...`, with all 71 matrices packed: 11.98 GB instead of 15.97), from a quarter fewer bytes of RAM a token. 0: plain bf16. Not with `MIMO_DENSE_BITS` 8 or 32, nor with a Vulkan device. |
 | `MIMO_MTP` | 2 (0 in a `VK=1` build) | Decode steps draft a token with each of the checkpoint's first N MTP layers (up to 3) and keep the drafts the trunk chooses: up to N + 1 tokens a step, the same greedy tokens and the same sampling distribution (see [speculative decoding](#speculative-decoding-mtp)). 0: one token a step. |
 | `MIMO_MTP_MIN_P` | 0.6 | A step verifies its drafts while the probabilities the MTP layers give them multiply to at least this (a draft's row costs its experts whether it stands or not); 0 verifies every draft. |
 | `MIMO_MTP_TRACE` | unset | Append a line per decode step to this file: the position, the drafts made, verified and kept, and each draft's probability. |
 | `MIMO_CACHE_GLOBAL` | 1 (0 in a `VK=1` build) | The MoE layers' expert caches are one pool of cap x layers buffers. In a decode step a layer that misses takes the least recently used buffer of any layer and may grow to twice cap, so the layers whose routing spreads wider hold more (on Pro about 10% fewer reads on demand); a prompt block reuses the layer's own least recently used buffer once the layer holds cap of them. On the RTX 4090 profile: the benchmark 1.928 to 1.982 tok/s (decode 2.218 to 2.312), eight different prompts 1.771 to 1.797, and a new prompt's first token about 0.3 s later (6.55 to 6.89 s on average: its experts find fewer buffers in the layers that gave theirs away). 0: a fixed cap per layer, least recently used within it. |
+| `MIMO_CACHE_BONUS` | 4 | With the pool (`MIMO_CACHE_GLOBAL`): a layer's buffers look used this many steps later to the least-recently-used choice, times the layer's share of the decode steps' disk stall over the average MoE layer's (a running average, at most three times). 0: plain LRU. See [Expert streaming](#expert-streaming). |
 | `MIMO_CACHE_DECAY` | 0 | 0: the expert cache reuses its least recently used slot. 0 < d < 1: the slot whose expert has the lowest use count, decayed by d at each of the layer's steps. 0.97 read 17% less on a benchmark that repeats one prompt (it keeps what the last identical request used) and was no faster on eight different prompts, so LRU stays the default. |
 | `MIMO_LARGE_PAGES` | 0 | Windows: 1 keeps each layer's expert cache in 2 MiB locked pages (needs the "Lock pages in memory" right); ordinary pages when they cannot be had. |
 | `MIMO_ROUTE_TRACE` | unset | Write every MoE step's routing, and the router's ranking at the prefetcher's two points, to this file for `tools/mimo_route_sim.py`. |

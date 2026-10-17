@@ -954,8 +954,9 @@ typedef struct { Slot *s; int n, cap, max, nbuf; int *by_expert; uint8_t *arena;
  * per-layer choice): the MoE layers share one pool of cap x layers buffers. A layer
  * that needs a slot in a decode step when the pool is full takes the least recently
  * used buffer of any layer (not pinned, not loading, not read ahead and still
- * waiting), and may hold up to twice cap, so the layers whose routing spreads wider
- * hold more: on Pro a decode step reads about 10% fewer experts on demand. A prompt
+ * waiting; the layers whose steps wait longer on the disk look more recent,
+ * MIMO_CACHE_BONUS), and may hold up to twice cap, so the layers whose routing spreads
+ * wider hold more: on Pro a decode step reads about 10% fewer experts on demand. A prompt
  * block's step reuses the layer's own least recently used buffer once the layer
  * holds cap of them: a new prompt's many experts would otherwise push out what the
  * next layers hold. 0: each layer its own cap, least recently used within it. */
@@ -1016,11 +1017,18 @@ typedef struct {
     int pf_on, pf_rows, pf_extra, pf_limit;
     int bulk;          /* the MoE step being computed has more rows than pf_rows (a prompt block) */
     int pf_ka, pf_kb;            /* experts predicted per row after the attention, after the MLP */
+    int pf_cancel;               /* MIMO_PREFETCH_CANCEL: a stale prefetch still queued leaves the queue */
     uint64_t waves, wave_experts;   /* moe_wave calls and the experts they computed */
     const float *pf_h; int pf_n, pf_li;
     uint8_t *pf_mark;            /* [layer][expert] predicted for the layer's next step */
     uint8_t *pf_made;            /* [layer] a prediction stands */
-    uint64_t pf_issued, pf_used, pf_wasted, pf_pred, pf_pred_hit;
+    uint64_t pf_issued, pf_used, pf_wasted, pf_pred, pf_pred_hit, pf_cancelled;
+    /* MIMO_CACHE_BONUS: each MoE layer's decode-step stall (a running average), and the
+     * clock ticks its slots look younger to the pool's least-recently-used choice */
+    float cache_bonus;
+    double lstall[MIMO_MAX_LAYERS], lstall_sum;
+    uint64_t lbonus[MIMO_MAX_LAYERS];
+    int n_moe;
     double t_pred, t_qkv, t_oproj;   /* t_attn's matmuls: qkv, and o_proj */
     /* MIMO_CACHE_DECAY > 0: a slot to reuse is the one whose expert has the lowest
      * decayed use count (each of its layer's steps multiplies it by the decay), the
@@ -1201,6 +1209,7 @@ static int io_fd(Model *m, int *own, int fi, int direct) {
  * whose aligned range runs past its shard's end is read buffered. An expert not
  * stored in one run (six tensors apart) is one piece. */
 static int64_t g_io_piece = (int64_t)1 << 40;
+static int g_io_delay_us;          /* MIMO_IO_DELAY_US (tests): each read waits this long first */
 typedef struct { int64_t start, len, pad; int direct, whole; } ExpertSpan;
 static int expert_span(const Model *m, int li, int eid, ExpertSpan *sp) {
     const ERef *er = &m->eref[(int64_t)li * m->c.n_experts + eid];
@@ -1271,8 +1280,12 @@ static void *io_main(void *arg) {
         if (g_io.quit) break;
         int p = g_io.head[d][0] != g_io.tail[d][0] ? 0 : 1;
         IoJob j = g_io.q[d][p][g_io.head[d][p]++ % MIMO_IOQ];
-        if (!j.s) continue;                 /* a prefetch a demand moved to the front */
+        if (!j.s) continue;                 /* a prefetch a demand moved to the front, or cancelled */
         pthread_mutex_unlock(&g_io.mx);
+        if (g_io_delay_us) {                /* tests: a slow disk, so the queues fill */
+            struct timespec ts = { g_io_delay_us / 1000000, (long)(g_io_delay_us % 1000000) * 1000 };
+            nanosleep(&ts, NULL);
+        }
         expert_read(m, j.li, j.eid, j.s, own, j.part);
         pthread_mutex_lock(&g_io.mx);
         if (atomic_fetch_sub_explicit(&j.s->pending, 1, memory_order_acq_rel) == 1) {
@@ -1314,6 +1327,8 @@ static void io_start(Model *m) {
     int per = env_int("MIMO_IO_PER_DRIVE", 2), total = env_int("MIMO_IO_THREADS", -1);
     const char *pm = getenv("MIMO_IO_PIECE_MB");
     if (pm && *pm && atof(pm) > 0) g_io_piece = ((int64_t)(atof(pm) * 1048576.0) + 4095) & ~4095LL;
+    g_io_delay_us = env_int("MIMO_IO_DELAY_US", 0);
+    if (g_io_delay_us < 0) g_io_delay_us = 0;
     long long dev[MIMO_IO_DRIVES];
     g_io.ndrive = 0;
     for (int i = 0; i < m->S.nfd && i < ST_MAX_SHARDS; i++) {
@@ -1394,6 +1409,30 @@ static void io_promote(Slot *s) {
     s->qn = 0;
     if (moved) pthread_cond_broadcast(&g_io.job);
     pthread_mutex_unlock(&g_io.mx);
+}
+
+/* A prefetch its layer's step did not ask for, whose read no reader has taken yet: its
+ * jobs leave the queue and its slot is free again. Left in the queue, it would be read
+ * before the next layer's prefetches and the step's later demands. 0 when a reader holds a
+ * piece of it already (the read finishes, and the slot is the first to be reused). */
+static int io_cancel(Model *m, LCache *lc, Slot *s) {
+    if (!g_io.nth || !s->qn) return 0;
+    pthread_mutex_lock(&g_io.mx);
+    int d = s->qdrive, queued = 1;
+    for (int k = 0; k < s->qn && queued; k++) {
+        unsigned pos = s->qpos + (unsigned)k;
+        queued = pos - g_io.head[d][1] < g_io.tail[d][1] - g_io.head[d][1] && g_io.q[d][1][pos % MIMO_IOQ].s == s;
+    }
+    if (queued)
+        for (int k = 0; k < s->qn; k++) g_io.q[d][1][(s->qpos + (unsigned)k) % MIMO_IOQ].s = NULL;
+    pthread_mutex_unlock(&g_io.mx);
+    if (!queued) return 0;
+    s->qn = 0;
+    atomic_store_explicit(&s->state, SLOT_EMPTY, memory_order_release);
+    lc->by_expert[s->eid] = -1;
+    s->eid = -1;
+    m->bytes_read -= (uint64_t)m->e_bytes;
+    return 1;
 }
 
 static unsigned long long io_seen(void) {
@@ -1525,7 +1564,8 @@ static int slot_entry_global(Model *m, int li) {
             Slot *x = &c2->s[k];
             if (!x->base || x->eid < 0 || x->pin || x->pref ||
                 atomic_load_explicit(&x->state, memory_order_acquire) == SLOT_LOADING) continue;
-            if (x->used < oldest) { oldest = x->used; v = x; vl = l2; vk = k; }
+            uint64_t age = x->used ? x->used + m->lbonus[l2] : 0;   /* a spent prefetch goes first */
+            if (age < oldest) { oldest = age; v = x; vl = l2; vk = k; }
         }
     }
     if (!v) return -1;
@@ -1585,8 +1625,9 @@ static Slot *slot_take(Model *m, int li, int e, int prefetch) {
 
 /* The step's experts uni[0..nu) of layer li: those the cache holds (resident or on
  * their way) are pinned, the prefetcher's leftovers of this layer become the first to
- * go, and the others take free slots while there are any, their reads submitted.
- * sl[j] stays NULL for an expert that found no slot yet. Returns the step's stamp. */
+ * go -- those whose read has not started leave the queue (io_cancel) -- and the others
+ * take free slots while there are any, their reads submitted. sl[j] stays NULL for an
+ * expert that found no slot yet. Returns the step's stamp. */
 static uint64_t slots_demand(Model *m, int li, const int *uni, int nu, Slot **sl) {
     LCache *lc = &m->cache[li];
     uint64_t stamp = ++m->clock;
@@ -1600,8 +1641,13 @@ static uint64_t slots_demand(Model *m, int li, const int *uni, int nu, Slot **sl
         if (s->pref) { s->pref = 0; m->pf_used++; }
         if (atomic_load_explicit(&s->state, memory_order_acquire) == SLOT_LOADING) io_promote(s);
     }
-    for (int k = 0; k < lc->n; k++)
-        if (lc->s[k].pref) { lc->s[k].pref = 0; lc->s[k].used = 0; m->pf_wasted++; }
+    for (int k = 0; k < lc->n; k++) {
+        Slot *s = &lc->s[k];
+        if (!s->pref) continue;
+        s->pref = 0; s->used = 0; m->pf_wasted++;
+        if (m->pf_cancel && atomic_load_explicit(&s->state, memory_order_acquire) == SLOT_LOADING &&
+            io_cancel(m, lc, s)) m->pf_cancelled++;
+    }
     for (int j = 0; j < nu; j++) {
         if (sl[j]) continue;
         Slot *s = slot_take(m, li, uni[j], 0);
@@ -1811,7 +1857,18 @@ static void model_load(Model *m, const char *dir, int cap) {
     m->pf_rows = env_int("MIMO_PREFETCH_ROWS", 4);
     m->pf_extra = env_int("MIMO_PREFETCH_EXTRA", 0);
     m->pf_limit = env_int("MIMO_PREFETCH_LIMIT", 64);
+    m->pf_cancel = env_int("MIMO_PREFETCH_CANCEL", 1) != 0;
     if (m->pf_extra < 0) m->pf_extra = 0;
+    /* MIMO_CACHE_BONUS (steps, default 4; 0: plain LRU): the pool's least recently used choice
+     * sees a layer's slots as used that many steps later times the layer's share of the
+     * decode steps' disk stall over the average MoE layer's (at most three times as many). On
+     * Pro's RTX 4090 profile the first half of the layers -- more experts to read a step,
+     * shorter attentions -- carry most of the stall while the drives idle in the second: their
+     * experts staying longer moves reads to where the drives have time. */
+    const char *cb = getenv("MIMO_CACHE_BONUS");
+    m->cache_bonus = cb && *cb ? (float)atof(cb) : 4.0f;
+    if (!(m->cache_bonus > 0)) m->cache_bonus = 0;
+    for (int li = 0; li < c->n_layers; li++) m->n_moe += c->moe[li] != 0;
     const char *dv = getenv("MIMO_CACHE_DECAY");
     m->decay = dv && *dv ? (float)atof(dv) : 0.0f;
     if (g_cache_global) fprintf(stderr, "[mimo] expert cache: one pool of %d slots for every layer (MIMO_CACHE_GLOBAL)\n", g_slots_total);
@@ -2364,6 +2421,14 @@ static int moe_cpu(Model *m, int li, const float *xn, int n, const int *sel,
         }
     }
     m->t_expert += now_s() - t0 - (m->t_disk - waited);
+    if (m->cache_bonus > 0 && !m->bulk && g_cache_global) {   /* the layer's share of the stall: MIMO_CACHE_BONUS */
+        double old = m->lstall[li];
+        m->lstall[li] += (m->t_disk - waited - old) / 16.0;
+        m->lstall_sum += m->lstall[li] - old;
+        double share = m->lstall_sum > 1e-9 ? m->lstall[li] * m->n_moe / m->lstall_sum : 0.0;
+        if (share > 3.0) share = 3.0;
+        m->lbonus[li] = (uint64_t)(m->cache_bonus * m->n_moe * share);
+    }
     free(done); free(wave); free(sl);
     free(first); free(xg); free(g); free(row); free(uni);
     return total;
@@ -2403,10 +2468,12 @@ static void mimo_prefetch(Model *m, int li, const float *h, int n, int k) {
             if (best < 0) break;
             v[best] = -INFINITY;
             if (!mark[best]) { mark[best] = 1; order[no++] = best; }
-            votes[best]++;
+            votes[best] += K + 2 - j;
         }
     }
-    /* the experts most rows chose first (a block of rows; one row keeps its rank order) */
+    /* the likeliest first: a row's choice weighs K + 2 - its rank, so a row's first choice
+     * comes before another row's last and one row keeps its rank order. What a step does not
+     * ask for is then mostly at the queue's end, where its demand cancels it unread */
     for (int a = 1; a < no; a++) {
         int e = order[a], b = a;
         while (b > 0 && votes[order[b - 1]] < votes[e]) { order[b] = order[b - 1]; b--; }
@@ -3627,7 +3694,7 @@ typedef struct {
     double started, disk0, expert0, attn0, pred0, qkv0, oproj0;
     double prefilled, pdisk, pexpert, pattn;   /* the counters when the prompt was in */
     uint64_t pmiss, ppfi, waves0, wexp0;
-    uint64_t hits0, miss0, fw0, pfi0, pfu0, pfw0, pp0, pph0, br0;
+    uint64_t hits0, miss0, fw0, pfi0, pfu0, pfw0, pp0, pph0, br0, pfc0;
     uint64_t mtps0, mtpd0[MIMO_MTP_MAX], mtpk0[MIMO_MTP_MAX];   /* MTP steps, each block's drafts tried and kept */
     double mtpt0;                                                /* and the drafting time */
     int n_prompt, budget, reuse;
@@ -3638,12 +3705,13 @@ typedef struct {
  * often a step's experts were the ones predicted for it. */
 static void mimo_stream_report(const Model *m, const MimoReq *rq) {
     uint64_t pi = m->pf_issued - rq->pfi0, pu = m->pf_used - rq->pfu0, pw = m->pf_wasted - rq->pfw0,
-             pp = m->pf_pred - rq->pp0, ph = m->pf_pred_hit - rq->pph0;
-    fprintf(stderr, "[mimo] streaming: %llu demand reads, %llu prefetched (%llu used, %llu unused), "
+             pp = m->pf_pred - rq->pp0, ph = m->pf_pred_hit - rq->pph0, pc = m->pf_cancelled - rq->pfc0;
+    fprintf(stderr, "[mimo] streaming: %llu demand reads, %llu prefetched (%llu used, %llu unused, %llu of them "
+                    "cancelled unread), "
                     "predicted %.1f%% of %llu choices, %.2f GB read, %.2fs stalled, %.2fs predicting; "
                     "attention matmuls: qkv %.2fs, o_proj %.2fs; %.2f experts a wave\n",
             (unsigned long long)(m->miss - rq->miss0), (unsigned long long)pi, (unsigned long long)pu,
-            (unsigned long long)pw, pp ? 100.0 * ph / pp : 0.0, (unsigned long long)pp,
+            (unsigned long long)pw, (unsigned long long)pc, pp ? 100.0 * ph / pp : 0.0, (unsigned long long)pp,
             (m->bytes_read - rq->br0) / 1e9, m->t_disk - rq->disk0, m->t_pred - rq->pred0,
             m->t_qkv - rq->qkv0, m->t_oproj - rq->oproj0,
             m->waves > rq->waves0 ? (double)(m->wave_experts - rq->wexp0) / (double)(m->waves - rq->waves0) : 0.0);
@@ -3688,6 +3756,7 @@ static int mimo_serve_start(Model *m, Tok *tokenizer, ColiServeCommand *cmd, int
     double disk0 = m->t_disk, expert0 = m->t_expert, attn0 = m->t_attn;
     uint64_t hits0 = m->hits, miss0 = m->miss, fw0 = m->forwards;
     rq->pred0 = m->t_pred; rq->pfi0 = m->pf_issued; rq->pfu0 = m->pf_used; rq->pfw0 = m->pf_wasted;
+    rq->pfc0 = m->pf_cancelled;
     rq->pp0 = m->pf_pred; rq->pph0 = m->pf_pred_hit; rq->br0 = m->bytes_read;
     rq->qkv0 = m->t_qkv; rq->oproj0 = m->t_oproj; rq->waves0 = m->waves; rq->wexp0 = m->wave_experts;
     rq->mtps0 = g_mtp.steps; rq->mtpt0 = g_mtp.t;
