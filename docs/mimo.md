@@ -341,6 +341,12 @@ a few rows (the o_proj the GPU does not hold, the MTP layers') decode each group
 weights once for all of its rows. The draft's probability (a softmax over the
 vocabulary, 152576 `expf`) and the dense MLP's silu run over the workers; the softmax
 sums fixed chunks in a fixed order, so its bits do not depend on the thread count.
+A draw at temperature > 0 (a verified row's, and the token after a step whose drafts
+all stood) spreads its `expf` the same way, adds the total in order still, and sorts
+only the entries that could be in top_p's nucleus -- those of at least (total - cut) /
+vocabulary -- and the whole vocabulary only when the draw lands among entries of equal
+probability, whose order the sort decides: the draws of sorting it every time
+(`tests/test_mimo_sample_draft.py`), about 0.7 ms instead of 17.
 
 On the RTX 4090 profile, one series ([the experiment](experiments/mimo-mtp2-4090-2026-10-17/README.md)):
 the benchmark 2.414 tok/s against 2.258 with one draft a step (decode 2.93 against

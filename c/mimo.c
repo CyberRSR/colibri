@@ -3227,25 +3227,99 @@ static int sample_desc(const void *a, const void *b) {
     return (pb > pa) - (pa > pb);
 }
 
-static int sample(const float *logits, int vocab, float temperature, float top_p) {
-    if (temperature <= 0.0f) return argmax(logits, vocab);
-    SampleProb *rank = xmalloc((size_t)vocab * sizeof(SampleProb), "sampling");
+/* What sample() and sample_draft() draw from: every entry's p = exp((logit - max) /
+ * temperature), the entries sorted by p, the most likely first, as qsort sorts the whole
+ * vocabulary, and top_p's nucleus, the fewest first entries whose p reach top_p of the
+ * total; a draw walks the nucleus in that order.
+ *
+ * Over 152576 entries that took ~17 ms a draw, several draws a step: the expf one after
+ * another ~4.6 ms, the sort ~11.5. The expf now run over the workers, each entry's the
+ * same expf (the total still added in order, so the cut keeps its bits), and only the
+ * entries whose p could be in the nucleus are sorted: those of at least (total - cut) /
+ * vocab, since all the others together come short of total - cut (a dozen or so on
+ * MiMo's rows; ~0.65 ms a draw). They come out in the whole sort's order but among
+ * entries of equal p, which qsort leaves wherever its partitions put them. The sums a
+ * walk adds do not see that order (equal terms), only which entry a draw lands on does:
+ * when that entry's p is another's too (sample_tie), or the draft's p is the nucleus'
+ * last and entries outside share it, the whole vocabulary is sorted as before
+ * (sample_sort over all of it) and the draw reads the same place there. So the same
+ * tokens as before for the same seed. */
+typedef struct {
+    float *p;           /* each entry's p, by id */
+    SampleProb *r;      /* r[0..m): sorted, the whole vocabulary when `all` */
+    int m, n, all;      /* the nucleus: r[0..n) */
+    double cut, nucleus;
+} SampleRank;
+
+/* r: the entries of p at least `least` (NaN or 0: all of them) sorted, and the nucleus */
+static void sample_sort(SampleRank *k, int vocab, double least) {
+    int m = 0;
+    for (int i = 0; i < vocab; i++)
+        if (!(k->p[i] < least)) { k->r[m].p = k->p[i]; k->r[m].id = i; m++; }
+    qsort(k->r, (size_t)m, sizeof(SampleProb), sample_desc);
+    k->m = m; k->all = m == vocab;
+    k->n = 0; k->nucleus = 0.0;
+    while (k->n < m && k->nucleus < k->cut) k->nucleus += k->r[k->n++].p;
+}
+
+static void sample_rank(SampleRank *k, const float *logits, int vocab, float temperature, float top_p) {
+    static float *p; static SampleProb *r; static int cap;   /* one draw at a time, the serve loop's */
+    if (vocab > cap) {
+        free(p); free(r);
+        p = xmalloc((size_t)vocab * sizeof(float), "sampling");
+        r = xmalloc((size_t)vocab * sizeof(SampleProb), "sampling");
+        cap = vocab;
+    }
+    k->p = p; k->r = r;
     float top = logits[0];
     for (int i = 1; i < vocab; i++) if (logits[i] > top) top = logits[i];
-    double total = 0.0;
-    for (int i = 0; i < vocab; i++) {
-        float p = expf((logits[i] - top) / temperature);
-        total += p; rank[i].p = p; rank[i].id = i;
+    enum { CH = 512 };
+    #pragma omp parallel for schedule(dynamic, 1)
+    for (int c = 0; c < (vocab + CH - 1) / CH; c++) {
+        int lo = c * CH, hi = lo + CH < vocab ? lo + CH : vocab;
+        for (int i = lo; i < hi; i++) p[i] = expf((logits[i] - top) / temperature);
     }
-    qsort(rank, (size_t)vocab, sizeof(SampleProb), sample_desc);
-    double cut = (top_p > 0.0f && top_p < 1.0f) ? top_p * total : total, kept = 0.0;
-    int n = 0;
-    while (n < vocab && kept < cut) kept += rank[n++].p;
-    double draw = ((double)rand() / RAND_MAX) * kept, acc = 0.0;
-    int pick = rank[0].id;
-    for (int i = 0; i < n; i++) { acc += rank[i].p; if (acc >= draw) { pick = rank[i].id; break; } }
-    free(rank);
-    return pick;
+    double total = 0.0;
+    for (int i = 0; i < vocab; i++) total += p[i];
+    k->cut = (top_p > 0.0f && top_p < 1.0f) ? top_p * total : total;
+    sample_sort(k, vocab, (total - k->cut) / vocab);
+    if (!k->all && !(k->nucleus >= k->cut)) sample_sort(k, vocab, 0.0);   /* short of the cut: rounding */
+}
+
+/* Whether the order of entries of equal p decides the entry at r[j]: another than r[j],
+ * and than the draft `skip` a walk passes over, has its p. */
+static int sample_tie(const SampleRank *k, int j, int skip) {
+    if (k->all) return 0;
+    float v = k->r[j].p;
+    int lo = j, hi = j;
+    while (lo > 0 && k->r[lo - 1].p == v) lo--;
+    while (hi + 1 < k->m && k->r[hi + 1].p == v) hi++;
+    return hi - lo - (skip >= 0 && k->p[skip] == v) > 0;
+}
+
+static int sample(const float *logits, int vocab, float temperature, float top_p) {
+    if (temperature <= 0.0f) return argmax(logits, vocab);
+    SampleRank k;
+    sample_rank(&k, logits, vocab, temperature, top_p);
+    double draw = ((double)rand() / RAND_MAX) * k.nucleus, acc = 0.0;
+    int j = 0;
+    for (int i = 0; i < k.n; i++) { acc += k.r[i].p; if (acc >= draw) { j = i; break; } }
+    if (sample_tie(&k, j, -1)) sample_sort(&k, vocab, 0.0);
+    return k.r[j].id;
+}
+
+/* The first of r[0..n), passing over d, where their p added up reach draw, else the
+ * last of them; -1 when the nucleus is d alone. */
+static int sample_walk(const SampleProb *r, int n, int d, double draw) {
+    double acc = 0.0;
+    int j = -1;
+    for (int i = 0; i < n; i++) {
+        if (r[i].id == d) continue;
+        j = i;
+        acc += r[i].p;
+        if (acc >= draw) break;
+    }
+    return j;
 }
 
 /* A draft d against the distribution sample() draws from (speculative sampling with a
@@ -3254,31 +3328,20 @@ static int sample(const float *logits, int vocab, float temperature, float top_p
  * has sample()'s distribution. Greedy: the argmax, kept when it is d. */
 static int sample_draft(const float *logits, int vocab, float temperature, float top_p, int d, int *kept) {
     if (temperature <= 0.0f) { int y = argmax(logits, vocab); *kept = y == d; return y; }
-    SampleProb *rank = xmalloc((size_t)vocab * sizeof(SampleProb), "sampling");
-    float top = logits[0];
-    for (int i = 1; i < vocab; i++) if (logits[i] > top) top = logits[i];
-    double total = 0.0;
-    for (int i = 0; i < vocab; i++) {
-        float p = expf((logits[i] - top) / temperature);
-        total += p; rank[i].p = p; rank[i].id = i;
-    }
-    qsort(rank, (size_t)vocab, sizeof(SampleProb), sample_desc);
-    double cut = (top_p > 0.0f && top_p < 1.0f) ? top_p * total : total, nucleus = 0.0, pd = 0.0;
-    int n = 0;
-    while (n < vocab && nucleus < cut) nucleus += rank[n++].p;
-    for (int i = 0; i < n; i++) if (rank[i].id == d) { pd = rank[i].p; break; }
+    SampleRank k;
+    sample_rank(&k, logits, vocab, temperature, top_p);
+    /* d at the nucleus' last p with others of it outside: the order says whether d is in */
+    if (!k.all && k.p[d] == k.r[k.n - 1].p && k.n < k.m && k.r[k.n].p == k.p[d]) sample_sort(&k, vocab, 0.0);
+    double pd = 0.0;
+    for (int i = 0; i < k.n; i++) if (k.r[i].id == d) { pd = k.r[i].p; break; }
     int pick = d;
-    *kept = ((double)rand() / RAND_MAX) * nucleus < pd;
+    *kept = ((double)rand() / RAND_MAX) * k.nucleus < pd;
     if (!*kept) {
-        double draw = ((double)rand() / RAND_MAX) * (nucleus - pd), acc = 0.0;
-        for (int i = 0; i < n; i++) {
-            if (rank[i].id == d) continue;
-            pick = rank[i].id;
-            acc += rank[i].p;
-            if (acc >= draw) break;
-        }
+        double draw = ((double)rand() / RAND_MAX) * (k.nucleus - pd);
+        int j = sample_walk(k.r, k.n, d, draw);
+        if (j >= 0 && sample_tie(&k, j, d)) { sample_sort(&k, vocab, 0.0); j = sample_walk(k.r, k.n, d, draw); }
+        if (j >= 0) pick = k.r[j].id;
     }
-    free(rank);
     return pick;
 }
 
