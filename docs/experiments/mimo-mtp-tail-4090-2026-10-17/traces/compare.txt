@@ -1,0 +1,20 @@
+# greedy: recorded g.trace against the after engine's (the check binary)
+recorded 273 steps, new 273 steps
+steps identical (P, N, kept, printed p): 273 of 273
+cut at 0.4: same verified count in 273 of 273 steps; closest product to 0.4: recorded 4.35e-03, new 4.35e-03
+cut at 0.6: same verified count in 273 of 273 steps; closest product to 0.6: recorded 1.40e-03, new 1.40e-03
+
+# sampled: recorded t07.trace against the after engine's
+recorded 296 steps, new 271 steps
+steps identical (P, N, kept, printed p): 1 of 271; first difference at step 1: (26, 3, None, 1, ['0.99997', '0.56460', '0.96946']) vs (26, 3, 3, 3, ['0.99997', '0.56460', '0.96946'])
+cut at 0.4: same verified count in 86 of 271 steps; closest product to 0.4: recorded 8.65e-04, new 3.40e-03
+cut at 0.6: same verified count in 59 of 271 steps; closest product to 0.6: recorded 1.35e-03, new 1.72e-04
+
+# sampled: recorded t07.trace against the before engine's (07d76d68)
+recorded 296 steps, new 271 steps
+steps identical (P, N, kept, printed p): 1 of 271; first difference at step 1: (26, 3, None, 1, ['0.99997', '0.56460', '0.96946']) vs (26, 3, 3, 3, ['0.99997', '0.56460', '0.96946'])
+cut at 0.4: same verified count in 86 of 271 steps; closest product to 0.4: recorded 8.65e-04, new 3.40e-03
+cut at 0.6: same verified count in 59 of 271 steps; closest product to 0.6: recorded 1.35e-03, new 1.72e-04
+
+# sampled: the before engine's against the after engine's
+byte-identical, 271 steps

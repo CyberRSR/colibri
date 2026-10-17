@@ -347,7 +347,10 @@ the benchmark 2.414 tok/s against 2.258 with one draft a step (decode 2.93 again
 2.70); eight different prompts 2.071 against 2.002 greedy, every reply the same bytes,
 and 1.977 against 1.888 sampled at temperature 0.7, top_p 0.9. Verifying both drafts
 every step: 2.384, 2.005 and 1.947. The first drafts wait for the first token, which
-comes no later.
+comes no later. Spreading the softmax and the silu over the workers
+([the next round](experiments/mimo-mtp-tail-4090-2026-10-17/README.md)) took the
+benchmark from 2.450 to 2.485 tok/s and the eight prompts greedy from 2.122 to 2.146 in
+one series.
 
 Not with `KV_SLOTS` > 1 (several conversations a step), a read-out (`logprobs`), a
 `VK=1` build (off by default there: its dense chain keeps the trunk's hidden states on

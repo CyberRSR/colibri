@@ -1,0 +1,223 @@
+{
+  "benchmark": {
+    "b-before-1": {
+      "engine_sha256": "068b322e6b4d50cf7a5266cd471702fbb0011a037789032e5a4c5b745ecc44f0",
+      "median_tok_s": 2.4467,
+      "median_decode_tok_s": 2.9706,
+      "tok_s": [
+        2.4467,
+        2.4496,
+        2.4406
+      ],
+      "decode_tok_s": [
+        2.9706,
+        2.9756,
+        2.962
+      ],
+      "replies_0305abcd": true,
+      "last_request": {
+        "generation_s": 21.27,
+        "stalled_s": 3.06,
+        "experts_s": 12.72,
+        "attention_s": 3.18,
+        "mtp_steps": 26,
+        "kept": "24 of 24, 12 of 13",
+        "drafting_s": 1.15
+      }
+    },
+    "b-after": {
+      "engine_sha256": "60061c428463b34a2fa7de20446f37f9bedfc520352e7ae5abf7795e31a11356",
+      "median_tok_s": 2.4849,
+      "median_decode_tok_s": 3.0268,
+      "tok_s": [
+        2.4789,
+        2.4849,
+        2.489
+      ],
+      "decode_tok_s": [
+        3.0268,
+        3.0225,
+        3.0322
+      ],
+      "replies_0305abcd": true,
+      "last_request": {
+        "generation_s": 20.78,
+        "stalled_s": 3.08,
+        "experts_s": 12.66,
+        "attention_s": 3.11,
+        "mtp_steps": 26,
+        "kept": "24 of 24, 12 of 13",
+        "drafting_s": 0.81
+      }
+    },
+    "b-before-2": {
+      "engine_sha256": "068b322e6b4d50cf7a5266cd471702fbb0011a037789032e5a4c5b745ecc44f0",
+      "median_tok_s": 2.4532,
+      "median_decode_tok_s": 2.983,
+      "tok_s": [
+        2.442,
+        2.4532,
+        2.4605
+      ],
+      "decode_tok_s": [
+        2.983,
+        2.9776,
+        2.9852
+      ],
+      "replies_0305abcd": true,
+      "last_request": {
+        "generation_s": 21.1,
+        "stalled_s": 3.1,
+        "experts_s": 12.64,
+        "attention_s": 3.13,
+        "mtp_steps": 26,
+        "kept": "24 of 24, 12 of 13",
+        "drafting_s": 1.1
+      }
+    }
+  },
+  "benchmark_after_vs_mean_before_pct": {
+    "overall": 1.43,
+    "decode": 1.68
+  },
+  "varied_greedy": {
+    "g-before-1": {
+      "overall_tok_s": 2.1213,
+      "mean_decode_tok_s": 2.7379,
+      "decode_tok_s": [
+        2.409,
+        3.016,
+        2.68,
+        2.342,
+        2.719,
+        2.858,
+        2.841,
+        3.039
+      ],
+      "tokens": 466,
+      "replies_equal_recorded": 8,
+      "drafting_s": 9.57,
+      "kept": [
+        [
+          151,
+          162
+        ],
+        [
+          95,
+          102
+        ]
+      ]
+    },
+    "g-after": {
+      "overall_tok_s": 2.1462,
+      "mean_decode_tok_s": 2.7834,
+      "decode_tok_s": [
+        2.452,
+        3.062,
+        2.725,
+        2.397,
+        2.762,
+        2.901,
+        2.882,
+        3.087
+      ],
+      "tokens": 466,
+      "replies_equal_recorded": 8,
+      "drafting_s": 7.04,
+      "kept": [
+        [
+          151,
+          162
+        ],
+        [
+          95,
+          102
+        ]
+      ]
+    },
+    "g-before-2": {
+      "overall_tok_s": 2.1217,
+      "mean_decode_tok_s": 2.7387,
+      "decode_tok_s": [
+        2.424,
+        3.012,
+        2.674,
+        2.338,
+        2.717,
+        2.861,
+        2.844,
+        3.039
+      ],
+      "tokens": 466,
+      "replies_equal_recorded": 8,
+      "drafting_s": 9.57,
+      "kept": [
+        [
+          151,
+          162
+        ],
+        [
+          95,
+          102
+        ]
+      ]
+    }
+  },
+  "varied_after_vs_mean_before_pct": {
+    "overall": 1.16,
+    "mean_decode": 1.65
+  },
+  "correctness": {
+    "passed": true,
+    "positions": 17,
+    "argmax_matches": 17,
+    "max_abs_logit_difference": 4.57763671875e-05,
+    "max_kl_cpu_to_cuda": 1.4709953778534417e-11,
+    "greedy_reply_equal": true,
+    "engine_sha256": "60061c428463b34a2fa7de20446f37f9bedfc520352e7ae5abf7795e31a11356",
+    "cpu.f32": "cebbf3a80f8c5ae076f255e9ea2a84a5cfd38bf63348905b136102fa7e95feb4",
+    "cuda.f32": "01479691813946771dca571984e6ceac62dff3b73ef58b9003edefa7f19ffc87",
+    "reply": "63ed99846816797ba35192500956feedcfba7df134b42cad4a1b41595364c669"
+  },
+  "check_binary": {
+    "g": {
+      "drafts": 815,
+      "p_bits_differ": 0,
+      "silu_calls_checked_at_least": 1000,
+      "silu_calls_differ": 0
+    },
+    "t07": {
+      "drafts": 808,
+      "p_bits_differ": 0,
+      "silu_calls_checked_at_least": 1000,
+      "silu_calls_differ": 0
+    }
+  },
+  "traces": {
+    "workload": "the eight varied prompts at 128 tokens, MIMO_MTP=3 MIMO_MTP_MIN_P=0, SEED=20261017; sampled: temperature 0.7, top_p 0.9",
+    "greedy": {
+      "recorded_steps": 273,
+      "after_steps": 273,
+      "identical_steps": 273,
+      "cut_same_steps": {
+        "0.4": 273,
+        "0.6": 273
+      },
+      "closest_product_to_0.6": 0.0014,
+      "after_sha256": "1ec26f5ff20427b9e1328477953d5739ddbb1f9f3c45dca994dd31553ef8fb23",
+      "recorded_sha256": "6d4a92c4715e4384a3705952e1632fa5e57677f7733ae3b5fc482ad31607ae13"
+    },
+    "sampled": {
+      "recorded_steps": 296,
+      "after_steps": 271,
+      "before_steps": 271,
+      "before_equals_after_bytes": true,
+      "before_replies_equal_after": 8,
+      "recorded_vs_committed": "differs from step 1 (P=26: the same printed probabilities, kept 1 recorded against 3) for the before and the after engine alike: written by an earlier build",
+      "closest_product_to_0.6": 0.000172,
+      "after_sha256": "95a42778d658d1b9e1310bba69b887cc1c51db07cbc959ba85b4bd6a66b1658a",
+      "before_sha256": "95a42778d658d1b9e1310bba69b887cc1c51db07cbc959ba85b4bd6a66b1658a",
+      "recorded_sha256": "fe76969a3415fd568b28cf7bed15d583e62d38d606f51b4a9b3ab7e29553c81e"
+    }
+  }
+}

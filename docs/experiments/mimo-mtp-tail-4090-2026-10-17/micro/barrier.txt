@@ -1,0 +1,20 @@
+OMP_NUM_THREADS=8:
+T 8: fork+join 232.4 us, +2 barriers 87.1 us, argmax region 49.4 us, serial argmax 80.5 us (14159 899)
+T 8: fork+join 40.3 us, +2 barriers 86.6 us, argmax region 57.2 us, serial argmax 79.9 us (14159 899)
+T 8: fork+join 36.3 us, +2 barriers 81.7 us, argmax region 51.7 us, serial argmax 83.8 us (14159 899)
+T 8: fork+join 28.7 us, +2 barriers 80.1 us, argmax region 42.6 us, serial argmax 100.0 us (14159 899)
+OMP_NUM_THREADS=16:
+T 16: fork+join 451.3 us, +2 barriers 193.8 us, argmax region 72.3 us, serial argmax 79.7 us (14159 899)
+T 16: fork+join 43.4 us, +2 barriers 152.8 us, argmax region 58.2 us, serial argmax 80.5 us (14159 899)
+T 16: fork+join 45.6 us, +2 barriers 147.6 us, argmax region 67.9 us, serial argmax 79.3 us (14159 899)
+T 16: fork+join 58.4 us, +2 barriers 149.1 us, argmax region 55.8 us, serial argmax 100.0 us (14159 899)
+OMP_NUM_THREADS=16 OMP_WAIT_POLICY=active:
+T 16: fork+join 428.3 us, +2 barriers 199.9 us, argmax region 60.5 us, serial argmax 79.7 us (14159 899)
+T 16: fork+join 51.4 us, +2 barriers 139.4 us, argmax region 67.1 us, serial argmax 80.2 us (14159 899)
+T 16: fork+join 47.2 us, +2 barriers 150.1 us, argmax region 65.5 us, serial argmax 80.4 us (14159 899)
+T 16: fork+join 51.5 us, +2 barriers 158.5 us, argmax region 67.3 us, serial argmax 80.5 us (14159 899)
+OMP_NUM_THREADS=16 OMP_WAIT_POLICY=passive:
+T 16: fork+join 426.2 us, +2 barriers 191.7 us, argmax region 53.4 us, serial argmax 168.4 us (14159 899)
+T 16: fork+join 57.6 us, +2 barriers 140.3 us, argmax region 55.7 us, serial argmax 80.2 us (14159 899)
+T 16: fork+join 54.3 us, +2 barriers 147.3 us, argmax region 84.0 us, serial argmax 80.0 us (14159 899)
+T 16: fork+join 48.6 us, +2 barriers 136.4 us, argmax region 59.9 us, serial argmax 80.1 us (14159 899)
