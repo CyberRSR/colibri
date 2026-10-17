@@ -205,3 +205,7 @@ logits and every reply unchanged.
 [A fourth](experiments/mimo-sample-4090-2026-10-17/README.md) sorts only the entries a
 sampled draw's nucleus can hold: 2.122 against 2.036 tok/s over the eight prompts
 sampled at temperature 0.7 in one series, the same draws and replies; greedy unchanged.
+[A fifth](experiments/mimo-io-4090-2026-10-17/README.md) drops the prefetches a step did
+not ask for while they are still queued and lets the layers that wait on the disk keep
+their experts longer: 2.565 against 2.440 tok/s for the benchmark and 2.245 against
+2.115 over the eight prompts greedy in one series, the logits and every reply unchanged.

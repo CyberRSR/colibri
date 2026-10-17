@@ -311,8 +311,12 @@ so the time they take overlaps the computation instead of adding to it:
 prediction points; `tools/mimo_route_sim.py` replays it through cache policies and
 prediction sizes offline. The measured effect on the RTX 4090 machine is in
 [the streaming experiment](experiments/mimo-stream-4090-2026-10-16/README.md),
-[its second round](experiments/mimo-stream2-4090-2026-10-16/README.md) and
-[the packing and pooling one](experiments/mimo-pack-4090-2026-10-17/README.md).
+[its second round](experiments/mimo-stream2-4090-2026-10-16/README.md),
+[the packing and pooling one](experiments/mimo-pack-4090-2026-10-17/README.md) and
+[the I/O round](experiments/mimo-io-4090-2026-10-17/README.md), which measured where the
+steps wait and added the cancelling, the order and the bonus: the benchmark 2.440 to
+2.565 tok/s and the eight prompts greedy 2.115 to 2.245 in one series, the stalls a third
+shorter, every reply and both logits files the same bytes.
 
 ## Speculative decoding (MTP)
 

@@ -1,0 +1,28 @@
+# predict2.py: each predictor's top-8 (distinct per step) against the union the layer's step demanded
+# the benchmark's three measured requests (inst2 engine, rank logging only)
+prefetch(attn,1)   rows=1: top-8 distinct in union 3906/4968 = 0.786; by rank 0.97 0.97 0.90 0.84 0.82 0.72 0.60 0.47 0.29 0.20 0.17 0.12 0.08 0.11 0.07 0.03
+                           row 0 by rank 0.97 0.97 0.90 0.84 0.82 0.72 0.60 0.47
+prefetch(attn,1)   rows=2: top-8 distinct in union 24495/30846 = 0.794; by rank 0.97 0.93 0.90 0.86 0.82 0.75 0.66 0.58 0.34 0.29 0.24 0.19 0.19 0.15 0.13 0.12
+                           row 0 by rank 0.96 0.94 0.89 0.85 0.83 0.74 0.66 0.58
+prefetch(attn,1)   rows=3: top-8 distinct in union 40398/51111 = 0.790; by rank 0.96 0.93 0.90 0.85 0.81 0.75 0.67 0.60 0.37 0.31 0.27 0.24 0.21 0.18 0.18 0.17
+                           row 0 by rank 0.95 0.94 0.91 0.86 0.81 0.75 0.65 0.58
+attn,2-ahead       rows=1: top-8 distinct in union 3348/4896 = 0.684; by rank 0.94 0.89 0.84 0.71 0.67 0.56 0.48 0.38 0.27 0.20 0.19 0.11 0.14 0.13 0.11 0.06
+                           row 0 by rank 0.94 0.89 0.84 0.71 0.67 0.56 0.48 0.38
+attn,2-ahead       rows=2: top-8 distinct in union 21288/29901 = 0.712; by rank 0.92 0.86 0.83 0.78 0.71 0.63 0.58 0.50 0.33 0.28 0.23 0.20 0.19 0.16 0.15 0.14
+                           row 0 by rank 0.93 0.85 0.82 0.78 0.71 0.62 0.56 0.49
+attn,2-ahead       rows=3: top-8 distinct in union 34818/49086 = 0.709; by rank 0.91 0.87 0.81 0.76 0.71 0.64 0.59 0.53 0.36 0.31 0.27 0.24 0.24 0.19 0.18 0.17
+                           row 0 by rank 0.91 0.87 0.80 0.76 0.69 0.63 0.58 0.50
+embedding          rows=1: top-8 distinct in union 933/3744 = 0.249; by rank 0.40 0.31 0.26 0.22 0.18 0.24 0.21 0.17 0.17 0.19 0.12 0.08 0.12 0.08 0.17 0.08
+                           row 0 by rank 0.40 0.31 0.26 0.22 0.18 0.24 0.21 0.17
+mlp,2-ahead        rows=1: top-8 distinct in union 3471/4896 = 0.709; by rank 0.94 0.92 0.84 0.75 0.68 0.60 0.52 0.40 0.26 0.25 0.23 0.10 0.09 0.09 0.07 0.09
+                           row 0 by rank 0.94 0.92 0.84 0.75 0.68 0.60 0.52 0.40
+mlp,2-ahead        rows=2: top-8 distinct in union 21915/30174 = 0.726; by rank 0.94 0.88 0.84 0.79 0.72 0.66 0.57 0.51 0.34 0.29 0.22 0.20 0.19 0.17 0.14 0.13
+                           row 0 by rank 0.95 0.88 0.83 0.79 0.74 0.65 0.55 0.48
+mlp,2-ahead        rows=3: top-8 distinct in union 36273/49830 = 0.728; by rank 0.93 0.88 0.83 0.77 0.72 0.68 0.60 0.53 0.36 0.30 0.25 0.23 0.22 0.19 0.17 0.16
+                           row 0 by rank 0.91 0.88 0.84 0.77 0.72 0.68 0.57 0.51
+mlp,1-ahead        rows=1: top-8 distinct in union 4134/4968 = 0.832; by rank 0.96 0.97 0.95 0.89 0.83 0.80 0.71 0.55 0.28 0.12 0.14 0.08 0.06 0.07 0.03 0.02
+                           row 0 by rank 0.96 0.97 0.95 0.89 0.83 0.80 0.71 0.55
+mlp,1-ahead        rows=2: top-8 distinct in union 25947/31152 = 0.833; by rank 0.98 0.95 0.93 0.90 0.86 0.81 0.70 0.64 0.32 0.27 0.20 0.17 0.15 0.13 0.12 0.11
+                           row 0 by rank 0.98 0.96 0.93 0.89 0.87 0.80 0.69 0.61
+mlp,1-ahead        rows=3: top-8 distinct in union 42822/51930 = 0.825; by rank 0.97 0.95 0.92 0.90 0.85 0.78 0.71 0.63 0.37 0.29 0.26 0.22 0.20 0.18 0.15 0.15
+                           row 0 by rank 0.97 0.96 0.93 0.89 0.86 0.79 0.71 0.61
