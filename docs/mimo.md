@@ -183,6 +183,14 @@ The reference holds the dense weights in f32, which for all 70 layers of Pro is 
 80 GiB, so the comparison stops at 32 of the 70 layers, which fit in the 61 GiB of
 the test machine.
 
+In a Windows build (MinGW-w64 on msvcrt) the softmaxes, silu and the router's sigmoid
+take `expf` from `exp_f.h`: libmingwex's own x87 `exp`, inline, its two truncations by
+`FISTTP` rather than under a control word switched to chopping and back. Every float
+gives the library's bits (`tests/test_exp_f.py` tries all 2^32). The library's two
+`FLDCW` make a call 5.7 times slower at two of the 64 places its object can land in a
+page, and a build whose change elsewhere put it there computed 3.5% slower
+([the measurement](experiments/mimo-layout-4090-2026-10-17/README.md)).
+
 ## Measured
 
 Ryzen 7 PRO 8700GE (8 cores, 16 threads), 64 GB DDR5, NVMe RAID, Linux, with nothing

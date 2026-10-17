@@ -62,6 +62,7 @@
 #include "serve_codec.h"
 #include "serve_poll.h"
 #include "stop_ids.h"
+#include "exp_f.h"         /* expf's bits without MinGW's two FLDCW (their cost moves with the code layout) */
 #ifdef COLI_MIMO_CUDA
 #include "backend_cuda_mimo.h"
 static int g_mimo_cuda;
@@ -128,8 +129,8 @@ static int env_int(const char *name, int fallback) {
     return (v && *v) ? atoi(v) : fallback;
 }
 
-static inline float silu(float x) { return x / (1.0f + expf(-x)); }
-static inline float sigmoid(float x) { return 1.0f / (1.0f + expf(-x)); }
+static inline float silu(float x) { return x / (1.0f + exp_f(-x)); }
+static inline float sigmoid(float x) { return 1.0f / (1.0f + exp_f(-x)); }
 
 /* ---------------------------------------------------------------- config ---- */
 
@@ -2059,8 +2060,8 @@ static void attention_rows(Model *m, int li, const float *xn, int n, float *out)
                 }
                 float sink = l->sink ? l->sink[h] : -INFINITY;
                 if (sink > best) best = sink;
-                float den = l->sink ? expf(sink - best) : 0.0f;
-                for (int j = first; j <= p; j++) { score[j - first] = expf(score[j - first] - best); den += score[j - first]; }
+                float den = l->sink ? exp_f(sink - best) : 0.0f;
+                for (int j = first; j <= p; j++) { score[j - first] = exp_f(score[j - first] - best); den += score[j - first]; }
                 float *o = ctxv + ((size_t)t * nh + h) * vd;
                 for (int i = 0; i < vd; i++) o[i] = 0;
                 for (int j = first; j <= p; j++) {
@@ -2164,8 +2165,8 @@ static void attention(Model *m, int li, const float *xn, int n, int p0, float *o
                         for (int j = first; j <= p; j++) if (score[j - first] > best) best = score[j - first];
                         float sink = l->sink ? l->sink[h] : -INFINITY;
                         if (sink > best) best = sink;
-                        float den = l->sink ? expf(sink - best) : 0.0f;
-                        for (int j = first; j <= p; j++) { score[j - first] = expf(score[j - first] - best); den += score[j - first]; }
+                        float den = l->sink ? exp_f(sink - best) : 0.0f;
+                        for (int j = first; j <= p; j++) { score[j - first] = exp_f(score[j - first] - best); den += score[j - first]; }
                         float *o = ctxv + ((size_t)t * nh + h) * vd;
                         for (int i = 0; i < vd; i++) o[i] = 0;
                         for (int j = first; j <= p; j++) {
@@ -2202,8 +2203,8 @@ static void attention(Model *m, int li, const float *xn, int n, int p0, float *o
                 }
                 float sink = l->sink ? l->sink[h] : -INFINITY;
                 if (sink > best) best = sink;
-                float den = l->sink ? expf(sink - best) : 0.0f;
-                for (int j = first; j <= p; j++) { score[j - first] = expf(score[j - first] - best); den += score[j - first]; }
+                float den = l->sink ? exp_f(sink - best) : 0.0f;
+                for (int j = first; j <= p; j++) { score[j - first] = exp_f(score[j - first] - best); den += score[j - first]; }
                 float *o = ctxv + ((size_t)t * nh + h) * vd;
                 for (int i = 0; i < vd; i++) o[i] = 0;
                 for (int j = first; j <= p; j++) {
@@ -2769,7 +2770,7 @@ static double exp_sum(const float *x, int n, float top) {
     for (int c = 0; c < nc; c++) {
         int lo = c * CH, hi = lo + CH < n ? lo + CH : n;
         double a = 0;
-        for (int i = lo; i < hi; i++) a += expf(x[i] - top);
+        for (int i = lo; i < hi; i++) a += exp_f(x[i] - top);
         part[c] = a;
     }
     double s = 0;
@@ -3344,7 +3345,7 @@ static void sample_rank(SampleRank *k, const float *logits, int vocab, float tem
     #pragma omp parallel for schedule(dynamic, 1)
     for (int c = 0; c < (vocab + CH - 1) / CH; c++) {
         int lo = c * CH, hi = lo + CH < vocab ? lo + CH : vocab;
-        for (int i = lo; i < hi; i++) p[i] = expf((logits[i] - top) / temperature);
+        for (int i = lo; i < hi; i++) p[i] = exp_f((logits[i] - top) / temperature);
     }
     double total = 0.0;
     for (int i = 0; i < vocab; i++) total += p[i];

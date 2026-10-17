@@ -27,6 +27,7 @@ HEADER = r'''
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
+#include "exp_f.h"
 static void *xmalloc(size_t n, const char *what) { void *p = malloc(n); if (!p) { fprintf(stderr, "OOM %s\n", what); exit(1); } return p; }
 '''
 
@@ -225,7 +226,7 @@ class SampleDraft(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             c_file, exe = Path(tmp) / "draft.c", Path(tmp) / "draft.exe"
             c_file.write_text(driver.replace("@CODE@", sampler()).replace("@REFERENCE@", REFERENCE), encoding="utf-8")
-            subprocess.run([gcc, "-O2", str(c_file), "-o", str(exe), "-lm"], check=True)
+            subprocess.run([gcc, "-O2", "-I", str(SRC.parent), str(c_file), "-o", str(exe), "-lm"], check=True)
             run = subprocess.run([str(exe)], capture_output=True, text=True, timeout=600)
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         self.assertIn("ok", run.stdout.splitlines()[-1])
