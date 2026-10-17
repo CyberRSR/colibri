@@ -1,0 +1,6 @@
+threads 16, master x87 cw 0x37f, workers differing 0
+expf over 4194304 inputs: serial and threaded bits the same
+rows 471, checks 20544, mismatches 0; rows where a check fell back to the full sort: 0
+full sorts 0 of 21015 sample_sort calls (incl. timing, top_p >= 1 rows), mean candidates of the partial ones 12.7
+per call: old mean 16.440 ms (median 16.446, max 17.832); new mean 0.744 ms (median 0.740, max 1.319); in the engine (old) mean 17.619 ms
+ok

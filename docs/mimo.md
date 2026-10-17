@@ -356,7 +356,9 @@ every step: 2.384, 2.005 and 1.947. The first drafts wait for the first token, w
 comes no later. Spreading the softmax and the silu over the workers
 ([the next round](experiments/mimo-mtp-tail-4090-2026-10-17/README.md)) took the
 benchmark from 2.450 to 2.485 tok/s and the eight prompts greedy from 2.122 to 2.146 in
-one series.
+one series. Sorting only the nucleus' candidates
+([the round after](experiments/mimo-sample-4090-2026-10-17/README.md)) took the eight
+prompts sampled from 2.036 to 2.122 tok/s, the same replies.
 
 Not with `KV_SLOTS` > 1 (several conversations a step), a read-out (`logprobs`), a
 `VK=1` build (off by default there: its dense chain keeps the trunk's hidden states on

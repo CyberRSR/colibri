@@ -202,3 +202,6 @@ prompts greedy and sampled (2.002 and 1.888), every greedy reply unchanged.
 softmax and the dense MLP's silu over the CPU workers: 2.485 against 2.450 tok/s for
 the benchmark and 2.146 against 2.122 over the eight prompts greedy in one series, the
 logits and every reply unchanged.
+[A fourth](experiments/mimo-sample-4090-2026-10-17/README.md) sorts only the entries a
+sampled draw's nucleus can hold: 2.122 against 2.036 tok/s over the eight prompts
+sampled at temperature 0.7 in one series, the same draws and replies; greedy unchanged.

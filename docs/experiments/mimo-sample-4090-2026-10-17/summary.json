@@ -1,0 +1,247 @@
+{
+  "varied_sampled": {
+    "s-before-1": {
+      "overall_tok_s": 2.0261,
+      "mean_decode_tok_s": 2.5869,
+      "decode_tok_s": [
+        2.254,
+        2.915,
+        2.609,
+        2.105,
+        2.662,
+        2.684,
+        2.737,
+        2.729
+      ],
+      "seconds": 231.48,
+      "tokens": 469,
+      "generation_s": {
+        "total": 176.59,
+        "stalled": 26.55,
+        "experts": 99.01,
+        "attention": 26.14
+      },
+      "replies_equal_reference": 8,
+      "drafting_s": 7.64,
+      "kept": [
+        [
+          150,
+          166
+        ],
+        [
+          99,
+          105
+        ]
+      ]
+    },
+    "s-after": {
+      "overall_tok_s": 2.122,
+      "mean_decode_tok_s": 2.7368,
+      "decode_tok_s": [
+        2.457,
+        3.11,
+        2.757,
+        2.222,
+        2.791,
+        2.807,
+        2.879,
+        2.87
+      ],
+      "seconds": 221.02,
+      "tokens": 469,
+      "generation_s": {
+        "total": 166.59,
+        "stalled": 27.02,
+        "experts": 97.61,
+        "attention": 25.49
+      },
+      "replies_equal_reference": 8,
+      "drafting_s": 7.43,
+      "kept": [
+        [
+          150,
+          166
+        ],
+        [
+          99,
+          105
+        ]
+      ]
+    },
+    "s-before-2": {
+      "overall_tok_s": 2.0456,
+      "mean_decode_tok_s": 2.6113,
+      "decode_tok_s": [
+        2.328,
+        2.958,
+        2.64,
+        2.128,
+        2.667,
+        2.686,
+        2.744,
+        2.741
+      ],
+      "seconds": 229.27,
+      "tokens": 469,
+      "generation_s": {
+        "total": 174.8,
+        "stalled": 27.02,
+        "experts": 97.72,
+        "attention": 25.51
+      },
+      "replies_equal_reference": 8,
+      "drafting_s": 7.51,
+      "kept": [
+        [
+          150,
+          166
+        ],
+        [
+          99,
+          105
+        ]
+      ]
+    }
+  },
+  "varied_sampled_after_vs_mean_before_pct": {
+    "overall": 4.23,
+    "mean_decode": 5.3
+  },
+  "benchmark": {
+    "b-before-1": {
+      "engine_sha256": "60061c428463b34a2fa7de20446f37f9bedfc520352e7ae5abf7795e31a11356",
+      "median_tok_s": 2.4689,
+      "median_decode_tok_s": 3.0041,
+      "tok_s": [
+        2.4746,
+        2.4689,
+        2.4682
+      ],
+      "decode_tok_s": [
+        3.0071,
+        3.0041,
+        2.9994
+      ],
+      "replies_0305abcd": true,
+      "last_request": {
+        "generation_s": 21.0,
+        "stalled_s": 3.08,
+        "experts_s": 12.74,
+        "attention_s": 3.21,
+        "mtp_steps": 26,
+        "kept": "24 of 24, 12 of 13",
+        "drafting_s": 0.88
+      }
+    },
+    "b-after": {
+      "engine_sha256": "6e1937b4583b8e6fafbaa027ecf97591533e0c220a697363bcc4613e54c810cc",
+      "median_tok_s": 2.4685,
+      "median_decode_tok_s": 3.0028,
+      "tok_s": [
+        2.462,
+        2.4685,
+        2.4702
+      ],
+      "decode_tok_s": [
+        3.0022,
+        3.0028,
+        3.0044
+      ],
+      "replies_0305abcd": true,
+      "last_request": {
+        "generation_s": 20.97,
+        "stalled_s": 3.04,
+        "experts_s": 12.74,
+        "attention_s": 3.2,
+        "mtp_steps": 26,
+        "kept": "24 of 24, 12 of 13",
+        "drafting_s": 0.88
+      }
+    },
+    "b-before-2": {
+      "engine_sha256": "60061c428463b34a2fa7de20446f37f9bedfc520352e7ae5abf7795e31a11356",
+      "median_tok_s": 2.4713,
+      "median_decode_tok_s": 3.0025,
+      "tok_s": [
+        2.4674,
+        2.4739,
+        2.4713
+      ],
+      "decode_tok_s": [
+        3.0007,
+        3.009,
+        3.0025
+      ],
+      "replies_0305abcd": true,
+      "last_request": {
+        "generation_s": 20.98,
+        "stalled_s": 3.03,
+        "experts_s": 12.77,
+        "attention_s": 3.2,
+        "mtp_steps": 26,
+        "kept": "24 of 24, 12 of 13",
+        "drafting_s": 0.89
+      }
+    }
+  },
+  "benchmark_after_vs_mean_before_pct": {
+    "overall": -0.06,
+    "decode": -0.02
+  },
+  "varied_greedy_after": {
+    "overall_tok_s": 2.1385,
+    "mean_decode_tok_s": 2.7696,
+    "decode_tok_s": [
+      2.47,
+      3.046,
+      2.707,
+      2.372,
+      2.748,
+      2.888,
+      2.866,
+      3.059
+    ],
+    "seconds": 217.91,
+    "tokens": 466,
+    "generation_s": {
+      "total": 163.94,
+      "stalled": 26.04,
+      "experts": 96.39,
+      "attention": 25.32
+    },
+    "replies_equal_reference": 8,
+    "drafting_s": 7.45,
+    "kept": [
+      [
+        151,
+        162
+      ],
+      [
+        95,
+        102
+      ]
+    ]
+  },
+  "draw_ms_in_timed_engines": {
+    "before": {
+      "sample_calls_at_last_line": 192,
+      "sample_ms": 17.497,
+      "sample_draft_calls_at_last_line": 258,
+      "sample_draft_ms": 17.719
+    },
+    "after": {
+      "sample_calls_at_last_line": 192,
+      "sample_ms": 0.632,
+      "sample_draft_calls_at_last_line": 258,
+      "sample_draft_ms": 0.642
+    }
+  },
+  "micro_real_rows": [
+    "threads 16, master x87 cw 0x37f, workers differing 0",
+    "expf over 4194304 inputs: serial and threaded bits the same",
+    "rows 471, checks 20544, mismatches 0; rows where a check fell back to the full sort: 0",
+    "full sorts 0 of 21015 sample_sort calls (incl. timing, top_p >= 1 rows), mean candidates of the partial ones 12.7",
+    "per call: old mean 16.440 ms (median 16.446, max 17.832); new mean 0.744 ms (median 0.740, max 1.319); in the engine (old) mean 17.619 ms",
+    "ok"
+  ]
+}
