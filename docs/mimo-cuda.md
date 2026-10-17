@@ -210,3 +210,8 @@ sampled at temperature 0.7 in one series, the same draws and replies; greedy unc
 not ask for while they are still queued and lets the layers that wait on the disk keep
 their experts longer: 2.565 against 2.440 tok/s for the benchmark and 2.245 against
 2.115 over the eight prompts greedy in one series, the logits and every reply unchanged.
+[A sixth](experiments/mimo-omp-spin-4090-2026-10-17/README.md) runs the CPU's OpenMP
+regions on a team that spins between them instead of MinGW libgomp's, which sleeps on
+semaphores: the compute 7% shorter, most of it then waiting on the disk; 2.614 against
+2.594 tok/s for the benchmark and 2.261 against 2.222 over the eight prompts greedy in
+one series, the logits and every reply unchanged.
