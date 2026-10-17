@@ -2184,7 +2184,9 @@ static void dense_mlp(Model *m, Layer *l, const float *xn, int n, float *out) {
     float *u = xmalloc((size_t)n * F * sizeof(float), "mlp up");
     dw_matmul(g, xn, n, &l->gate);
     dw_matmul(u, xn, n, &l->up);
-    for (size_t i = 0; i < (size_t)n * F; i++) g[i] = silu(g[i]) * u[i];
+    /* over the workers: each element alone, the same expf, so the split moves no bit */
+    #pragma omp parallel for schedule(dynamic, 512)
+    for (int64_t i = 0; i < (int64_t)n * F; i++) g[i] = silu(g[i]) * u[i];
     dw_matmul(out, g, n, &l->down);
     free(g); free(u);
     (void)m;
@@ -2687,6 +2689,28 @@ static void forward(Model *m, const int *ids, int n, float *logits, int all_rows
     free(h); free(xn); free(tmp);
 }
 
+/* sum exp(x[i] - top) over x[0..n), the softmax's denominator: over the workers in
+ * chunks of a fixed size, each chunk's sum in double in order, then the chunks' in order,
+ * so the bits do not depend on the thread count or on which worker took a chunk. (One
+ * region: on MinGW's libgomp a fork or a barrier costs tens of microseconds, so the
+ * argmax before it stays a single pass.) */
+static double exp_sum(const float *x, int n, float top) {
+    enum { CH = 512 };
+    int nc = (n + CH - 1) / CH;
+    double *part = xmalloc((size_t)nc * sizeof(double), "softmax chunks");
+    #pragma omp parallel for schedule(dynamic, 1)
+    for (int c = 0; c < nc; c++) {
+        int lo = c * CH, hi = lo + CH < n ? lo + CH : n;
+        double a = 0;
+        for (int i = lo; i < hi; i++) a += expf(x[i] - top);
+        part[c] = a;
+    }
+    double s = 0;
+    for (int c = 0; c < nc; c++) s += part[c];
+    free(part);
+    return s;
+}
+
 /* MTP block k over rows at positions p0.., row t from the trunk's hidden state at p0 + t
  * and tok[t], the token at p0 + t + k + 1; with `p`, the last row's draft (else -1) and in
  * *p the probability the block gives it. The trunk's attention counters stay as they
@@ -2724,9 +2748,7 @@ static int mtp_run(Model *m, int k, const int *tok, int p0, int n, float *p) {
         dw_matmul(lg, xn, 1, &m->head);
         d = 0;
         for (int i = 1; i < c->vocab; i++) if (lg[i] > lg[d]) d = i;
-        double s = 0;
-        for (int i = 0; i < c->vocab; i++) s += expf(lg[i] - lg[d]);
-        *p = (float)(1.0 / s);
+        *p = (float)(1.0 / exp_sum(lg, c->vocab, lg[d]));
         free(lg);
     }
     free(cat); free(h); free(xn); free(tmp);

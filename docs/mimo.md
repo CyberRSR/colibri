@@ -336,9 +336,11 @@ that everywhere (over eight different prompts, greedy, two drafts a step were no
 faster than one). The layers' own probability tells the drafts apart: over those
 prompts a first draft its layer gave 0.8 or more stood every time, one under 0.5
 three times in ten. Each MTP layer (738 MB, its bf16 packed, on the CPU) takes about
-20 ms a step whether its draft is verified or not, and the CPU's matrices of a step of
+15 ms a step whether its draft is verified or not, and the CPU's matrices of a step of
 a few rows (the o_proj the GPU does not hold, the MTP layers') decode each group of
-weights once for all of its rows.
+weights once for all of its rows. The draft's probability (a softmax over the
+vocabulary, 152576 `expf`) and the dense MLP's silu run over the workers; the softmax
+sums fixed chunks in a fixed order, so its bits do not depend on the thread count.
 
 On the RTX 4090 profile, one series ([the experiment](experiments/mimo-mtp2-4090-2026-10-17/README.md)):
 the benchmark 2.414 tok/s against 2.258 with one draft a step (decode 2.93 against
