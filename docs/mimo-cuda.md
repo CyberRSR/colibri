@@ -49,6 +49,7 @@ python tools/make_mimo_tiny.py --output mimo_tiny --force --vision
 $env:MIMO_CUDA = '1'
 python tests/mimo_tiny_harness.py --binary ./mimo.exe --fixture ./mimo_tiny
 python tests/test_mimo_prefix_serve.py
+python tests/test_omp_spin.py
 $env:MIMO_CUDA_TEST = '1'
 python tests/test_mimo_cuda_fallback.py
 ```
