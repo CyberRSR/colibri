@@ -611,7 +611,10 @@ Read **only** by `c/mimo.c` (and `MIMO_MAX_IMAGE_TOKENS` by the gateway). See [m
 | `MIMO_PREFETCH_LIMIT` | 64 | MiMo: prefetches waiting at once. |
 | `MIMO_IO_PIECE_MB` | unset | MiMo: cut each expert read into pieces of this size; unset, one read per expert. |
 | `MIMO_CACHE_DECAY` | 0 | MiMo: 0 is an LRU expert cache; 0 < d < 1 reuses the slot whose expert has the lowest use count decayed by d per step of its layer. |
-| `MIMO_MTP` | 1 (0 in a `VK=1` build) | MiMo: decode steps verify a draft of the checkpoint's first MTP layer (two tokens a step when it holds; the same greedy tokens and sampling distribution). 0 decodes one token a step. |
+| `MIMO_MTP` | 2 (0 in a `VK=1` build) | MiMo: decode steps draft with the checkpoint's first N MTP layers (up to 3) and keep the drafts the trunk chooses (up to N + 1 tokens a step; the same greedy tokens and sampling distribution). 0 decodes one token a step. |
+| `MIMO_MTP_MIN_P` | 0.6 | MiMo: a step verifies its drafts while the probabilities the MTP layers give them multiply to at least this; 0 verifies every draft. |
+| `MIMO_MTP_TRACE` | unset | MiMo: append a line per decode step to this file (the position, drafts made, verified and kept, their probabilities). |
+| `MIMO_MTP_ORACLE`, `MIMO_MTP_ORACLE_MISS` | unset | Tests only (the by-hand path): the reference's ids from position 0 stand in for the MTP layers' drafts; `MIMO_MTP_ORACLE_MISS=m` makes every m-th draft one the trunk does not choose. |
 | `MIMO_CACHE_GLOBAL` | 1 (0 in a `VK=1` build) | MiMo: the MoE layers' expert caches are one pool (in a decode step a miss takes the least recently used buffer of any layer; a layer may grow to twice the cap). Faster decode, a slightly later first token; 0 keeps a fixed cap per layer. See mimo.md. |
 | `MIMO_BF16_PACK` | 1 | MiMo: the o_proj and the head the CPU computes are packed without loss (12 bits a weight, the same logits); 0 keeps plain bf16. |
 | `MIMO_CUDA_BF16_PACK` | 1 | MiMo, CUDA: BF16 matrices go to the GPU packed without loss (12 bits a weight, the same results), so more o_proj fit; 0 uploads plain bf16. |

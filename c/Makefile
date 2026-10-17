@@ -1452,10 +1452,11 @@ mimo$(EXE): mimo.c backend_cuda_mimo.h $(MIMO_CUDA_OBJ) $(VK_OBJ) $(VK_SPV) .bui
 # Tiny MiMo fixture + vendor oracle, the Kimi K3 pattern: the generator is numpy (and
 # Pillow for the test picture) and deterministic; ref.json is committed and comes from
 # Xiaomi's own modeling code (tools/make_mimo_ref.py, maintainer-run, SHA-256-pinned),
-# so CI needs neither torch nor network. The fixture carries the vision tower too.
+# so CI needs neither torch nor network. The fixture carries the vision tower too, and
+# the release's three MTP layers, which the engine drafts with (the oracle never reads them).
 .PHONY: mimo-tiny-generate mimo-tiny-check
 mimo-tiny-generate:
-	$(PYTHON) tools/make_mimo_tiny.py --output ./mimo_tiny --force --vision
+	$(PYTHON) tools/make_mimo_tiny.py --output ./mimo_tiny --force --vision --mtp 3
 
 mimo-tiny-check: mimo-tiny-generate mimo$(EXE)
 	$(PYTHON) tests/mimo_tiny_harness.py --binary ./mimo$(EXE) --fixture ./mimo_tiny

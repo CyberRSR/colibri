@@ -32,13 +32,15 @@ make -C c mimo
 coli chat --model ~/Models/MiMo-V2.6-Flash
 ```
 
-Pro is the same engine and the same commands. Three files of the release are never
-loaded (the DFlash drafter, the audio tokenizer and the MTP layer, 9.9 GB together),
-so the download can skip them, 563.6 GB instead of 573.5:
+Pro is the same engine and the same commands. Two parts of the release are never
+loaded (the DFlash drafter and the audio tokenizer, 7.4 GB together), so the download
+can skip them, 566.1 GB instead of 573.5. `model_mtp.safetensors` (2.5 GB) holds the
+MTP layers the engine drafts with ([speculative decoding](#speculative-decoding-mtp));
+without it, decode runs one token a step:
 
 ```sh
 hf download XiaomiMiMo/MiMo-V2.6-Pro-MOPD --local-dir ~/Models/MiMo-V2.6-Pro \
-  --exclude "dflash/*" --exclude "audio_tokenizer/*" --exclude "model_mtp.safetensors"
+  --exclude "dflash/*" --exclude "audio_tokenizer/*"
 coli chat --model ~/Models/MiMo-V2.6-Pro --ram 54
 ```
 
@@ -80,9 +82,8 @@ the FP8 scale grid tiled per chunk (a Flash full-attention layer has 108 scale r
 not the 106 a contiguous grid would have). The layout is the one vLLM loads
 (`vllm/model_executor/models/mimo_v2.py`); the engine undoes it at load time.
 
-Not implemented yet: the second and third MTP layers (the first drafts tokens: see
-[speculative decoding](#speculative-decoding-mtp)), the separate DFlash drafter,
-audio and video input.
+Not implemented yet: the separate DFlash drafter, audio and video input (the MTP
+layers draft tokens: see [speculative decoding](#speculative-decoding-mtp)).
 
 ## Chat template
 
@@ -297,37 +298,61 @@ prediction sizes offline. The measured effect on the RTX 4090 machine is in
 ## Speculative decoding (MTP)
 
 Pro's checkpoint carries three multi-token-prediction layers (`model_mtp.safetensors`);
-the engine drafts with the first, by default (`MIMO_MTP`). Once a token is chosen,
-the MTP layer predicts the one after it from the trunk's final hidden state (after
-the trunk's final norm, as vLLM hands it over) and the chosen token's embedding:
-`eh_proj` of `[enorm(embedding) | hnorm(hidden)]`, one sliding-window attention
-block with its own window of K/V and a dense MLP, its final norm and the shared
-lm_head. The next decode step runs the chosen token and the draft through the trunk
-as two rows. Every kernel computes a row's bytes whatever rows are beside it (what
-the prompt blocks already rely on), so the first row's logits are a plain step's
-and choose the plain decode's token. When that token is the draft, the second row
-has computed the token after it too, and the step yields two tokens; otherwise the
-draft's row is dropped -- the position goes back and the next step overwrites its
-K/V. Sampling (temperature > 0) keeps the draft with the probability the sampler
-gives it (its share of top-p's nucleus) and otherwise draws from the nucleus without
-it, so the tokens have the plain sampler's distribution
-(`tests/test_mimo_sample_draft.py`), not the same draws. Greedy replies are the bytes
-of `MIMO_MTP=0`'s.
+a decode step drafts with the first `MIMO_MTP` of them, two by default. Once the token
+at position P is chosen, MTP layer k drafts the token at P + k + 1: its row at P - 1
+reads the trunk's final hidden state there (after the trunk's final norm, as the
+serving stacks hand it over) and the embedding of the token at P + k -- the chosen
+token for the first layer, the drafts before it for the others -- through `eh_proj` of
+`[enorm(embedding) | hnorm(hidden)]`, one sliding-window attention block with its own
+window of K/V and a dense MLP, its final norm and the shared lm_head. Every layer reads
+the trunk's hidden state, not the layer before it: that is how SGLang's multi-layer
+MTP runs MiMo-V2 (vLLM builds only the first layer and feeds it its own output for
+further drafts). On the benchmark prompt the trunk's hidden state gave the second and
+third layers' drafts 74% and 93% acceptance; the output of the layer before, after its
+final norm, 42% and 9%.
 
-Two rows cost little more than one: the dense matrices are read once for both, and
-the two tokens' experts overlap -- a layer needs 13.9 experts for two consecutive
-tokens, not 16 -- while the disk reads per token stay what they were. The MTP block
-itself (738 MB, its bf16 packed, on the CPU) takes about 20 ms a step. On the RTX
-4090 profile 88% of the benchmark's drafts were kept: 2.206 tok/s against 1.999
-(decode 2.617 against 2.329); over eight different prompts 1.982 against 1.844
-greedy, every reply the same bytes, and 1.941 against 1.770 sampled at temperature
-0.7, top_p 0.9 (86% of the drafts kept). The first draft waits for the first token,
-which comes no later ([the MTP experiment](experiments/mimo-mtp-4090-2026-10-17/README.md)).
+The step verifies the drafts the layers are sure of: the first ones whose
+probabilities (each layer's own softmax) multiply to at least `MIMO_MTP_MIN_P`, 0.6
+by default. The chosen token and those drafts go through the trunk as rows of one
+block. Every kernel computes a row's bytes whatever rows are beside it (what the
+prompt blocks already rely on), so each row's logits are those a plain step would
+compute after the tokens before it, and so is the token they choose. The drafts stand
+up to the first one that is not that token; the token chosen instead ends the step,
+and the rows after it are dropped -- the position goes back, the next step overwrites
+their K/V, and a window's ring keeps `MIMO_MTP` - 1 positions more than the window so
+that the dropped rows overwrite none the next step reads. The rows an MTP layer ran
+with a draft that did not stand run again with the token chosen, so its window holds
+what one token at a time would have given it. Sampling (temperature > 0) keeps a draft
+with the probability the sampler gives it (its share of top-p's nucleus) and otherwise
+draws from the nucleus without it, so the tokens have the plain sampler's
+distribution (`tests/test_mimo_sample_draft.py`), not the same draws. Greedy replies
+are the bytes of `MIMO_MTP=0`'s.
+
+A verified draft costs its row whether it stands or not: the dense matrices are read
+once for every row of a step, but each row brings its own experts -- a layer needs 8
+for one token, 13.9 for two consecutive ones, 19.3 for three -- about 220 ms a row on
+the RTX 4090 profile. Verifying every draft, a second one stands too rarely to pay for
+that everywhere (over eight different prompts, greedy, two drafts a step were no
+faster than one). The layers' own probability tells the drafts apart: over those
+prompts a first draft its layer gave 0.8 or more stood every time, one under 0.5
+three times in ten. Each MTP layer (738 MB, its bf16 packed, on the CPU) takes about
+20 ms a step whether its draft is verified or not, and the CPU's matrices of a step of
+a few rows (the o_proj the GPU does not hold, the MTP layers') decode each group of
+weights once for all of its rows.
+
+On the RTX 4090 profile, one series ([the experiment](experiments/mimo-mtp2-4090-2026-10-17/README.md)):
+the benchmark 2.414 tok/s against 2.258 with one draft a step (decode 2.93 against
+2.70); eight different prompts 2.071 against 2.002 greedy, every reply the same bytes,
+and 1.977 against 1.888 sampled at temperature 0.7, top_p 0.9. Verifying both drafts
+every step: 2.384, 2.005 and 1.947. The first drafts wait for the first token, which
+comes no later.
 
 Not with `KV_SLOTS` > 1 (several conversations a step), a read-out (`logprobs`), a
 `VK=1` build (off by default there: its dense chain keeps the trunk's hidden states on
-the device), or a checkpoint whose first MTP layer is missing or not in Pro's layout
-(a fused qkv, a dense MLP of the trunk's width).
+the device), or MTP layers missing or not in Pro's layout (a fused qkv, a dense MLP of
+the trunk's width). `MIMO_MTP_TRACE` writes every step's drafts, the ones verified and
+kept, and the layers' probabilities, from which a cut can be chosen offline (the
+experiment's `traces/`).
 
 ## On a GPU (Vulkan)
 
@@ -375,7 +400,9 @@ photo equal to the same prompt computed cold) are the CPU's, and hold with
 | `MIMO_PREFETCH_LIMIT` | 64 | Prefetches waiting in the queues at once. |
 | `MIMO_IO_PIECE_MB` | unset | Cut each expert read into pieces of this size (a demand then waits behind a piece, and an expert arrives through several readers). Unset: one read per expert; 4 MB pieces with two readers a drive doubled the stalls on the measured NVMe drives. |
 | `MIMO_BF16_PACK` | 1 | The o_proj and the head the CPU computes (all of them without CUDA, the ones the GPU does not hold with it) are packed without loss at start-up: each weight's sign/mantissa byte and a 4-bit code for its exponent within its row's window of 15 (the rare others listed per row), 12 bits instead of 16, as `MIMO_CUDA_BF16_PACK` packs them for the GPU. The kernel rebuilds every bf16 and sums in the bf16 kernel's order, so the logits are the same bytes (the 70-layer CPU logits of the streaming experiments, SHA-256 `cebbf3a8...`, with all 71 matrices packed: 11.98 GB instead of 15.97), from a quarter fewer bytes of RAM a token. 0: plain bf16. Not with `MIMO_DENSE_BITS` 8 or 32, nor with a Vulkan device. |
-| `MIMO_MTP` | 1 (0 in a `VK=1` build) | Decode steps verify a draft of the checkpoint's first MTP layer and keep it when the trunk chooses it: up to two tokens a step, the same greedy tokens and the same sampling distribution (see [speculative decoding](#speculative-decoding-mtp)). 0: one token a step. |
+| `MIMO_MTP` | 2 (0 in a `VK=1` build) | Decode steps draft a token with each of the checkpoint's first N MTP layers (up to 3) and keep the drafts the trunk chooses: up to N + 1 tokens a step, the same greedy tokens and the same sampling distribution (see [speculative decoding](#speculative-decoding-mtp)). 0: one token a step. |
+| `MIMO_MTP_MIN_P` | 0.6 | A step verifies its drafts while the probabilities the MTP layers give them multiply to at least this (a draft's row costs its experts whether it stands or not); 0 verifies every draft. |
+| `MIMO_MTP_TRACE` | unset | Append a line per decode step to this file: the position, the drafts made, verified and kept, and each draft's probability. |
 | `MIMO_CACHE_GLOBAL` | 1 (0 in a `VK=1` build) | The MoE layers' expert caches are one pool of cap x layers buffers. In a decode step a layer that misses takes the least recently used buffer of any layer and may grow to twice cap, so the layers whose routing spreads wider hold more (on Pro about 10% fewer reads on demand); a prompt block reuses the layer's own least recently used buffer once the layer holds cap of them. On the RTX 4090 profile: the benchmark 1.928 to 1.982 tok/s (decode 2.218 to 2.312), eight different prompts 1.771 to 1.797, and a new prompt's first token about 0.3 s later (6.55 to 6.89 s on average: its experts find fewer buffers in the layers that gave theirs away). 0: a fixed cap per layer, least recently used within it. |
 | `MIMO_CACHE_DECAY` | 0 | 0: the expert cache reuses its least recently used slot. 0 < d < 1: the slot whose expert has the lowest use count, decayed by d at each of the layer's steps. 0.97 read 17% less on a benchmark that repeats one prompt (it keeps what the last identical request used) and was no faster on eight different prompts, so LRU stays the default. |
 | `MIMO_LARGE_PAGES` | 0 | Windows: 1 keeps each layer's expert cache in 2 MiB locked pages (needs the "Lock pages in memory" right); ordinary pages when they cannot be had. |

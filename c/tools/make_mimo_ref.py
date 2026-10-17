@@ -161,7 +161,7 @@ def to_state_dict(tensors, config):
             continue
         if name.endswith(".weight_scale_inv") or name.endswith(".weight_scale"):
             continue
-        if name.startswith("visual."):
+        if name.startswith(("visual.", "model.mtp.")):   # the MTP layers: the vendor's code has none
             continue
         if dtype == "BF16":
             value = bf16_to_f32(arr)

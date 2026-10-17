@@ -22,6 +22,9 @@ What is checked, all token-exact (argmax, no tolerances):
   - with the vision fixture (make_mimo_tiny.py --vision): the picture through
     the tower, greedy and teacher-forced, f32 and native BF16, and the negated
     picture giving the reference's own answer for it
+  - with the fixture's MTP layers (make_mimo_tiny.py --mtp): the same tokens with one,
+    two and three verified drafts a step, the drafts the blocks' own, the reference's
+    (MIMO_MTP_ORACLE) or the reference's with misses
   - the oracle BITES: one corrupted expert scale byte per layer-2 expert, and
     separately the qkv scale rows read as one continuous grid instead of per
     chunk, must each change the output (guards against a comparison that
@@ -37,6 +40,7 @@ import array
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -46,7 +50,7 @@ from pathlib import Path
 
 
 def run_engine(binary, fixture, prompt_ids, max_new, env, extra_env=None,
-               image=None):
+               image=None, stderr=None):
     run_env = dict(os.environ, **env)
     if extra_env:
         run_env.update(extra_env)
@@ -60,6 +64,8 @@ def run_engine(binary, fixture, prompt_ids, max_new, env, extra_env=None,
     if result.returncode != 0:
         raise AssertionError(
             f"engine exited {result.returncode}:\n{result.stderr[-2000:]}")
+    if stderr is not None:
+        stderr.append(result.stderr)
     tokens = []
     for word in result.stdout.split():
         if not word.lstrip("-").isdigit():
@@ -254,6 +260,68 @@ def check_oracle_bites(binary, fixture, reference, experts):
     print(f"ok qkv scale grid bites: {count}/{len(reference['cases'])} cases")
 
 
+def mtp_counts(stderr):
+    """(drafts verified, drafts kept) from the engine's MTP line; None without one."""
+    line = re.search(r"\[mimo\] MTP: (\d+) (drafts|steps of up to \d+ drafts), (\d+) kept \(([^)]*)\)", stderr)
+    if not line:
+        return None
+    if line.group(2) == "drafts":
+        return int(line.group(1)), int(line.group(3))
+    pairs = [(int(a), int(b)) for a, b in re.findall(r"(\d+) of (\d+)", line.group(4))]
+    return sum(b for _, b in pairs), sum(a for a, _ in pairs)
+
+
+def check_mtp(binary, fixture, reference):
+    """With the fixture's MTP layers (make_mimo_tiny.py --mtp): one, two and three drafts
+    a step give the reference's greedy tokens whatever the drafts are -- the blocks' own
+    (nearly all dropped: the drafted rows rolled back, in windows of 8 they keep
+    wrapping), only those the blocks are sure of (MIMO_MTP_MIN_P), the reference's own
+    tokens (MIMO_MTP_ORACLE: every one kept), or those with every second or third
+    draft missed (kept up to the miss, the rows after it dropped). The forced runs have
+    to keep and drop drafts, and the cut to verify fewer, or the paths under test did
+    not run."""
+    if not (fixture / "model_mtp.safetensors").exists():
+        print("skip mtp: the fixture has no MTP layers (make_mimo_tiny.py --mtp)")
+        return
+    for depth in ("1", "2", "3"):
+        totals = {}
+        for label, miss, min_p in (("own drafts", None, "0"), ("the reference's", "0", "0"),
+                                   ("the reference's the blocks are sure of", "0", "0.99"),
+                                   ("every 2nd missed", "2", "0"), ("every 3rd missed", "3", "0")):
+            verified = kept = 0
+            for name, case in reference["cases"].items():
+                env = dict(reference["engine_env"], MIMO_MTP=depth, MIMO_MTP_MIN_P=min_p)
+                if miss is not None:
+                    env.update(MIMO_MTP_ORACLE=" ".join(map(str, case["greedy_full_ids"])),
+                               MIMO_MTP_ORACLE_MISS=miss)
+                err = []
+                got = run_engine(binary, fixture, case["prompt_ids"],
+                                 case["max_new_tokens"], env, stderr=err)
+                if got != case["greedy_new_ids"]:
+                    raise AssertionError(f"MIMO_MTP={depth}, {label}: greedy mismatch in case "
+                                         f"'{name}': engine {got} vs reference "
+                                         f"{case['greedy_new_ids']}")
+                counts = mtp_counts(err[0])
+                if counts is None:
+                    raise AssertionError(f"MIMO_MTP={depth}, {label}, case '{name}': no MTP "
+                                         "line, the engine did not draft")
+                verified += counts[0]
+                kept += counts[1]
+            totals[label] = (kept, verified)
+            if miss == "0" and kept != verified:
+                raise AssertionError(f"MIMO_MTP={depth}, {label}: {kept} of {verified} of the "
+                                     "reference's drafts kept, not all")
+            if miss in ("2", "3") and not 0 < kept < verified:
+                raise AssertionError(f"MIMO_MTP={depth}, {label}: {kept} of {verified} drafts "
+                                     "kept -- the steps did not both keep and drop drafts")
+            if min_p != "0" and kept >= totals["the reference's"][0]:
+                raise AssertionError(f"MIMO_MTP={depth}: MIMO_MTP_MIN_P={min_p} kept {kept} of "
+                                     "the reference's drafts, no fewer than verifying them all")
+        print(f"ok mtp {depth} draft{'' if depth == '1' else 's'} a step: the reference's "
+              f"tokens in {len(reference['cases'])} cases with "
+              + ", ".join(f"{label} ({k} of {v} kept)" for label, (k, v) in totals.items()))
+
+
 def check_image(binary, fixture, reference, vocab):
     """The fixture's picture, preprocessed the gateway's way (patches.f32,
     pinned by hash to what the official Qwen2-VL processor produced), through
@@ -322,6 +390,7 @@ def main():
     check_teacher_forcing(args.binary, fixture, reference, config["vocab_size"])
     check_oracle_bites(args.binary, fixture, reference,
                        config["n_routed_experts"])
+    check_mtp(args.binary, fixture, reference)
     if "image" in reference:
         check_image(args.binary, fixture, reference, config["vocab_size"])
     print("mimo-tiny-check: all checks passed")
