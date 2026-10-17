@@ -433,6 +433,7 @@ static inline __m256 pk_decode8(PkRow *r, int i) {   /* = bf16_decode8 of the 8 
 #endif
 static void matmul_bf16p(float *y, const float *x, const DW *d, int S) {
     int I = d->I, O = d->O;
+    if (S < 1) return;
 #ifdef __AVX2__
     if (S >= 4) {   /* matmul_bf16's prompt block on the two outputs' rows unpacked once a tile */
         const float *x_all = x;
@@ -485,29 +486,40 @@ static void matmul_bf16p(float *y, const float *x, const DW *d, int S) {
         }
         return;
     }
-#endif
+    /* a decode step's rows (verified drafts among them): each group decoded once for all
+     * of them, every row summed in the one-row order */
+    const float *x1 = x + (S > 1 ? I : 0), *x2 = x + (S > 2 ? 2 * (int64_t)I : 0);
+    #pragma omp parallel for schedule(static)
+    for (int o = 0; o < O; o++) {
+        PkRow r = pk_row(d, o);
+        __m256 a0 = _mm256_setzero_ps(), a1 = a0, a2 = a0;
+        for (int i = 0; i < I; i += 8) {
+            __m256 w = pk_decode8(&r, i);
+            a0 = _mm256_fmadd_ps(_mm256_loadu_ps(x + i), w, a0);
+            if (S > 1) a1 = _mm256_fmadd_ps(_mm256_loadu_ps(x1 + i), w, a1);
+            if (S > 2) a2 = _mm256_fmadd_ps(_mm256_loadu_ps(x2 + i), w, a2);
+        }
+        y[o] = hsum256(a0);
+        if (S > 1) y[(int64_t)O + o] = hsum256(a1);
+        if (S > 2) y[2 * (int64_t)O + o] = hsum256(a2);
+    }
+#else
     #pragma omp parallel for schedule(static)
     for (int o = 0; o < O; o++) {
         for (int s = 0; s < S; s++) {
             PkRow r = pk_row(d, o);
             const float *xs = x + (int64_t)s * I;
             float a = 0;
-#ifdef __AVX2__
-            __m256 acc = _mm256_setzero_ps();
-            for (int i = 0; i < I; i += 8)
-                acc = _mm256_fmadd_ps(_mm256_loadu_ps(xs + i), pk_decode8(&r, i), acc);
-            a = hsum256(acc);
-#else
             for (int i = 0; i < I; i += 8) {
                 uint64_t lo, hi;
                 pk_group(&r, i, &lo, &hi);
                 for (int k = 0; k < 8; k++)
                     a += xs[i + k] * bf16_to_f32((uint16_t)(((lo >> (8 * k)) & 0xFF) | ((hi >> (8 * k)) & 0xFF) << 8));
             }
-#endif
             y[(int64_t)s * O + o] = a;
         }
     }
+#endif
 }
 
 /* Pack a bf16 matrix in place (rows a multiple of 8 long); 1 if it was. */
@@ -568,6 +580,46 @@ static int dw_pack_bf16(DW *d, size_t *from, size_t *to) {
  * across blocks, the convention of quant.h's matmul_fp8. */
 static void matmul_fp8_rows(float *y, const float *x, const uint8_t *q8, const float *rs,
                             int nblk, int S, int I, int O) {
+#ifdef __AVX2__
+    if (S > 1) {
+        /* rows four at a time (a decode step's verified drafts, a prompt's): each group of
+         * 8 weights decoded once for them, every row summed in the one-row order below */
+        #pragma omp parallel for schedule(static)
+        for (int o = 0; o < O; o++) {
+            const uint8_t *w = q8 + (int64_t)o * I;
+            const float *scl = rs + (int64_t)o * nblk;
+            for (int s0 = 0; s0 < S; s0 += 4) {
+                int R = S - s0 < 4 ? S - s0 : 4;
+                const float *x0 = x + (int64_t)s0 * I, *x1 = x0 + (R > 1 ? I : 0),
+                            *x2 = x0 + (R > 2 ? 2 * (int64_t)I : 0), *x3 = x0 + (R > 3 ? 3 * (int64_t)I : 0);
+                double a0 = 0, a1 = 0, a2 = 0, a3 = 0;
+                for (int b = 0; b < nblk; b++) {
+                    int base = b * 128, end = base + 128 < I ? base + 128 : I, i = base;
+                    __m256 v0 = _mm256_setzero_ps(), v1 = v0, v2 = v0, v3 = v0;
+                    for (; i + 8 <= end; i += 8) {
+                        __m256 wd = e4m3_decode8(w + i);
+                        v0 = _mm256_fmadd_ps(_mm256_loadu_ps(x0 + i), wd, v0);
+                        if (R > 1) v1 = _mm256_fmadd_ps(_mm256_loadu_ps(x1 + i), wd, v1);
+                        if (R > 2) v2 = _mm256_fmadd_ps(_mm256_loadu_ps(x2 + i), wd, v2);
+                        if (R > 3) v3 = _mm256_fmadd_ps(_mm256_loadu_ps(x3 + i), wd, v3);
+                    }
+                    float c0 = hsum256(v0), c1 = hsum256(v1), c2 = hsum256(v2), c3 = hsum256(v3);
+                    for (; i < end; i++) {
+                        float wi = e4m3_decode(w[i]);
+                        c0 += wi * x0[i]; c1 += wi * x1[i]; c2 += wi * x2[i]; c3 += wi * x3[i];
+                    }
+                    a0 += (double)c0 * scl[b]; a1 += (double)c1 * scl[b];
+                    a2 += (double)c2 * scl[b]; a3 += (double)c3 * scl[b];
+                }
+                y[(int64_t)s0 * O + o] = (float)a0;
+                if (R > 1) y[(int64_t)(s0 + 1) * O + o] = (float)a1;
+                if (R > 2) y[(int64_t)(s0 + 2) * O + o] = (float)a2;
+                if (R > 3) y[(int64_t)(s0 + 3) * O + o] = (float)a3;
+            }
+        }
+        return;
+    }
+#endif
     #pragma omp parallel for schedule(static)
     for (int o = 0; o < O; o++) {
         const uint8_t *w = q8 + (int64_t)o * I;
