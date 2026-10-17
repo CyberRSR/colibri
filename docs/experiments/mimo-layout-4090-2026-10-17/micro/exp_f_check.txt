@@ -1,0 +1,3 @@
+x87 (msvcrt): 4294967296 floats, 0 differ
+silu: expf 32.0 ns, exp_f 17.3 ns a value (same sums)
+ok

@@ -216,3 +216,11 @@ regions on a team that spins between them instead of MinGW libgomp's, which slee
 semaphores: the compute 7% shorter, most of it then waiting on the disk; 2.614 against
 2.594 tok/s for the benchmark and 2.261 against 2.222 over the eight prompts greedy in
 one series, the logits and every reply unchanged.
+[A seventh](experiments/mimo-layout-4090-2026-10-17/README.md) finds why a change
+elsewhere could make the CPU phases 3.5% slower: MinGW's `exp`, behind every `expf`,
+switches the x87 control word twice a call, and at two of the 64 places the linker can put
+it that costs 5.7 times the call. `exp_f.h` computes the same bits without the switch:
+with the library at such a place 2.607 against 2.582 and 2.569 tok/s for the benchmark in
+one series; where it sits now, no difference that shows (2.612 against 2.606 and 2.611,
+2.251 against 2.244 and 2.251 over the eight prompts greedy); the logits and every reply
+unchanged.

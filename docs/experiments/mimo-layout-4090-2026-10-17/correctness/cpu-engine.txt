@@ -1,0 +1,13 @@
+[SPLIT] +C:/AI/MiMoPro-Shards -> 88 shard(s)
+[SPLIT] model across 2 dir(s): 130 shard(s) total (primary D:\AI\Models\MiMo-V2.6-Pro-MOPD -> 42 shard(s)), no duplication
+[mimo] MTP: decode steps verify up to 2 drafts, from the checkpoint's first 2 MTP layers, while the probabilities the layers give them multiply to 0.6 or more (MIMO_MTP=0: off)
+[mimo] expert cache: one pool of 4416 slots for every layer (MIMO_CACHE_GLOBAL)
+[mimo] expert readers: 4 on 2 device(s)
+[OMP] spinning team: 16 threads spin 2000 us between regions (COLI_OMP_SPIN_US; COLI_OMP_SPIN=0: libgomp's team)
+[mimo] 75 bf16 matrices packed without loss for the CPU: 12.51 GB for 16.67 GB
+[mimo] 70 layers (60 sliding window 128, 10 full), 384 experts top-8, cache 64/layer, dense native, ctx 16384, vision -- loaded in 12.80s
+[mimo] prefill 17 tokens 10.14s, decode 32 tokens 16.17s (1.98 tok/s), experts 12973 hits 6592 misses 263289.2 MB read, rss 115.53 GB
+[mimo] time: expert reads 6.46s (40.76 GB/s), expert matmuls 8.79s, attention 8.71s, the rest (dense MLP, router, head) 2.35s
+[mimo] streaming: 6592 demand reads, 6735 prefetched (4916 used, 1819 unused, 198 of them cancelled unread), predicted 81.6% of 17664 choices, 263.29 GB read, 6.46s stalled, 0.24s predicting; attention matmuls: qkv 4.72s, o_proj 3.83s; 2.57 experts a wave
+[mimo] MTP: 13 steps of up to 2 drafts, 17 kept (12 of 12, 5 of 6), 2.31 tokens a step, 1.14s drafting
+[mimo] decode 32 tokens in 13 verified steps

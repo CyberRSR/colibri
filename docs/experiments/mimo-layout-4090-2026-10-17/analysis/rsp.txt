@@ -1,0 +1,14 @@
+# The main thread's samples in __expl_internal with its RSP (winsample3, ~1 kHz, 72 s of each benchmark arm,
+# runs/s2: v3, v2, v2, v3). The same stack offsets in both binaries; only v3's FLDCW stall.
+r-v3.samples: 67469 main-thread samples, 3803 in __expl_internal (5.64%), 2170 right after its two FLDCW (+0x3a, +0x44)
+  RSP mod 4096 of the samples in __expl_internal: 0x558 825, 0x560 554, 0x568 399, 0x5d8 346, 0x788 282, 0x4c8 228, 0x570 224, 0x5e0 207
+  RSP mod 4096 right after the FLDCW: 0x558 776, 0x568 372, 0x5d8 322, 0x788 257, 0x4c8 208, 0x6f8 88
+r-v2.samples: 67340 main-thread samples, 1086 in __expl_internal (1.61%), 64 right after its two FLDCW (+0x3a, +0x44)
+  RSP mod 4096 of the samples in __expl_internal: 0x560 453, 0x570 135, 0x5e0 102, 0x4d0 99, 0x790 93, 0x558 44, 0x700 34, 0xa10 34
+  RSP mod 4096 right after the FLDCW: 0x558 35, 0x4c8 8, 0x568 5, 0x5d8 5, 0xa08 4, 0x788 4
+r-v2b.samples: 67429 main-thread samples, 1030 in __expl_internal (1.53%), 49 right after its two FLDCW (+0x3a, +0x44)
+  RSP mod 4096 of the samples in __expl_internal: 0x560 431, 0x570 124, 0x5e0 116, 0x4d0 104, 0x790 85, 0x700 39, 0xa10 31, 0x558 26
+  RSP mod 4096 right after the FLDCW: 0x558 21, 0x4c8 7, 0x5d8 7, 0x568 4, 0xa08 4, 0x788 3
+r-v3b.samples: 67575 main-thread samples, 3874 in __expl_internal (5.73%), 2194 right after its two FLDCW (+0x3a, +0x44)
+  RSP mod 4096 of the samples in __expl_internal: 0x558 791, 0x560 539, 0x568 397, 0x5d8 374, 0x788 333, 0x4c8 261, 0x570 225, 0x790 205
+  RSP mod 4096 right after the FLDCW: 0x558 724, 0x568 362, 0x5d8 341, 0x788 306, 0x4c8 237, 0xa08 89

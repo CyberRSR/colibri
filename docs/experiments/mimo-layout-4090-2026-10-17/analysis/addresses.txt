@@ -1,0 +1,16 @@
+# Where libmingwex's __expl_internal (behind every expf) landed in each build of the last rounds;
+# the microbenchmark's slow starts are 0x3c0 and 0xbc0 of a page (micro/mingw-256x16.txt).
+# c/build/...                                   sha256 (12)    __expl_internal  page offset
+io-prefetch/bin-before                         fde8d98acc6d  0000000140070d00 0xd00
+io-prefetch/v1                                 03627cb930e6  0000000140072780 0x780
+io-prefetch/v2                                 c57b74e0fd2c  0000000140072b40 0xb40
+io-prefetch/v3                                 d0382c68c88f  0000000140072bc0 0xbc0  slow slot
+io-prefetch/v4                                 e1170344c80a  0000000140073780 0x780
+io-prefetch/v5                                 b5c1e652bb92  0000000140073880 0x880
+io-prefetch/bin-after                          127f376698a6  0000000140071340 0x340
+omp-spin2/bin-before                           dcd4b07e0c24  0000000140071340 0x340
+omp-spin2/bin-after                            347f0acd3275  0000000140072100 0x100
+layout/bin-before                              347f0acd3275  0000000140072100 0x100
+layout/bin-after                               af1c7ca677b2  0000000140072ac0 0xac0
+layout/bin-bad                                 cbb3a5a9690e  00000001400723c0 0x3c0  slow slot
+layout/bin-after-bad                           fd8994af85b6  0000000140072bc0 0xbc0  slow slot

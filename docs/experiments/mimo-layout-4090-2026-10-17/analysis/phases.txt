@@ -1,0 +1,39 @@
+# Main-thread phases from the I/O round's development logs (c/build/io-prefetch/dev/s2, the IOLOG builds):
+# v2 (one vote a choice) and v3 (+ MIMO_PREFETCH_ORDER, off and on), the three measured requests of each.
+# A>B: from event A to the next event B of the main thread. phases.py LOG
+v2-again.iolog: 3 measured requests, generation 20.229s a request
+  WAVE_BEGIN>WAVE_END            12.485s/req      5979 calls    2.0883 ms/call
+  ATTN_BEGIN>ATTN_END             3.192s/req      1890 calls    1.6891 ms/call
+  WAIT_BEGIN>WAIT_END             2.419s/req      2610 calls    0.9267 ms/call
+  MTP_BEGIN>MTP_END               0.880s/req        54 calls   16.2913 ms/call
+  DEMAND_END>MOE_BEGIN            0.557s/req      1863 calls    0.2991 ms/call
+  ATTN_END>DEMAND                 0.389s/req      1863 calls    0.2088 ms/call
+  MOE_BEGIN>WAVE_BEGIN            0.082s/req      1861 calls    0.0443 ms/call
+  MOE_END>ATTN_BEGIN              0.079s/req      1836 calls    0.0430 ms/call
+  DEMAND>DEMAND_END               0.056s/req      1863 calls    0.0303 ms/call
+  FWD_END>MTP_BEGIN               0.045s/req        25 calls    1.8017 ms/call
+  ATTN_END>ATTN_BEGIN             0.036s/req        27 calls    1.3446 ms/call
+v3-order0.iolog: 3 measured requests, generation 20.660s a request
+  WAVE_BEGIN>WAVE_END            12.582s/req      5777 calls    2.1779 ms/call
+  ATTN_BEGIN>ATTN_END             3.386s/req      1890 calls    1.7915 ms/call
+  WAIT_BEGIN>WAIT_END             2.188s/req      2362 calls    0.9262 ms/call
+  MTP_BEGIN>MTP_END               0.943s/req        54 calls   17.4565 ms/call
+  DEMAND_END>MOE_BEGIN            0.703s/req      1863 calls    0.3772 ms/call
+  ATTN_END>DEMAND                 0.539s/req      1863 calls    0.2892 ms/call
+  MOE_END>ATTN_BEGIN              0.083s/req      1836 calls    0.0454 ms/call
+  MOE_BEGIN>WAVE_BEGIN            0.082s/req      1862 calls    0.0441 ms/call
+  DEMAND>DEMAND_END               0.057s/req      1863 calls    0.0305 ms/call
+  FWD_END>MTP_BEGIN               0.045s/req        25 calls    1.8057 ms/call
+  ATTN_END>ATTN_BEGIN             0.045s/req        27 calls    1.6653 ms/call
+v3-order1.iolog: 3 measured requests, generation 20.602s a request
+  WAVE_BEGIN>WAVE_END            12.580s/req      5639 calls    2.2310 ms/call
+  ATTN_BEGIN>ATTN_END             3.402s/req      1890 calls    1.8002 ms/call
+  WAIT_BEGIN>WAIT_END             2.088s/req      2261 calls    0.9237 ms/call
+  MTP_BEGIN>MTP_END               0.952s/req        54 calls   17.6281 ms/call
+  DEMAND_END>MOE_BEGIN            0.715s/req      1863 calls    0.3840 ms/call
+  ATTN_END>DEMAND                 0.542s/req      1863 calls    0.2909 ms/call
+  MOE_BEGIN>WAVE_BEGIN            0.085s/req      1862 calls    0.0457 ms/call
+  MOE_END>ATTN_BEGIN              0.079s/req      1836 calls    0.0432 ms/call
+  DEMAND>DEMAND_END               0.060s/req      1863 calls    0.0323 ms/call
+  ATTN_END>ATTN_BEGIN             0.045s/req        27 calls    1.6772 ms/call
+  FWD_END>MTP_BEGIN               0.045s/req        25 calls    1.8069 ms/call
