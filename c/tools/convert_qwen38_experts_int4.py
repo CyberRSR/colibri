@@ -222,6 +222,15 @@ def read_header(path):
         return json.loads(f.read(n)), 8 + n
 
 
+def pread(fd, nbytes, offset):
+    """os.pread, which Windows does not have. There a seek and a read give the
+    same bytes: every process opens its own Source and reads it from one thread."""
+    if hasattr(os, "pread"):
+        return os.pread(fd, nbytes, offset)
+    os.lseek(fd, offset, os.SEEK_SET)
+    return os.read(fd, nbytes)
+
+
 class Source:
     """The routed experts of a Qwen3.8 snapshot, located by name in its shards."""
 
@@ -283,7 +292,7 @@ class Source:
             fd = self._fds[path] = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
         out = bytearray()
         while len(out) < nbytes:
-            chunk = os.pread(fd, nbytes - len(out), offset + len(out))
+            chunk = pread(fd, nbytes - len(out), offset + len(out))
             if not chunk:
                 raise IOError(f"{path}: short read at {offset + len(out)}")
             out += chunk
