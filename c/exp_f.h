@@ -62,4 +62,17 @@ static inline float exp_f(float x) {
 static inline float exp_f(float x) { return expf(x); }
 #endif
 
+/* exp_f behind a call, for the few sites where GCC arranged the arithmetic around the
+ * library's call: inline there, exp_f (its range branches, its asm) changed which
+ * multiply-adds GCC fused, and so the bits -- qwen38's sigmoid, qwen36's shared-expert
+ * gate, DeepSeek V4's DSpark gates. The sites come from GCC's final GIMPLE, where the
+ * .FMA calls are, compared with the build that called the library; a call to this is
+ * not the library's call either, so each site was checked, not assumed. Off the x87
+ * path it is expf, called as before. */
+#if EXP_F_X87
+static __attribute__((noinline, unused)) float exp_f_call(float x) { return exp_f(x); }
+#else
+static inline float exp_f_call(float x) { return expf(x); }
+#endif
+
 #endif

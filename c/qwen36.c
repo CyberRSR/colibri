@@ -3149,7 +3149,7 @@ static void qwen_shared_experts_cpu(Model *m, Layer *l, const float *x, int S,
             for(int i=0;i<I;i++){float sv=g[i];g[i]=(sv/(1.f+exp_f(-sv)))*u[i];}
             if(!qtd(l->qth_shd,hh,g,I,D)) matmul_d(hh,g,&l->sh_d,1,I,D);
             float sgate=1.f;
-            if(l->sh_gate){float sg=0.f;for(int i=0;i<D;i++)sg+=xs[i]*l->sh_gate[i];sgate=1.f/(1.f+exp_f(-sg));}
+            if(l->sh_gate){float sg=0.f;for(int i=0;i<D;i++)sg+=xs[i]*l->sh_gate[i];sgate=1.f/(1.f+exp_f_call(-sg));}
             float *os=out+(int64_t)s*D;
             for(int d=0;d<D;d++)os[d]+=sgate*hh[d];
         }
@@ -3165,7 +3165,7 @@ static void qwen_shared_experts_cpu(Model *m, Layer *l, const float *x, int S,
             for(int s=0;s<rows;s++){
                 const float *xs=x+(int64_t)(base+s)*D;
                 float sgate=1.f;
-                if(l->sh_gate){float sg=0.f;for(int i=0;i<D;i++)sg+=xs[i]*l->sh_gate[i];sgate=1.f/(1.f+exp_f(-sg));}
+                if(l->sh_gate){float sg=0.f;for(int i=0;i<D;i++)sg+=xs[i]*l->sh_gate[i];sgate=1.f/(1.f+exp_f_call(-sg));}
                 float *os=out+(int64_t)(base+s)*D;const float *hs=bh+(int64_t)s*D;
                 for(int d=0;d<D;d++)os[d]+=sgate*hs[d];
             }

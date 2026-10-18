@@ -510,9 +510,9 @@ static void v4_ds_sinkhorn(const float *mix, const float *scale,
                            float eps, float *pre, float *post, float *comb) {
     for (int j = 0; j < hc; j++) {
         float z = mix[j] * scale[0] + base[j];
-        pre[j] = 1.0f / (1.0f + exp_f(-z)) + eps;
+        pre[j] = 1.0f / (1.0f + exp_f_call(-z)) + eps;
         z = mix[j + hc] * scale[1] + base[j + hc];
-        post[j] = 2.0f / (1.0f + exp_f(-z));
+        post[j] = 2.0f / (1.0f + exp_f_call(-z));
     }
     for (int j = 0; j < hc; j++) {
         float maximum = -FLT_MAX;
@@ -981,7 +981,7 @@ static int v4_ds_final_hidden(float *out, const float *state,
         for (int i = 0; i < flat; i++) mix += weight[i] * state[i];
         float z = mix * inverse * g_v4ds_core.head_scale.data[0] +
                   g_v4ds_core.head_base.data[copy];
-        pre[copy] = 1.0f / (1.0f + exp_f(-z)) + config->hc_eps;
+        pre[copy] = 1.0f / (1.0f + exp_f_call(-z)) + config->hc_eps;
     }
     for (int i = 0; i < hidden; i++) {
         float sum = 0.0f;

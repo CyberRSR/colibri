@@ -633,8 +633,8 @@ static void q38_dense_matmul(Model *m,float *y,const float *x,const Q38Weight *w
 }
 
 static inline float q38_sigmoid(float x) {
-    if (x >= 0.f) { float z=exp_f(-x); return 1.f/(1.f+z); }
-    float z=exp_f(x); return z/(1.f+z);
+    if (x >= 0.f) { float z=exp_f_call(-x); return 1.f/(1.f+z); }
+    float z=exp_f_call(x); return z/(1.f+z);
 }
 static inline float q38_silu(float x) { return x * q38_sigmoid(x); }
 static inline float q38_softplus(float x) { return x > 20.f ? x : log1pf(exp_f(x)); }
