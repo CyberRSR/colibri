@@ -1,2 +1,9 @@
 # cmd.exe finds labels unreliably in LF-only batch files: keep CRLF on checkout.
 START-HERE.bat text eol=crlf
+
+# The tiny decision fixtures: ref.json pins their files by the SHA-256 of the
+# LF bytes the generators write (fixture_sha256). Keep the committed JSON LF in
+# a Windows checkout too, where core.autocrlf=true would hand back CRLF.
+c/clef_tiny/*.json text eol=lf
+c/laya_tiny/**/*.json text eol=lf
+c/gliner_decide_tiny/**/*.json text eol=lf

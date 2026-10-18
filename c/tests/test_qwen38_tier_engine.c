@@ -18,14 +18,8 @@
  * test_qwen36_tier_int8_engine.c: engine first, then the fake backend, then
  * the tier source, so the tier's statics (G, qs()) are readable here. */
 #define main qwen38_main_unused
-#include "../qwen38.c"
+#include "../qwen38.c"   /* through st.h, compat.h's setenv/unsetenv: MinGW has neither */
 #undef main
-
-#ifdef _WIN32
-#undef setenv
-#undef unsetenv
-#define unsetenv(name) _putenv_s(name, "")
-#endif
 
 #include "qwen36_fake_cuda.h"
 

@@ -54,13 +54,17 @@ import json
 import math
 import os
 import platform
-import resource
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
 import torch
+
+try:
+    import resource  # POSIX only (peak RSS)
+except ImportError:
+    resource = None
 
 VAE_SCALE = 16          # QwenImage21Pipeline.vae_scale_factor: one latent token per 16x16 pixels
 RATIO_EDGES = (0.01, 0.05, 0.10)
@@ -93,7 +97,15 @@ def rss_gb(kind: str = "RssAnon") -> float:
 
 
 def peak_rss_gb() -> float:
+    """0 where getrusage is missing (Windows)."""
+    if resource is None:
+        return 0.0
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1048576.0
+
+
+def loadavg_1min() -> float:
+    """0 where the OS keeps no load average (Windows)."""
+    return os.getloadavg()[0] if hasattr(os, "getloadavg") else 0.0
 
 
 def release_memory():
@@ -106,7 +118,7 @@ def release_memory():
 
 def log(msg: str):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}  (anon {rss_gb():.1f} GB, file {rss_gb('RssFile'):.1f} GB, "
-          f"avail {mem_available_gb():.1f} GB, load {os.getloadavg()[0]:.1f})", flush=True)
+          f"avail {mem_available_gb():.1f} GB, load {loadavg_1min():.1f})", flush=True)
 
 
 class MemoryGuard:
@@ -310,7 +322,7 @@ def encode_prompts(model_dir: Path, prompts: list[str], dtype: torch.dtype, dump
             with torch.no_grad():
                 prompt_embeds, mask, image_pad_mask = pipe.encode_prompt(prompt=prompt, device=torch.device("cpu"))
             enc_s = time.time() - t1
-            enc_load = os.getloadavg()[0]
+            enc_load = loadavg_1min()
             if mask is not None and not bool(mask.all()):
                 raise SystemExit("unexpected padding mask for a single prompt")
             if bool(image_pad_mask.any()):
@@ -418,7 +430,7 @@ class DenoiseRecorder:
 
     def _model_post(self, module, args, output):
         self.step_s.append(time.time() - self._t0)
-        self.step_load.append(os.getloadavg()[0])
+        self.step_load.append(loadavg_1min())
         noise = f32(output[0][0, -self.n:])
         if self.dump:
             self.noise_pred.append(noise)
@@ -575,7 +587,7 @@ def decode(model_dir: Path, items: list[dict], dump: bool):
                 pil = pipe.image_processor.postprocess(image, output_type="pil")[0]
             dec_s = time.time() - t1
             out = {"pil": pil, "rgba": torch.from_numpy(np.array(pil)).contiguous(), "decode_s": dec_s,
-                   "loadavg": os.getloadavg()[0]}
+                   "loadavg": loadavg_1min()}
             if dump:
                 out["vae_in"] = f32(latents[0, :, 0])
                 out["vae_out"] = f32(image[0])

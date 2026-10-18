@@ -9,14 +9,8 @@
  * must agree. The fake's coli_cuda_dn_step is the host-side reference of the
  * CUDA kernels, with the sigmoid gate Qwen3.8's norm uses. */
 #define main qwen38_main_unused
-#include "../qwen38.c"
+#include "../qwen38.c"   /* through st.h, compat.h's setenv/unsetenv: MinGW has neither */
 #undef main
-
-#ifdef _WIN32
-#undef setenv
-#undef unsetenv
-#define unsetenv(name) _putenv_s(name, "")
-#endif
 
 #include "qwen36_fake_cuda.h"
 

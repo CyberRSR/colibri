@@ -311,7 +311,9 @@ def write_safetensors(path, tensors):
 
 
 def write_json(path, value):
-    path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    # LF on Windows too: ref.json's fixture_sha256 pins these bytes
+    path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8",
+                    newline="\n")
 
 
 def main():
