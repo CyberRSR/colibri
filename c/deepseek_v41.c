@@ -74,6 +74,7 @@
 #include <immintrin.h>
 #endif
 #include "hyper_connections.h"
+#include "exp_f.h"
 #include "tok.h"
 #include "serve_codec.h"
 #include "serve_poll.h"
@@ -2192,7 +2193,7 @@ static int compressor_run(Model *m, int layer, const float *x, int n, int start_
                 }
                 float total = 0.0f, mixed = 0.0f;
                 for (int k = 0; k < ratio; k++) {
-                    float weight = expf(score[(size_t)(g * ratio + k) * hd + i] - best);
+                    float weight = exp_f(score[(size_t)(g * ratio + k) * hd + i] - best);
                     total += weight;
                     mixed += weight * kv[(size_t)(g * ratio + k) * hd + i];
                 }
@@ -2231,7 +2232,7 @@ static int compressor_run(Model *m, int layer, const float *x, int n, int start_
                 }
                 float total = 0.0f, mixed = 0.0f;
                 for (int k = 0; k < ratio; k++) {
-                    float weight = expf(l->cstate_score[(size_t)k * hd + i] - best);
+                    float weight = exp_f(l->cstate_score[(size_t)k * hd + i] - best);
                     total += weight;
                     mixed += weight * l->cstate_kv[(size_t)k * hd + i];
                 }
@@ -2644,7 +2645,7 @@ static void swiglu_into(const Cfg *c, float *gate, const float *up, int64_t coun
             if (u < -c->swiglu_limit) u = -c->swiglu_limit;
             if (g >  c->swiglu_limit) g =  c->swiglu_limit;
         }
-        gate[i] = (g / (1.0f + expf(-g))) * u;
+        gate[i] = (g / (1.0f + exp_f(-g))) * u;
     }
 }
 
@@ -2708,7 +2709,7 @@ static void moe_gate(Model *m, Layer *l, int E, int topk, float *scores,
     for (int e = 0; e < E; e++) {
         float value = scores[e] / c->gate_temp;
         /* sqrtsoftplus: softplus then square root, in fp32 as the vendor does */
-        float softplus = value > 20.0f ? value : logf(1.0f + expf(value));
+        float softplus = value > 20.0f ? value : logf(1.0f + exp_f(value));
         scores[e] = sqrtf(softplus);
     }
     for (int k = 0; k < topk; k++) {
@@ -3210,7 +3211,7 @@ static void vision_forward(Model *m, Vision *v, const float *patches, int n_h, i
                     if (scores[j] > best) best = scores[j];
                 }
                 float total = 0.0f;
-                for (int j = 0; j < n; j++) { scores[j] = expf(scores[j] - best); total += scores[j]; }
+                for (int j = 0; j < n; j++) { scores[j] = exp_f(scores[j] - best); total += scores[j]; }
                 float *dst = attended + (size_t)i * vd + (size_t)h * hd;
                 for (int d = 0; d < hd; d++) dst[d] = 0.0f;
                 for (int j = 0; j < n; j++) {
@@ -3231,7 +3232,7 @@ static void vision_forward(Model *m, Vision *v, const float *patches, int n_h, i
             float *hidden = hidden_all + (size_t)i * 2 * c->vision_inter;
             for (int j = 0; j < c->vision_inter; j++) {
                 float gate = hidden[j], up = hidden[c->vision_inter + j];
-                hidden[j] = (gate / (1.0f + expf(-gate))) * up;
+                hidden[j] = (gate / (1.0f + exp_f(-gate))) * up;
             }
         }
         mvb_rows(projected_all, vd, &b->w2, hidden_all, 2 * c->vision_inter, n);
@@ -4163,7 +4164,7 @@ static int serve_sample(const float *logits, int vocab, float temperature, float
     for (int i = 1; i < vocab; i++) if (logits[i] > top) top = logits[i];
     double total = 0.0;
     for (int i = 0; i < vocab; i++) {
-        float p = expf((logits[i] - top) / temperature);
+        float p = exp_f((logits[i] - top) / temperature);
         total += p;
         rank[i].p = p; rank[i].id = i;
     }
@@ -4190,7 +4191,7 @@ static double spec_accept_prob(const float *logits, int vocab, float temperature
     for (int i = 1; i < vocab; i++) if (logits[i] > top) top = logits[i];
     double total = 0.0;
     for (int i = 0; i < vocab; i++) {
-        float p = expf((logits[i] - top) / temperature);
+        float p = exp_f((logits[i] - top) / temperature);
         total += p;
         rank[i].p = p; rank[i].id = i;
     }

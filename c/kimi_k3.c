@@ -111,6 +111,7 @@
 #include "st.h"
 #include "tok.h"
 #include "quant.h"
+#include "exp_f.h"
 #ifdef COLI_CUDA
 #include "backend_cuda.h"
 #endif
@@ -334,10 +335,10 @@ static float *afcalloc(int64_t n){
     return fcalloc(n);
 #endif
 }
-static inline float sigmoidf_(float x){ return 1.f/(1.f+expf(-x)); }
-static inline float siluf_(float x){ return x/(1.f+expf(-x)); }
+static inline float sigmoidf_(float x){ return 1.f/(1.f+exp_f(-x)); }
+static inline float siluf_(float x){ return x/(1.f+exp_f(-x)); }
 static void softmax_(float *x, int n){ float m=x[0]; for(int i=1;i<n;i++) if(x[i]>m)m=x[i];
-    float s=0; for(int i=0;i<n;i++){ x[i]=expf(x[i]-m); s+=x[i]; } for(int i=0;i<n;i++) x[i]/=s; }
+    float s=0; for(int i=0;i<n;i++){ x[i]=exp_f(x[i]-m); s+=x[i]; } for(int i=0;i<n;i++) x[i]/=s; }
 static void rmsnorm_(float *out, const float *x, const float *w, int D, float eps){
     double ms=0; for(int i=0;i<D;i++) ms+=(double)x[i]*x[i];
     float r=1.f/sqrtf((float)(ms/D)+eps);
@@ -1456,7 +1457,7 @@ static void kda_forward(Model *m, Layer *l, int li, const float *x, int C, float
                 const float *rgt_h=rgt+(int64_t)h*hd; float *ma_h=ma+(int64_t)h*hd;
                 for(int i=0;i<hd;i++){
                     float z=rgt_h[i]+a->dt[(int64_t)h*hd+i];
-                    ma_h[i]=expf(c->gate_lb*sigmoidf_(a->A[h]*z));
+                    ma_h[i]=exp_f(c->gate_lb*sigmoidf_(a->A[h]*z));
                 }
                 mb[h]=sigmoidf_(bt[h]);
             }
@@ -1531,7 +1532,7 @@ static void kda_forward(Model *m, Layer *l, int li, const float *x, int C, float
             }
             for(int i=0;i<hd;i++){
                 float z=rgt[(int64_t)h*hd+i]+a->dt[(int64_t)h*hd+i];
-                alpha[i]=expf(c->gate_lb*sigmoidf_(a->A[h]*z));
+                alpha[i]=exp_f(c->gate_lb*sigmoidf_(a->A[h]*z));
             }
             float beta=sigmoidf_(bt[h]);
             float *S=(m->mux_rows?m->mux_rows[t].seq->kstate[li]:m->kstate[li])+(int64_t)h*hd*hd;
@@ -2921,7 +2922,7 @@ static int sample_tok(const float *lo, int V, float temp, float top_p){
     if(!rank){ fprintf(stderr,"OOM sampling\n"); exit(1); }
     for(int i=1;i<V;i++) if(lo[i]>mx) mx=lo[i];
     double sum=0;
-    for(int i=0;i<V;i++){ float p=expf((lo[i]-mx)/temp); sum+=p; rank[i]=(SampleProb){p,i}; }
+    for(int i=0;i<V;i++){ float p=exp_f((lo[i]-mx)/temp); sum+=p; rank[i]=(SampleProb){p,i}; }
     qsort(rank,(size_t)V,sizeof(SampleProb),sample_prob_desc);
     double cut=(top_p>0.f&&top_p<1.f)?top_p*sum:sum, kept=0; int n=0;
     while(n<V&&kept<cut) kept+=rank[n++].p;

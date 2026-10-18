@@ -110,6 +110,7 @@ static inline void vkt_ram_gave(void) {}
 #include <sys/resource.h>
 #endif
 #include "hyper_connections.h"   /* mHC, condiviso con deepseek_v4.c */
+#include "exp_f.h"               /* expf's bits without MinGW's two FLDCW (their cost moves with the code layout) */
 
 /* ---------- config ----------
  * Nested like Kimi K3's: the root carries the vision wrapper and `text_config`
@@ -1204,9 +1205,9 @@ static void layer_norm(float *out, const float *x, const float *w, const float *
 }
 
 static float sigmoidf_(float x) {
-    return x >= 0.0f ? 1.0f / (1.0f + expf(-x)) : expf(x) / (1.0f + expf(x));
+    return x >= 0.0f ? 1.0f / (1.0f + exp_f(-x)) : exp_f(x) / (1.0f + exp_f(x));
 }
-static float siluf_(float x) { return x / (1.0f + expf(-x)); }
+static float siluf_(float x) { return x / (1.0f + exp_f(-x)); }
 
 /* SwiGLU clampata: il gate ha solo il tetto, up e' limitato da entrambi i lati.
  * Vale sia per l'MLP denso che per gli esperti -- il testo di GLM-5.3 NON usa
@@ -1271,7 +1272,7 @@ static void kda_layer(const Cfg *c, const GLayer *l, const float *x, int tokens,
         for (int h = 0; h < H; h++)
             for (int d = 0; d < D; d++) {
                 int i = h * D + d;
-                dk[i] = c->gate_lb * sigmoidf_(expf(l->alog[h]) * (dk[i] + l->dt[i]));
+                dk[i] = c->gate_lb * sigmoidf_(exp_f(l->alog[h]) * (dk[i] + l->dt[i]));
             }
         for (int h = 0; h < H; h++) bt[h] = sigmoidf_(bt[h]);
         memcpy(qkv, q + t * P, (size_t)P * sizeof(float));
@@ -1404,7 +1405,7 @@ static void mla_layer(const Cfg *c, const GLayer *l, const float *x, int tokens,
             attended[(size_t)t * H + h] = used > 0;
             if (!used) continue;
             double total = 0.0;
-            for (int i = 0; i < used; i++) { score[i] = expf(score[i] - top); total += score[i]; }
+            for (int i = 0; i < used; i++) { score[i] = exp_f(score[i] - top); total += score[i]; }
             int seen_slot = 0;
             for (int i = 0; i < width; i++) {
                 const int at = chosen[i];
@@ -3345,7 +3346,7 @@ static int sample_token(const float *logits, int vocab) {
     double total = 0.0;
     const float inverse = 1.0f / g_temp;
     for (int i = 0; i < vocab; i++) {
-        probability[i] = expf((logits[i] - top) * inverse);
+        probability[i] = exp_f((logits[i] - top) * inverse);
         total += probability[i];
         order[i] = i;
     }

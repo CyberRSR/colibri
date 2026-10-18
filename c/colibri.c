@@ -79,6 +79,7 @@
 #include "route_trace.h"                           /* ROUTE_TRACE + .coli_usage, engine-agnostic (#700) */
 #include "kv_fp8.h"                               /* KV8=1: cache latente in fp8 e4m3 + scala per-riga */
 #include "kv_tq.h"                                /* KV_TQ=3|4: cache latente PolarQuant (rot+polare) */
+#include "exp_f.h"                                /* expf's bits without MinGW's two FLDCW (their cost moves with the code layout) */
 #ifdef _OPENMP
 #include <omp.h>                                  /* scratch per-thread nell'attention */
 #else
@@ -1643,9 +1644,9 @@ static void layernorm(float *v, const float *w, const float *b, int n, float eps
     for(int i=0;i<n;i++) v[i]=((float)(v[i]-mu))*r*w[i]+b[i];
 }
 static void softmax(float *x,int n){ float m=-1e30f; for(int i=0;i<n;i++) if(x[i]>m)m=x[i];
-    float s=0; for(int i=0;i<n;i++){x[i]=expf(x[i]-m);s+=x[i];} for(int i=0;i<n;i++) x[i]/=s; }
-static inline float sigmoidf(float x){ return 1.f/(1.f+expf(-x)); }
-static inline float siluf(float x){ return x/(1.f+expf(-x)); }
+    float s=0; for(int i=0;i<n;i++){x[i]=exp_f(x[i]-m);s+=x[i];} for(int i=0;i<n;i++) x[i]/=s; }
+static inline float sigmoidf(float x){ return 1.f/(1.f+exp_f(-x)); }
+static inline float siluf(float x){ return x/(1.f+exp_f(-x)); }
 
 /* FFN di un expert MoE (routed): gate+up -> silu(gate)*up -> down. Un solo helper per
  * i ~6 siti inline di moe() e (piu' avanti) il worker distribuito, che la chiama con i
@@ -5220,11 +5221,11 @@ static void attention_rows(Model *m, Layer *l, int layer, float *x, int S, int p
                     a*=c->attn_scale;
                     const float *vv=kvb_tile+jj*kvb_dim+(int64_t)h*(c->qk_nope+vh)+c->qk_nope;
                     if(a>mrun){
-                        float rs=expf(mrun-a);
+                        float rs=exp_f(mrun-a);
                         lrun*=rs; for(int d=0;d<vh;d++) cx[d]*=rs;
                         mrun=a;
                     }
-                    float w=expf(a-mrun);
+                    float w=exp_f(a-mrun);
                     lrun+=w; for(int d=0;d<vh;d++) cx[d]+=w*vv[d];
                 }
                 st[0]=mrun; st[1]=lrun;

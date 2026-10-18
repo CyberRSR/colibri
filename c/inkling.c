@@ -40,6 +40,7 @@
 #endif
 #include "omp_tune.h"
 #include "route_trace.h"
+#include "exp_f.h"
 #include "kv_prefix.h"
 #include "pin_pool.h"                          /* KV prefix reuse (shared) */                          /* shared routing telemetry (#700) */
 #include "serve_codec.h"
@@ -227,8 +228,8 @@ static double rss_gb(void) { struct rusage r; getrusage(RUSAGE_SELF, &r); return
 static double rss_gb(void) { struct rusage r; getrusage(RUSAGE_SELF, &r); return r.ru_maxrss / (1024.0*1024.0); }
 #endif
 static float *falloc(int64_t n) { float *p = malloc(n*sizeof(float)); if(!p){fprintf(stderr,"OOM %ld\n",(long)n);exit(1);} return p; }
-static float sigmoidf(float x) { return 1.f / (1.f + expf(-x)); }
-static float siluf(float x) { return x / (1.f + expf(-x)); }
+static float sigmoidf(float x) { return 1.f / (1.f + exp_f(-x)); }
+static float siluf(float x) { return x / (1.f + exp_f(-x)); }
 /* TOPP=p (0..1): top-p adattivo sui routed — tieni gli esperti fino al peso
  * cumulato p. 0 = spento (default): tutti i topk, calcolo invariato. */
 static float g_topp = 0.f;
@@ -727,7 +728,7 @@ static void rmsnorm_row(float *out, const float *x, const float *w, int D, float
 
 static void softmax_row(float *x, int n) {
     float m = -1e30f; for (int i = 0; i < n; i++) if (x[i] > m) m = x[i];
-    float s = 0; for (int i = 0; i < n; i++) { x[i] = expf(x[i]-m); s += x[i]; }
+    float s = 0; for (int i = 0; i < n; i++) { x[i] = exp_f(x[i]-m); s += x[i]; }
     for (int i = 0; i < n; i++) x[i] /= s;
 }
 
@@ -3003,7 +3004,7 @@ static int sample_logits(const float *logit, int n, float temp, float top_p) {
     PI *c = malloc((size_t)n * sizeof(PI));
     double sum = 0;
     for (int i = 0; i < n; i++) {
-        c[i].p = expf((logit[i] - logit[best]) / temp);
+        c[i].p = exp_f((logit[i] - logit[best]) / temp);
         c[i].i = i; sum += c[i].p;
     }
     qsort(c, n, sizeof(PI), pi_desc);

@@ -38,6 +38,7 @@
 
 #include "decide_serve.h"
 #include "matmul_f32.h"
+#include "exp_f.h"
 
 /* encode_record(max_length=16384), the default systemone() calls it with */
 #define CLEF_MAX_LENGTH 16384
@@ -453,7 +454,7 @@ static int clef_attention(const ClefAttn *a, const float *q_in, int nq, const fl
                     if (p[k] > mx) mx = p[k];
                 }
                 double sum = 0;
-                for (int k = 0; k < nk; k++) { p[k] = expf(p[k] - mx); sum += p[k]; }
+                for (int k = 0; k < nk; k++) { p[k] = exp_f(p[k] - mx); sum += p[k]; }
                 float inv = (float)(1.0 / sum);
                 for (int j = 0; j < hd; j++) c[j] = 0.f;
                 for (int k = 0; k < nk; k++) {

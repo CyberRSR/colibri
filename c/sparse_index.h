@@ -33,6 +33,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include "exp_f.h"
 
 /* Width of one query's index row: topk expanded tokens plus the tail. */
 static inline int coli_sparse_index_width(int topk, int pool, int with_tail) {
@@ -102,11 +103,11 @@ static inline int coli_sparse_index_select_range(int *out, const float *queries,
             }
             float total = 0.0f;
             for (int j = 0; j < pool; j++)
-                total += expf(gates[(size_t)(start + j) * dim + d] +
+                total += exp_f(gates[(size_t)(start + j) * dim + d] +
                               ape[(size_t)j * dim + d] - maximum);
             float mixed = 0.0f;
             for (int j = 0; j < pool; j++) {
-                const float weight = expf(gates[(size_t)(start + j) * dim + d] +
+                const float weight = exp_f(gates[(size_t)(start + j) * dim + d] +
                                           ape[(size_t)j * dim + d] - maximum) / total;
                 mixed += weight * keys[(size_t)(start + j) * dim + d];
             }
@@ -213,7 +214,7 @@ static inline int coli_sparse_attention_range(float *out, const float *queries,
             if (!used) continue;
             float total = 0.0f;
             for (int i = 0; i < used; i++) {
-                scores[i] = expf(scores[i] - maximum);
+                scores[i] = exp_f(scores[i] - maximum);
                 total += scores[i];
             }
             int index = 0;

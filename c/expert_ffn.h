@@ -45,6 +45,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <math.h>
+#include "exp_f.h"
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
 #include <immintrin.h>
@@ -294,7 +295,7 @@ static inline void xf_gate_up_rows(float *g, float *u, const XfExpert *e, const 
 }
 /* silu(g)*u over [0,F): the hidden row, in the engines' historical form */
 static inline void xf_swiglu(float *h, const float *g, const float *u, int F) {
-    for (int i = 0; i < F; i++) { float gv = g[i]; h[i] = (gv / (1.f + expf(-gv))) * u[i]; }
+    for (int i = 0; i < F; i++) { float gv = g[i]; h[i] = (gv / (1.f + exp_f(-gv))) * u[i]; }
 }
 /* down rows [r0,r1) of one expert for one hidden row */
 static inline void xf_down_rows(float *y, const XfExpert *e, const XfAct *h, int F, int r0, int r1, int mode) {

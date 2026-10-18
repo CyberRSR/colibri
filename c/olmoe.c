@@ -46,6 +46,7 @@
 #endif
 #include "omp_tune.h"
 #include "route_trace.h"                    /* shared routing telemetry (#700) */
+#include "exp_f.h"                          /* expf's bits without MinGW's two FLDCW (their cost moves with the code layout) */
 #include "kv_prefix.h"
 #include "pin_pool.h"                       /* piu scatti annidati */   /* riuso del prefisso tra turni (shared) */
 #include "serve_codec.h"
@@ -562,7 +563,7 @@ static void rmsnorm_row(float *out, const float *x, const float *w, int D, float
 
 static void softmax_row(float *x, int n) {
     float m = -1e30f; for (int i = 0; i < n; i++) if (x[i] > m) m = x[i];
-    float s = 0; for (int i = 0; i < n; i++) { x[i] = expf(x[i]-m); s += x[i]; }
+    float s = 0; for (int i = 0; i < n; i++) { x[i] = exp_f(x[i]-m); s += x[i]; }
     for (int i = 0; i < n; i++) x[i] /= s;
 }
 
@@ -1360,14 +1361,14 @@ static void moe_expert_row(const Model *m, const Slot *e, const float *xs, float
 #if defined(__AVX2__)
     if (moe_fused3(D, I)) {
         matmul_q_idot_pair_v3(g, u, xs, e->g, e->gs, e->u, e->us, D, I);   /* gate+up share one quant of xs */
-        for (int i = 0; i < I; i++) { float gv = g[i]; g[i] = (gv / (1.f + expf(-gv))) * u[i]; }
+        for (int i = 0; i < I; i++) { float gv = g[i]; g[i] = (gv / (1.f + exp_f(-gv))) * u[i]; }
         matmul_q_idot_v3(hh, g, e->d, e->ds, I, D);                        /* down_proj [D,I] */
     } else
 #endif
     {
     matmul_q(g, xs, e->g, e->gs, D, I);     /* gate_proj [I,D] */
     matmul_q(u, xs, e->u, e->us, D, I);     /* up_proj   [I,D] */
-    for (int i = 0; i < I; i++) { float gv = g[i]; g[i] = (gv / (1.f + expf(-gv))) * u[i]; }
+    for (int i = 0; i < I; i++) { float gv = g[i]; g[i] = (gv / (1.f + exp_f(-gv))) * u[i]; }
     matmul_q(hh, g, e->d, e->ds, I, D);     /* down_proj [D,I] */
     }
 }
@@ -1386,7 +1387,7 @@ static void moe_expert_rows(const Model *m, const Slot *e, const float *const *x
     matmul_q_rows(u, xs, n, e->u, e->us, D, I);     /* up_proj   [I,D] */
     for (int t = 0; t < n; t++) {
         float *gt = g[t]; const float *ut = u[t];
-        for (int i = 0; i < I; i++) { float gv = gt[i]; gt[i] = (gv / (1.f + expf(-gv))) * ut[i]; }
+        for (int i = 0; i < I; i++) { float gv = gt[i]; gt[i] = (gv / (1.f + exp_f(-gv))) * ut[i]; }
     }
     matmul_q_rows(hh, (const float *const *)g, n, e->d, e->ds, I, D);   /* down_proj [D,I] */
 }
@@ -2003,7 +2004,7 @@ static void pilot_prefetch(Model *m, int lnext, const float *x, int S) {
         float *exps = falloc(E);
         float sum_exps = 0.f;
         for (int e = 0; e < E; e++) {
-            exps[e] = expf(blended[e] - max_logit);
+            exps[e] = exp_f(blended[e] - max_logit);
             sum_exps += exps[e];
         }
 

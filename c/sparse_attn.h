@@ -28,6 +28,7 @@
 
 #include <math.h>
 #include <stddef.h>
+#include "exp_f.h"
 
 #if defined(__AVX2__)
 #include <immintrin.h>
@@ -57,11 +58,11 @@ static inline void coli_sparse_attend_scalar(float *out, const float *q, const f
         score[j] = dot * scale;
         if (score[j] > best) best = score[j];
     }
-    float denom = expf(sink - best);
+    float denom = exp_f(sink - best);
     for (int i = 0; i < hd; i++) out[i] = 0.0f;
     for (int j = 0; j < count; j++) {
         if (!(score[j] > -INFINITY)) continue;
-        float weight = expf(score[j] - best);
+        float weight = exp_f(score[j] - best);
         denom += weight;
         const float *k = kv + (size_t)idx[j] * hd;
         for (int i = 0; i < hd; i++) out[i] += weight * k[i];
@@ -95,13 +96,13 @@ static inline void coli_sparse_attend(float *out, const float *q, const float *k
         score[j] = dot * scale;
         if (score[j] > best) best = score[j];
     }
-    float denom = expf(sink - best);
+    float denom = exp_f(sink - best);
     int i = 0;
     for (; i + 8 <= hd; i += 8) _mm256_storeu_ps(out + i, _mm256_setzero_ps());
     for (; i < hd; i++) out[i] = 0.0f;
     for (int j = 0; j < count; j++) {
         if (!(score[j] > -INFINITY)) continue;
-        float weight = expf(score[j] - best);
+        float weight = exp_f(score[j] - best);
         denom += weight;
         const float *k = kv + (size_t)idx[j] * hd;
         __m256 w = _mm256_set1_ps(weight);

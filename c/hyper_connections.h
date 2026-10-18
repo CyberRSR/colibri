@@ -29,13 +29,14 @@
 
 #include <math.h>
 #include <stdlib.h>
+#include "exp_f.h"
 
 static inline float coli_hc_sigmoid(float value) {
     if (value >= 0.0f) {
-        float decay = expf(-value);
+        float decay = exp_f(-value);
         return 1.0f / (1.0f + decay);
     }
-    float growth = expf(value);
+    float growth = exp_f(value);
     return growth / (1.0f + growth);
 }
 
@@ -67,7 +68,7 @@ static inline int coli_hc_split_sinkhorn(float *pre, float *post, float *comb,
         }
         float sum = 0.0f;
         for (int column = 0; column < hc; column++) {
-            float value = expf(comb[row * hc + column] - maximum);
+            float value = exp_f(comb[row * hc + column] - maximum);
             comb[row * hc + column] = value;
             sum += value;
         }

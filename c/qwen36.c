@@ -81,6 +81,7 @@ static int qwen36_max_ctx(void) {
 #include "vk_tier.h"       /* optional Vulkan routed-expert tier (COLI_VULKAN=1; stubs without VK=1) */
 #include "route_trace.h"   /* the tier's expert history (.coli_usage), kept only while the tier is on */
 #include "expert_ffn.h"    /* routed experts: planar int4 kernel + layer runner */
+#include "exp_f.h"         /* expf's bits without MinGW's two FLDCW (their cost moves with the code layout) */
 #include "idot.h"          /* integer dot kernels for the dense trunk (COLI_DENSE_IDOT, COLI_DENSE_BITS) */
 #include "qwen38_vision.h" /* the ViT: the same tower in Qwen3.5/3.6/3.8 (#1757) */
 #include "qwen36_qpack.h"  /* optional MLX-affine qpack routed-expert path */
@@ -1723,12 +1724,12 @@ static void rmsnorm_row(float *out, const float *x, const float *w, int D, float
 
 static void softmax_row(float *x, int n) {
     float m = -1e30f; for (int i = 0; i < n; i++) if (x[i] > m) m = x[i];
-    float s = 0; for (int i = 0; i < n; i++) { x[i] = expf(x[i]-m); s += x[i]; }
+    float s = 0; for (int i = 0; i < n; i++) { x[i] = exp_f(x[i]-m); s += x[i]; }
     for (int i = 0; i < n; i++) x[i] /= s;
 }
 
 /* softplus(z) = log(1+exp(z)), stable for large z (HF GatedDeltaNet g_rule). */
-static float softplus_f(float z) { return z > 20.f ? z : log1pf(expf(z)); }
+static float softplus_f(float z) { return z > 20.f ? z : log1pf(exp_f(z)); }
 
 /* ---------- loading ---------- */
 static double req_num(jval *r, const char *k){
@@ -3107,7 +3108,7 @@ static void attention(Model *m, Layer *l, int layer, float *x, int S, int pos_ba
     float *ag = falloc((int64_t)S*H*hd);
     for (int s = 0; s < S; s++) for (int hh = 0; hh < H; hh++) for (int dd = 0; dd < hd; dd++) {
         int o = ((int64_t)s*H + hh)*hd + dd;
-        ag[o] = gate_dim ? ctx[o] * (1.f / (1.f + expf(-gate[o]))) : ctx[o];
+        ag[o] = gate_dim ? ctx[o] * (1.f / (1.f + exp_f(-gate[o]))) : ctx[o];
     }
     if (!qtd_batch(l->qth_o, out, ag, S, H*hd, D)) matmul_d(out, ag, &l->o, S, H*hd, D);
     free(q); free(k); free(vv); free(query); free(gate); free(ctx); free(ag);
@@ -3145,10 +3146,10 @@ static void qwen_shared_experts_cpu(Model *m, Layer *l, const float *x, int S,
             const float *xs=x+(int64_t)s*D;
             if(!qtd(l->qth_shg,g,xs,D,I)) matmul_d(g,xs,&l->sh_g,1,D,I);
             if(!qtd(l->qth_shu,u,xs,D,I)) matmul_d(u,xs,&l->sh_u,1,D,I);
-            for(int i=0;i<I;i++){float sv=g[i];g[i]=(sv/(1.f+expf(-sv)))*u[i];}
+            for(int i=0;i<I;i++){float sv=g[i];g[i]=(sv/(1.f+exp_f(-sv)))*u[i];}
             if(!qtd(l->qth_shd,hh,g,I,D)) matmul_d(hh,g,&l->sh_d,1,I,D);
             float sgate=1.f;
-            if(l->sh_gate){float sg=0.f;for(int i=0;i<D;i++)sg+=xs[i]*l->sh_gate[i];sgate=1.f/(1.f+expf(-sg));}
+            if(l->sh_gate){float sg=0.f;for(int i=0;i<D;i++)sg+=xs[i]*l->sh_gate[i];sgate=1.f/(1.f+exp_f(-sg));}
             float *os=out+(int64_t)s*D;
             for(int d=0;d<D;d++)os[d]+=sgate*hh[d];
         }
@@ -3159,12 +3160,12 @@ static void qwen_shared_experts_cpu(Model *m, Layer *l, const float *x, int S,
             int rows=S-base<B?S-base:B;
             matmul_d(bg,x+(int64_t)base*D,&l->sh_g,rows,D,I);
             matmul_d(bu,x+(int64_t)base*D,&l->sh_u,rows,D,I);
-            for(int64_t q=0;q<(int64_t)rows*I;q++){float sv=bg[q];bg[q]=(sv/(1.f+expf(-sv)))*bu[q];}
+            for(int64_t q=0;q<(int64_t)rows*I;q++){float sv=bg[q];bg[q]=(sv/(1.f+exp_f(-sv)))*bu[q];}
             matmul_d(bh,bg,&l->sh_d,rows,I,D);
             for(int s=0;s<rows;s++){
                 const float *xs=x+(int64_t)(base+s)*D;
                 float sgate=1.f;
-                if(l->sh_gate){float sg=0.f;for(int i=0;i<D;i++)sg+=xs[i]*l->sh_gate[i];sgate=1.f/(1.f+expf(-sg));}
+                if(l->sh_gate){float sg=0.f;for(int i=0;i<D;i++)sg+=xs[i]*l->sh_gate[i];sgate=1.f/(1.f+exp_f(-sg));}
                 float *os=out+(int64_t)(base+s)*D;const float *hs=bh+(int64_t)s*D;
                 for(int d=0;d<D;d++)os[d]+=sgate*hs[d];
             }
@@ -3385,7 +3386,7 @@ static void moe_vk_i8_cpu(Model *m, int layer, const float *x, int S, const int 
         slot_ensure_int8(m, e);
         matmul_qe(g, xs, e->g, e->gs, D, I);
         matmul_qe(u, xs, e->u, e->us, D, I);
-        for (int j = 0; j < I; j++) { float gv = g[j]; g[j] = (gv / (1.f + expf(-gv))) * u[j]; }
+        for (int j = 0; j < I; j++) { float gv = g[j]; g[j] = (gv / (1.f + exp_f(-gv))) * u[j]; }
         matmul_qd(ctb + (int64_t)i * D, g, e->d, e->ds, I, D);
         VktExpertSrc vs = vk_slot_src(m, e); vkt_note(layer, idx[i], &vs);
         slot_release(e);
@@ -3672,7 +3673,7 @@ static void moe_ex(Model *m, Layer *l, int layer, float *x, int S, float *out,
                 slot_ensure_int8(m, e);
                 matmul_qe(g, xs, e->g, e->gs, D, I);
                 matmul_qe(u, xs, e->u, e->us, D, I);
-                for (int i = 0; i < I; i++) { float gv = g[i]; g[i] = (gv / (1.f + expf(-gv))) * u[i]; }
+                for (int i = 0; i < I; i++) { float gv = g[i]; g[i] = (gv / (1.f + exp_f(-gv))) * u[i]; }
                 matmul_qd(hh, g, e->d, e->ds, I, D);
                 slot_release(e);
                 float w = val[kk]; float *os = out + (int64_t)s*D;
@@ -3685,13 +3686,13 @@ static void moe_ex(Model *m, Layer *l, int layer, float *x, int S, float *out,
                 int Ish = c->shared_inter;
                 if (!qtd(l->qth_shg, sh, xs, D, Ish))  matmul_d(sh, xs, &l->sh_g, 1, D, Ish);
                 if (!qtd(l->qth_shu, shu, xs, D, Ish)) matmul_d(shu, xs, &l->sh_u, 1, D, Ish);
-                for (int i = 0; i < Ish; i++) { float sv = sh[i]; sh[i] = (sv / (1.f + expf(-sv))) * shu[i]; }
+                for (int i = 0; i < Ish; i++) { float sv = sh[i]; sh[i] = (sv / (1.f + exp_f(-sv))) * shu[i]; }
                 if (!qtd(l->qth_shd, shd, sh, Ish, D)) matmul_d(shd, sh, &l->sh_d, 1, Ish, D);
                 float sgate = 1.f;
                 if (l->sh_gate) {
                     float sg = 0.f; const float *wg = l->sh_gate;
                     for (int i = 0; i < D; i++) sg += xs[i] * wg[i];
-                    sgate = 1.f / (1.f + expf(-sg));
+                    sgate = 1.f / (1.f + exp_f(-sg));
                 }
                 float *os = out + (int64_t)s*D;
                 for (int d = 0; d < D; d++) os[d] += sgate * shd[d];
@@ -3712,7 +3713,7 @@ static void moe_ex(Model *m, Layer *l, int layer, float *x, int S, float *out,
                 slot_ensure_int8(m, e);
                 matmul_qe(g, xs, e->g, e->gs, D, I);
                 matmul_qe(u, xs, e->u, e->us, D, I);
-                for (int i = 0; i < I; i++) { float gv = g[i]; g[i] = (gv / (1.f + expf(-gv))) * u[i]; }
+                for (int i = 0; i < I; i++) { float gv = g[i]; g[i] = (gv / (1.f + exp_f(-gv))) * u[i]; }
                 matmul_qd(hh, g, e->d, e->ds, I, D);
                 slot_release(e);
                 float w = val[kk];
@@ -3837,8 +3838,8 @@ static void deltanet(Model *m, Layer *l, int layer, float *x, int S, int pos_bas
         matmul(bb, x, l->dn_b, 1, H, vh);
         matmul(ab, x, l->dn_a, 1, H, vh);
         for (int h = 0; h < vh; h++) {
-            beta[h] = 1.f / (1.f + expf(-bb[h]));
-            gg[h] = expf(-expf(l->dn_alog[h]) * softplus_f(ab[h] + l->dn_dtbias[h]));   /* egh */
+            beta[h] = 1.f / (1.f + exp_f(-bb[h]));
+            gg[h] = exp_f(-exp_f(l->dn_alog[h]) * softplus_f(ab[h] + l->dn_dtbias[h]));   /* egh */
         }
         dn_gpu_push(m, layer);
         int ok = m->dn_dev_fresh[layer] && qt_dn_gpu_step(layer, x, out, gg, beta);
@@ -3878,8 +3879,8 @@ static void deltanet(Model *m, Layer *l, int layer, float *x, int S, int pos_bas
         const float *b = bb + (int64_t)r * vh, *a = ab + (int64_t)r * vh;
         float *outr = outrb + (int64_t)r * value_dim;
         for (int h = 0; h < vh; h++) {
-            beta[h] = 1.f / (1.f + expf(-b[h]));
-            gg[h] = -expf(l->dn_alog[h]) * softplus_f(a[h] + l->dn_dtbias[h]);
+            beta[h] = 1.f / (1.f + exp_f(-b[h]));
+            gg[h] = -exp_f(l->dn_alog[h]) * softplus_f(a[h] + l->dn_dtbias[h]);
         }
         /* causal depthwise conv1d (groups=conv_dim, kernel=convk) with carried ring
          * (serial: ~33k FLOP, an OpenMP fork/join would cost more) */
@@ -3889,7 +3890,7 @@ static void deltanet(Model *m, Layer *l, int layer, float *x, int S, int pos_bas
             float acc = 0.f;
             for (int kk = 0; kk < convk - 1; kk++) acc += w[kk] * rg[kk];
             acc += w[convk - 1] * qkv[cc];
-            conv_out[cc] = acc / (1.f + expf(-acc));   /* silu */
+            conv_out[cc] = acc / (1.f + exp_f(-acc));   /* silu */
         }
         /* advance ring: drop oldest, append current token's qkv */
         for (int cc = 0; cc < conv_dim; cc++) {
@@ -3928,7 +3929,7 @@ static void deltanet(Model *m, Layer *l, int layer, float *x, int S, int pos_bas
         for (int h = 0; h < vh; h++) {
             float kvl[512], dl[512];   /* vdim <= 512 */
             float *Sh = rec + (int64_t)h * kdim * vdim;
-            float egh = expf(gg[h]);
+            float egh = exp_f(gg[h]);
             for (int t = 0; t < kdim * vdim; t++) Sh[t] *= egh;
             const float *kd = k + (int64_t)h * kdim;
             const float *vd = v_in + (int64_t)h * vdim;
@@ -3974,7 +3975,7 @@ static void deltanet(Model *m, Layer *l, int layer, float *x, int S, int pos_bas
             float r = 1.f / sqrtf((float)(ms / vdim) + c->eps);
             for (int d = 0; d < vdim; d++) {
                 float val = o[d] * r * w[d];
-                outr[(int64_t)h * vdim + d] = val * zr[d] / (1.f + expf(-zr[d]));
+                outr[(int64_t)h * vdim + d] = val * zr[d] / (1.f + exp_f(-zr[d]));
             }
         }
         if (dbg && base + r == 0) {   /* DN_DBG: the first token of layer 0 */
@@ -3994,9 +3995,9 @@ static void deltanet(Model *m, Layer *l, int layer, float *x, int S, int pos_bas
             fwrite(ob, sizeof(float), H, dbg);
             fwrite(bb, sizeof(float), vh, dbg);
             fwrite(ab, sizeof(float), vh, dbg);
-            for (int h = 0; h < vh; h++) beta[h] = 1.f / (1.f + expf(-bb[h]));
+            for (int h = 0; h < vh; h++) beta[h] = 1.f / (1.f + exp_f(-bb[h]));
             fwrite(beta, sizeof(float), vh, dbg);
-            for (int h = 0; h < vh; h++) gg[h] = -expf(l->dn_alog[h]) * softplus_f(ab[h] + l->dn_dtbias[h]);
+            for (int h = 0; h < vh; h++) gg[h] = -exp_f(l->dn_alog[h]) * softplus_f(ab[h] + l->dn_dtbias[h]);
             fwrite(gg, sizeof(float), vh, dbg);
             fclose(dbg); dbg = NULL;
         }
@@ -4502,7 +4503,7 @@ static void pilot_prefetch(Model *m, int lnext, const float *x, int S) {
         int cand = 0; int idx[128];
         float max_logit = -1e30f; for (int e = 0; e < E; e++) if (blended[e] > max_logit) max_logit = blended[e];
         float *exps = falloc(E); float sum_exps = 0.f;
-        for (int e = 0; e < E; e++) { exps[e] = expf(blended[e] - max_logit); sum_exps += exps[e]; }
+        for (int e = 0; e < E; e++) { exps[e] = exp_f(blended[e] - max_logit); sum_exps += exps[e]; }
         float cum_sum = 0.f; int min_cand = c->topk; int max_cand = c->topk * g_wide;
         if (max_cand < min_cand) max_cand = min_cand; if (max_cand > 128) max_cand = 128; if (max_cand > E) max_cand = E;
         for (int kk = 0; kk < max_cand; kk++) {
@@ -5217,7 +5218,7 @@ static int serve_sample(const float *lo, int V, float temp, float top_p){
     if(!rank){ fprintf(stderr,"OOM sampling\n"); exit(1); }
     for(int i=1;i<V;i++) if(lo[i]>mx) mx=lo[i];
     double sum=0;
-    for(int i=0;i<V;i++){ float p=expf((lo[i]-mx)/temp); sum+=p; rank[i]=(SampleProb){p,i}; }
+    for(int i=0;i<V;i++){ float p=exp_f((lo[i]-mx)/temp); sum+=p; rank[i]=(SampleProb){p,i}; }
     qsort(rank,(size_t)V,sizeof(SampleProb),sample_prob_desc);
     double cut=(top_p>0.f&&top_p<1.f)?top_p*sum:sum, kept=0; int n=0;
     while(n<V&&kept<cut) kept+=rank[n++].p;

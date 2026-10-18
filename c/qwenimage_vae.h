@@ -45,6 +45,7 @@
 #include "st.h"
 #include "json.h"
 #include "qi_gemm.h"
+#include "exp_f.h"
 #ifdef __linux__
 #include <sys/mman.h>
 #include <unistd.h>
@@ -363,7 +364,7 @@ static inline void qiv_norm_px(float *d, const float *s, int C, const float *g, 
     if (den < 1e-12f) den = 1e-12f;
     for (int c = 0; c < C; c++) {
         float v = s[c] / den * scale * g[c];
-        d[c] = silu ? v / (1.f + expf(-v)) : v;
+        d[c] = silu ? v / (1.f + exp_f(-v)) : v;
     }
 }
 
@@ -518,7 +519,7 @@ static int qiv_attention(const QiVae *v, float *x, int N){
             float *s = S + (size_t)i * N, mx = -INFINITY;
             for (int j = 0; j < N; j++) { s[j] *= isd; if (s[j] > mx) mx = s[j]; }
             double sum = 0;
-            for (int j = 0; j < N; j++) { s[j] = expf(s[j] - mx); sum += s[j]; }
+            for (int j = 0; j < N; j++) { s[j] = exp_f(s[j] - mx); sum += s[j]; }
             float inv = (float)(1.0 / sum);
             for (int j = 0; j < N; j++) s[j] *= inv;
         }
