@@ -241,7 +241,12 @@ The dense weights stay resident; from the checkpoint headers, what the engine ho
 
 Each cached expert is 18.9 MiB, so one slot per layer over the 69 MoE layers is
 1.27 GiB. The KV cache covers only the 10 full-attention layers (the other 60 keep a
-ring of 128 positions): 0.78 GiB at an 8k context.
+ring of 128 positions): 102 KB a position, 0.78 GiB at an 8k context, 26.8 GB at 256k
+and 107 GB at the checkpoint's 1,048,576. The engine takes that memory as a
+conversation reaches the positions, not at start-up, and the expert pool makes room
+for it ([`MIMO_KV_STEP`](#environment)): with the RTX 4090 profile's 104 experts a
+layer cached, about 300k tokens of context fit beside the cache in 192 GB, and a
+conversation longer than that decodes from a smaller cache.
 
 The same machine, prompt and 128 tokens as the Flash table above:
 
@@ -456,7 +461,10 @@ photo equal to the same prompt computed cold) are the CPU's, and hold with
 | `MIMO_ROUTE_TRACE` | unset | Write every MoE step's routing, and the router's ranking at the prefetcher's two points, to this file for `tools/mimo_route_sim.py`. |
 | `MIMO_READ_THREADS` | -- | No longer read: the readers are `MIMO_IO_PER_DRIVE` per device (`MIMO_IO_THREADS` for one shared queue). |
 | `MIMO_CHUNK` | 512 | Prompt tokens per prefill block. Each block computes an expert once for all its rows, so larger blocks read and stream fewer experts: a 2260-token prompt took 498 s in blocks of 64 and 213 s in blocks of 512 (RTX 4090 profile; the logits do not depend on the blocks). |
-| `MIMO_CTX` / `CTX` | 8192 | Context the KV cache is sized for (capped by the checkpoint). |
+| `MIMO_CTX` / `CTX` | 8192 | Context the KV cache is sized for (capped by the checkpoint: 1,048,576 on Pro). |
+| `MIMO_KV_STEP` | 4096 | Windows: the full-attention layers' caches have address space for the whole context from the start, and their memory is committed this many positions at a time as a conversation reaches them (elsewhere the OS commits a page when it is first written), so a 1M context costs nothing until a conversation is that long. |
+| `MIMO_KV_SPARE_GB` | 4 | Before positions are committed, the expert pool (`MIMO_CACHE_GLOBAL`) gives back its least recently used buffers when they would leave less memory than this available, and stops growing into what is left (down to two routing steps' worth a MoE layer); the engine prints a line when it does. Only when experts are read changes, never a number. |
+| `MIMO_MEM_TEST_GB` | unset | Tests: the memory available is this, less what the caches and the pool hold, instead of the OS's measure (`tests/mimo_tiny_harness.py` makes the pool give buffers back). |
 | `MIMO_CAP` | 64 | Expert cache slots per layer when no argument gives one. |
 | `MIMO_MAX_IMAGE_TOKENS` | unset | Gateway: ceiling on what one picture costs in prompt tokens. |
 | `MIMO_LOGITS` | unset | Oracle: dump every prompt position's logits (f32) to this file. |

@@ -625,6 +625,9 @@ Read **only** by `c/mimo.c` (and `MIMO_MAX_IMAGE_TOKENS` by the gateway). See [m
 | `MIMO_READ_THREADS` | -- | MiMo: no longer read; see `MIMO_IO_PER_DRIVE`. |
 | `MIMO_CHUNK` | 512 | MiMo: prompt tokens per prefill block (larger blocks read fewer experts per prompt token). |
 | `MIMO_CTX` | `CTX`, else 8192 | MiMo: context the KV cache is sized for, capped by the checkpoint. |
+| `MIMO_KV_STEP` | 4096 | MiMo, Windows: the full-attention caches' memory is committed this many positions at a time as a conversation reaches them, so a long context costs nothing until it is used. |
+| `MIMO_KV_SPARE_GB` | 4 | MiMo: the expert pool gives back buffers before the attention caches would leave less memory than this available. |
+| `MIMO_MEM_TEST_GB` | unset | MiMo tests: the memory available is this less the caches' and the pool's, instead of the OS's measure. |
 | `MIMO_CAP` | 64 | MiMo: expert cache slots per layer when no argument gives one; never below one routing step. |
 | `MIMO_MAX_IMAGE_TOKENS` | unset | MiMo, gateway: ceiling on what one picture costs in prompt tokens. |
 | `MIMO_LOGITS` | unset | MiMo, oracle: dump every prompt position's logits (f32) to this file. |

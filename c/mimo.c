@@ -991,6 +991,7 @@ typedef struct {
     float *K[MIMO_MAX_LAYERS], *V[MIMO_MAX_LAYERS];
     int *ring_pos[MIMO_MAX_LAYERS];
     int pos;
+    int kv_have;
     kv_prefix kvp;
 } MimoSeq;
 typedef struct { MimoSeq *seq; int pos; } MimoRow;
@@ -1007,6 +1008,7 @@ typedef struct {
     int64_t part[6], e_bytes;    /* down, down scale, gate, gate scale, up, up scale */
     LCache cache[MIMO_MAX_LAYERS];
     int ctx, pos;
+    int kv_have;                 /* the full layers' cache rows committed (kv_reach) */
     kv_prefix kvp;
     uint64_t clock, hits, miss, bytes_read, forwards;
     double t_disk, t_expert, t_attn;
@@ -1674,9 +1676,131 @@ static void experts_ensure(Model *m, int li, const int *want, int n, Slot **out)
     for (int j = 0; j < n; j++) out[j]->pin--;
 }
 
+/* ---- the attention caches' memory ------------------------------------------------------
+ * A full-attention layer's K and V hold a row per position of the context: on Pro 10 layers
+ * of 8 x (192 + 128) floats, 102 KB a position, 107 GB for its million. On Windows the
+ * address space of every row is reserved at the start and the memory committed as a
+ * conversation reaches the positions (kv_reach), MIMO_KV_STEP (4096) of them at a time, so a
+ * long context costs memory only once a conversation is that long; elsewhere the OS commits
+ * a page when it is first written. Before positions are committed the expert pool makes room
+ * for them (pool_fit): when they would leave less than MIMO_KV_SPARE_GB (4) of memory
+ * available it gives back its least recently used buffers, and it never grows into what is
+ * left -- a long conversation decodes from a smaller expert cache instead of paging. Only
+ * when the time positions are reached changes, never a number. */
+static int g_kv_step;
+static double g_kv_spare;
+static double g_mem_test;   /* MIMO_MEM_TEST_GB (tests): the memory there is, the caches' own use taken off it */
+
+static void *kv_mem(size_t bytes, int lazy, const char *what) {
+#ifdef _WIN32
+    void *p = VirtualAlloc(NULL, bytes ? bytes : 1, lazy ? MEM_RESERVE : MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if (!p) { fprintf(stderr, "[mimo] out of memory: %s, %.2f GB (error %lu)\n", what, bytes / 1e9, GetLastError()); exit(1); }
+    return p;
+#else
+    (void)lazy;
+    return xmalloc(bytes ? bytes : 1, what);
+#endif
+}
+
+static void kv_mem_free(void *p) {
+#ifdef _WIN32
+    if (p) VirtualFree(p, 0, MEM_RELEASE);
+#else
+    free(p);
+#endif
+}
+
+/* MIMO_CACHE_GLOBAL: give back up to n of the pool's buffers, the least recently used first
+ * (none pinned, loading or read ahead), while it holds more than `least`. Returns how many. */
+static int pool_release(Model *m, int n, int least) {
+    int done = 0;
+    while (done < n && g_slots_used > least) {
+        Slot *v = NULL; int vl = -1;
+        uint64_t oldest = UINT64_MAX;
+        for (int l2 = 0; l2 < m->c.n_layers; l2++) {
+            LCache *c2 = &m->cache[l2];
+            if (!c2->s) continue;
+            for (int k = 0; k < c2->n; k++) {
+                Slot *x = &c2->s[k];
+                if (!x->base || x->pin || x->pref ||
+                    atomic_load_explicit(&x->state, memory_order_acquire) == SLOT_LOADING) continue;
+                uint64_t age = x->eid >= 0 && x->used ? x->used + m->lbonus[l2] : 0;
+                if (age < oldest) { oldest = age; v = x; vl = l2; }
+            }
+        }
+        if (!v) break;
+        if (v->eid >= 0) m->cache[vl].by_expert[v->eid] = -1;
+        v->eid = -1; v->used = 0;
+        compat_aligned_free(v->base);
+        v->base = v->buf = NULL;
+        atomic_store_explicit(&v->state, SLOT_EMPTY, memory_order_release);
+        m->cache[vl].nbuf--; g_slots_used--; done++;
+    }
+    return done;
+}
+
+/* The expert pool after `need` more bytes of the caches (`have` positions hold theirs): it
+ * keeps what leaves MIMO_KV_SPARE_GB available, at least two routing steps' worth a MoE layer. */
+static void pool_fit(Model *m, size_t need, size_t have) {
+    double sb = (double)m->e_bytes + 8192;
+    double avail = g_mem_test > 0 ? g_mem_test - (double)have - (double)g_slots_used * sb
+                                  : compat_mem_available_gb() * 1e9;
+    if (!g_cache_global || (g_mem_test <= 0 && !(avail > 0))) return;   /* layers of their own: fixed; or not measurable */
+    double room = avail - (double)need - g_kv_spare;
+    int least = m->n_moe * 2 * m->c.topk, before = g_slots_total, freed = 0;
+    if (room < 0) freed = pool_release(m, (int)ceil(-room / sb), least);
+    double can = room > 0 ? room / sb : 0;
+    if ((double)g_slots_used + can < (double)g_slots_total)
+        g_slots_total = g_slots_used + (int)can > least ? g_slots_used + (int)can : least;
+    if (g_slots_total != before || freed)
+        fprintf(stderr, "[mimo] expert pool: %d -> %d buffers (%d given back) to make room for the attention caches\n",
+                before, g_slots_total, freed);
+}
+
+/* Commit the full layers' rows [*have, upto) of the caches K[li], V[li] (the Model's or a
+ * parked conversation's), MIMO_KV_STEP positions at a time. */
+static void kv_reach_caches(Model *m, float *const *K, float *const *V, int *have, int upto) {
+    if (upto <= *have) return;
+    Cfg *c = &m->c;
+    int to = (int)(((int64_t)upto + g_kv_step - 1) / g_kv_step * g_kv_step);
+    if (to > m->ctx) to = m->ctx;
+    size_t kr = (size_t)c->kv_heads[0] * c->head_dim[0] * sizeof(float);
+    size_t vr = (size_t)c->kv_heads[0] * c->v_dim[0] * sizeof(float);
+    int full = 0;
+    for (int li = 0; li < c->n_layers; li++) full += !c->swa[li];
+    pool_fit(m, (size_t)(to - *have) * (kr + vr) * (size_t)full, (size_t)*have * (kr + vr) * (size_t)full);
+#ifdef _WIN32
+    for (int li = 0; li < c->n_layers; li++) {
+        if (c->swa[li]) continue;
+        if (!VirtualAlloc((char *)K[li] + kr * (size_t)*have, kr * (size_t)(to - *have), MEM_COMMIT, PAGE_READWRITE) ||
+            !VirtualAlloc((char *)V[li] + vr * (size_t)*have, vr * (size_t)(to - *have), MEM_COMMIT, PAGE_READWRITE)) {
+            fprintf(stderr, "[mimo] out of memory for the attention caches of positions %d..%d (error %lu)\n",
+                    *have, to, GetLastError());
+            exit(1);
+        }
+    }
+#endif
+    *have = to;
+}
+
+/* The Model's caches hold the positions before `upto`. */
+static void kv_reach(Model *m, int upto) {
+    if (upto <= m->kv_have) return;
+    float *K[MIMO_MAX_LAYERS], *V[MIMO_MAX_LAYERS];
+    for (int li = 0; li < m->c.n_layers; li++) { K[li] = m->L[li].K; V[li] = m->L[li].V; }
+    kv_reach_caches(m, K, V, &m->kv_have, upto);
+}
+
 static void kv_alloc(Model *m, int ctx) {
     Cfg *c = &m->c;
     m->ctx = ctx;
+    g_kv_step = env_int("MIMO_KV_STEP", 4096);
+    if (g_kv_step < 1) g_kv_step = 1;
+    const char *sp = getenv("MIMO_KV_SPARE_GB");
+    g_kv_spare = (sp && *sp ? atof(sp) : 4.0) * 1e9;
+    if (!(g_kv_spare >= 0)) g_kv_spare = 0;
+    const char *mt = getenv("MIMO_MEM_TEST_GB");
+    g_mem_test = mt && *mt ? atof(mt) * 1e9 : 0;
     /* With n MTP drafts a step, a window's ring keeps n - 1 more positions than the window:
      * the rows a step drops have overwritten the slots of the positions a ring earlier, of
      * which the next step would still read n - 1 (with one draft, none) -- the trunk's, and
@@ -1686,12 +1810,13 @@ static void kv_alloc(Model *m, int ctx) {
         Layer *l = &m->L[li];
         int k = c->swa[li];
         l->rows = k ? (c->window + extra < ctx ? c->window + extra : ctx) : ctx;
-        free(l->K); free(l->V); free(l->ring_pos);
-        l->K = xmalloc((size_t)l->rows * c->kv_heads[k] * c->head_dim[k] * sizeof(float), "K cache");
-        l->V = xmalloc((size_t)l->rows * c->kv_heads[k] * c->v_dim[k] * sizeof(float), "V cache");
+        kv_mem_free(l->K); kv_mem_free(l->V); free(l->ring_pos);
+        l->K = kv_mem((size_t)l->rows * c->kv_heads[k] * c->head_dim[k] * sizeof(float), !k, "K cache");
+        l->V = kv_mem((size_t)l->rows * c->kv_heads[k] * c->v_dim[k] * sizeof(float), !k, "V cache");
         l->ring_pos = xmalloc((size_t)l->rows * sizeof(int), "ring positions");
         for (int r = 0; r < l->rows; r++) l->ring_pos[r] = -1;
     }
+    m->kv_have = 0;
     kv_prefix_alloc(&m->kvp, ctx);
 }
 
@@ -2718,6 +2843,7 @@ static void forward(Model *m, const int *ids, int n, float *logits, int all_rows
     Cfg *c = &m->c;
     int H = c->hidden;
     if (m->pos + n > m->ctx) { fprintf(stderr, "[mimo] context full (%d + %d > %d)\n", m->pos, n, m->ctx); exit(1); }
+    kv_reach(m, m->pos + n);
     float *h = xmalloc((size_t)n * H * sizeof(float), "residual");
     float *xn = xmalloc((size_t)n * H * sizeof(float), "normed");
     float *tmp = xmalloc((size_t)n * H * sizeof(float), "block out");
@@ -2857,9 +2983,9 @@ static void mimo_seq_swap(Model *m, MimoSeq *q) {
         l->K = q->K[li]; l->V = q->V[li]; l->ring_pos = q->ring_pos[li];
         q->K[li] = K; q->V[li] = V; q->ring_pos[li] = rp;
     }
-    int pos = m->pos; kv_prefix p = m->kvp;
-    m->pos = q->pos; m->kvp = q->kvp;
-    q->pos = pos; q->kvp = p;
+    int pos = m->pos, have = m->kv_have; kv_prefix p = m->kvp;
+    m->pos = q->pos; m->kv_have = q->kv_have; m->kvp = q->kvp;
+    q->pos = pos; q->kv_have = have; q->kvp = p;
 }
 /* A conversation's caches of its own, the shape kv_alloc gives the Model's. */
 static void mimo_seq_alloc(Model *m, MimoSeq *q) {
@@ -2868,8 +2994,8 @@ static void mimo_seq_alloc(Model *m, MimoSeq *q) {
     for (int li = 0; li < c->n_layers; li++) {
         Layer *l = &m->L[li];
         int k = c->swa[li];
-        q->K[li] = xmalloc((size_t)l->rows * c->kv_heads[k] * c->head_dim[k] * sizeof(float), "K cache");
-        q->V[li] = xmalloc((size_t)l->rows * c->kv_heads[k] * c->v_dim[k] * sizeof(float), "V cache");
+        q->K[li] = kv_mem((size_t)l->rows * c->kv_heads[k] * c->head_dim[k] * sizeof(float), !k, "K cache");
+        q->V[li] = kv_mem((size_t)l->rows * c->kv_heads[k] * c->v_dim[k] * sizeof(float), !k, "V cache");
         q->ring_pos[li] = xmalloc((size_t)l->rows * sizeof(int), "ring positions");
         for (int r = 0; r < l->rows; r++) q->ring_pos[li][r] = -1;
     }
@@ -2887,6 +3013,8 @@ static void forward_rows(Model *m, const MimoRow *rows, const int *ids, int n, f
     float *h = xmalloc((size_t)n * H * sizeof(float), "residual");
     float *xn = xmalloc((size_t)n * H * sizeof(float), "normed");
     float *tmp = xmalloc((size_t)n * H * sizeof(float), "block out");
+    for (int t = 0; t < n; t++)
+        kv_reach_caches(m, rows[t].seq->K, rows[t].seq->V, &rows[t].seq->kv_have, rows[t].pos + 1);
     embed_rows(m, ids, n, h);
     m->mux_rows = rows;
     layers_cpu(m, h, n, 0, 0, xn, tmp, NULL);

@@ -936,8 +936,9 @@ def _mimo_geometry(config, context, _model_dir):
     return PlannerGeometry(state, fixed, workspace, experts)
 
 
-# What the checkpoint carries and mimo.c never loads: the three MTP layers (no
-# speculative decoding yet) and the audio encoder (text and images only).
+# What the plan does not count: the MTP layers (mimo.c drafts with Pro's first
+# two, 0.8 GB each, and does not read Flash's) and the audio encoder, which it
+# never loads (text and images only).
 _MIMO_NOT_LOADED = re.compile(r"^(?:model\.mtp\.|audio_encoder\.|speech_embeddings\.)")
 
 

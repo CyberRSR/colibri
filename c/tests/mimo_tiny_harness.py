@@ -134,6 +134,27 @@ def check_prefetch_cancel(binary, fixture, reference):
           f"{cancelled} prefetches cancelled unread")
 
 
+def check_kv_memory(binary, fixture, reference):
+    """The full layers' caches committed four positions at a time (MIMO_KV_STEP), in a
+    memory too small for them and the expert pool (MIMO_MEM_TEST_GB): the pool makes room,
+    giving buffers back, and no token moves."""
+    env = dict(reference["engine_env"], MIMO_KV_STEP="4", MIMO_KV_SPARE_GB="0",
+               MIMO_MEM_TEST_GB="0.0017")
+    given = 0
+    for name, case in reference["cases"].items():
+        logs = []
+        got = run_engine(binary, fixture, case["prompt_ids"],
+                         case["max_new_tokens"], env, stderr=logs)
+        if got != case["greedy_new_ids"]:
+            raise AssertionError(f"kv memory: greedy mismatch in case '{name}': "
+                                 f"engine {got} vs reference {case['greedy_new_ids']}")
+        given += sum(int(n) for n in re.findall(r"\((\d+) given back\)", logs[0]))
+    if not given:
+        raise AssertionError("kv memory: the pool gave nothing back, the check proves nothing")
+    print(f"ok attention caches committed as reached: identical in {len(reference['cases'])} "
+          f"cases, {given} pool buffers given back")
+
+
 def check_determinism(binary, fixture, reference):
     case = reference["cases"]["short"]
     first = run_engine(binary, fixture, case["prompt_ids"],
@@ -412,6 +433,7 @@ def main():
     check_greedy(args.binary, fixture, reference)
     check_exact_variants(args.binary, fixture, reference)
     check_prefetch_cancel(args.binary, fixture, reference)
+    check_kv_memory(args.binary, fixture, reference)
     check_determinism(args.binary, fixture, reference)
     check_block_invariance(args.binary, fixture, reference)
     check_teacher_forcing(args.binary, fixture, reference, config["vocab_size"])
