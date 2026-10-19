@@ -294,6 +294,20 @@ class GeneratedDepsWiringTest(unittest.TestCase):
                          "the Makefile's ENGINE_RULES and this file's derivation "
                          "disagree about which rules are engines")
 
+    def test_the_rule_scan_finds_every_rule(self):
+        """RULE_NAMES is the one pass over the Makefile that ENGINE_RULES,
+        TEST_RULES and the test binaries in AUTODEP_BINS come from, so a rule
+        it misses silently stops being a gate and its .d is never included.
+        It must name exactly the lines that start `NAME$(EXE):`, as read here.
+        Bite: drop `/` from its class and every tests/ rule is gone. Under
+        mingw32-make with Git Bash's sed, the earlier script, which needed
+        backslashes, found nothing."""
+        text = (C_DIR / "Makefile").read_text(encoding="utf-8")
+        expected = [n for n in re.findall(r"(?m)^([a-z0-9_/]*)\$\(EXE\):", text) if n]
+        self.assertEqual(_make_var("RULE_NAMES"), expected,
+                         "the Makefile's RULE_NAMES and the `NAME$(EXE):` lines "
+                         "read here disagree")
+
     def test_no_generated_rule_lists_headers_by_hand(self):
         """A hand-listed header on these rules is redundant and brings back the
         merge conflicts #1741 removed. Bite: add `st.h` to `colibri$(EXE):`,

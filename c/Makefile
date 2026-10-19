@@ -498,7 +498,13 @@ endif
 # they fail to link. Having a rule is the honest definition of "this is a gate".
 # RULE_NAMES is every `NAME$(EXE):` rule, with its directory; one pass over the
 # Makefile serves both TEST_RULES here and ENGINE_RULES (#1741, end of file).
-RULE_NAMES  := $(shell sed -n 's|^\([a-z0-9_/]*\)\$$(EXE):.*|\1|p' $(firstword $(MAKEFILE_LIST)))
+# sed prints the lines that start with one (`|` delimits, as the class holds
+# `/`), and cut keeps what precedes the `$`. No backslash: native Windows make
+# (mingw32-make) starts a command without shell metacharacters directly, not
+# through sh, and the MSYS runtime of Git Bash's sed then globs the unquoted
+# script, dropping every backslash. The earlier `\(...\)\1` ran as `(...)1`,
+# matched nothing, and emptied TEST_RULES, ENGINE_RULES and the .d includes.
+RULE_NAMES  := $(shell sed -n 's|^[a-z0-9_/]*[$$](EXE):|&|p' $(firstword $(MAKEFILE_LIST)) | cut -d'$$' -f1)
 TEST_RULES  := $(patsubst tests/%,%,$(filter tests/test_%,$(RULE_NAMES)))
 # test_uring is Linux-only. V4 engine tests are appended below only on supported
 # x86-64 Linux/Windows and aarch64 Linux hosts; the V4 infrastructure tests have
