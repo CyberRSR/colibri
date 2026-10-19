@@ -86,7 +86,12 @@ bounded at 104 so recovery has headroom on the validated machine. Plain
 `MIMO_CUDA=1` still retains host copies unless release is explicitly enabled.
 The 192-GiB profile is not appropriate for smaller-RAM machines.
 The launcher clears stale layer-truncation, trace and fault-injection settings
-and sets the requested context explicitly.
+and sets the requested context explicitly: by default the checkpoint's full
+1,048,576 positions (`-Context`), whose attention caches take memory only as a
+conversation grows (102 KB a token; past about 300k tokens beside this cache the
+expert pool gives memory back, see [`MIMO_KV_STEP`](mimo.md#environment)), and
+replies of up to 65,536 tokens, reasoning included, when a request asks for no
+fewer (`-MaxOutput`, the gateway's `--ngen`).
 
 | Variable | Default | Meaning |
 |---|---:|---|

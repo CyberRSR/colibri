@@ -10,7 +10,13 @@ param(
     # VRAM left free for scratch and other programs; -DenseGB 21 -ReserveGB 1 puts
     # five more o_proj on the GPU (+2% measured) and leaves about 1 GiB free
     [ValidateRange(0.5,8)][double]$ReserveGB = 2,
-    [ValidateRange(512,32768)][int]$Context = 16384,
+    # The model's full 1M positions. The attention caches take memory as a conversation
+    # grows (102 KB a token); past what RAM holds beside the expert cache (about 300k
+    # tokens here) the expert pool gives memory back and decoding slows (docs/mimo.md).
+    [ValidateRange(512,1048576)][int]$Context = 1048576,
+    # The most tokens a reply may have when a request does not ask for fewer; reasoning
+    # counts toward it.
+    [ValidateRange(256,1048576)][int]$MaxOutput = 65536,
     [ValidateRange(1,65535)][int]$Port = 18080,
     # Faster and NOT exact: every o_proj on the GPU as int8 (docs/mimo-cuda.md)
     [switch]$OprojInt8
@@ -51,8 +57,9 @@ foreach ($key in @('MIMO_CUDA_FAULT', 'MIMO_LAYERS', 'MIMO_TRACE', 'MIMO_LOGITS'
     Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue
 }
 Write-Host "MiMo native CUDA: dense budget $DenseGB GiB, cache $Cap experts/layer, CPU $Threads, readers $IoPerDrive per drive, prefetch $Prefetch$(if ($OprojInt8) { ', o_proj int8 (not exact)' })"
+Write-Host "Context $Context tokens, replies up to $MaxOutput tokens"
 Write-Host "API: http://127.0.0.1:$Port/v1"
 & python (Join-Path $EngineDir 'coli') serve --model $ModelDir --cap $Cap --ram 174 --ctx $Context `
-    --host 127.0.0.1 --port $Port --model-id 'mimo-v2.6-pro-mopd' --kv-slots 1 `
+    --ngen $MaxOutput --host 127.0.0.1 --port $Port --model-id 'mimo-v2.6-pro-mopd' --kv-slots 1 `
     --queue-timeout 7200 --max-queue 8
 exit $LASTEXITCODE
