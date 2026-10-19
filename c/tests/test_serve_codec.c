@@ -17,7 +17,7 @@ static void binary_stream(FILE *stream)
 
 static FILE *bytes_input(const void *data, size_t size)
 {
-    FILE *stream = tmpfile();
+    FILE *stream = compat_tmpfile();
     assert(stream);
     binary_stream(stream);
     assert(fwrite(data, 1, size, stream) == size);
@@ -163,7 +163,7 @@ static void test_invalid_headers_and_bodies(void)
 
 static void test_writer_golden_bytes(void)
 {
-    FILE *output = tmpfile();
+    FILE *output = compat_tmpfile();
     assert(output);
     binary_stream(output);
     assert(coli_serve_write_ready(output, 1.25));
@@ -203,7 +203,7 @@ static void test_writer_golden_bytes(void)
  * produce the handshake byte for byte as before. */
 static void test_ready_caps_golden_bytes(void)
 {
-    FILE *output = tmpfile();
+    FILE *output = compat_tmpfile();
     assert(output);
     binary_stream(output);
     assert(coli_serve_write_ready_caps(output, 1.25, "vision=1"));
@@ -256,7 +256,7 @@ static void test_decide_and_decision(void)
     assert(coli_serve_read_command(input, &profile, &command) == COLI_SERVE_READ_BAD_FRAME);
     fclose(input);
 
-    FILE *output = tmpfile();
+    FILE *output = compat_tmpfile();
     assert(output);
     binary_stream(output);
     assert(coli_serve_write_decision(output, "d-1", "{\"answers\":[]}", 14));
@@ -302,7 +302,7 @@ static void test_load_fail_kinds_and_line(void)
     assert(strcmp(coli_load_fail_kind_string(COLI_LOAD_FAIL_FORMAT), "format") == 0);
     assert(strcmp(coli_load_fail_kind_string(COLI_LOAD_FAIL_UNSUPPORTED), "unsupported") == 0);
 
-    FILE *output = tmpfile();
+    FILE *output = compat_tmpfile();
     assert(output);
     binary_stream(output);
     assert(coli_serve_write_load_fail(
@@ -317,7 +317,7 @@ static void test_load_fail_kinds_and_line(void)
     assert(memcmp(bytes, expected, count) == 0);
     fclose(output);
 
-    output = tmpfile();
+    output = compat_tmpfile();
     assert(output);
     binary_stream(output);
     assert(coli_serve_write_load_fail(output, COLI_LOAD_FAIL_NOMEM, NULL));

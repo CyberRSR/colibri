@@ -108,7 +108,7 @@ int main(void) {
     const unsigned char ff[]={0xff};
     CHECK(utf8_drain(carry,&carry_n,ff,sizeof ff,invalid_output,sizeof invalid_output,&invalid_n)==3);
     CHECK(!memcmp(invalid_output,replacement,3)&&carry_n==0);
-    FILE *raw_stream=tmpfile();CHECK(raw_stream!=NULL);
+    FILE *raw_stream=compat_tmpfile();CHECK(raw_stream!=NULL);
     out_bytes(raw_stream,carry,&carry_n,ff,sizeof ff);
     CHECK(fflush(raw_stream)==0&&fseek(raw_stream,0,SEEK_SET)==0);
     CHECK(fread(invalid_output,1,3,raw_stream)==3&&

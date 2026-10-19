@@ -16,7 +16,7 @@ static void binary_stream(FILE *stream)
 
 static FILE *bytes_input(const void *data, size_t size)
 {
-    FILE *stream=tmpfile(); assert(stream); binary_stream(stream);
+    FILE *stream=compat_tmpfile(); assert(stream); binary_stream(stream);
     assert(fwrite(data,1,size,stream)==size); rewind(stream); return stream;
 }
 
@@ -44,7 +44,7 @@ static void test_text_and_audio_submits_are_exact(void)
     memcpy(frame+header+sizeof(prompt)-1,audio,sizeof(audio));
     frame[header+sizeof(prompt)-1+sizeof(audio)]='\n';
     FILE *input=bytes_input(frame,(size_t)header+sizeof(prompt)+sizeof(audio));
-    FILE *output=tmpfile(); assert(output); binary_stream(output);
+    FILE *output=compat_tmpfile(); assert(output); binary_stream(output);
     assert(serve_read_cmd(input,output,NULL)==0);
     assert(g_qn==1&&strcmp(g_q[0].id,"audio")==0);
     assert(g_q[0].plen==(int)sizeof(prompt)-1&&memcmp(g_q[0].payload,prompt,sizeof(prompt)-1)==0);
@@ -54,7 +54,7 @@ static void test_text_and_audio_submits_are_exact(void)
     fclose(input); fclose(output); reset_queue();
 
     static const char text[]="SUBMIT text 7 3 2 0 1\na\nb\n";
-    input=bytes_input(text,sizeof(text)-1); output=tmpfile(); assert(output); binary_stream(output);
+    input=bytes_input(text,sizeof(text)-1); output=compat_tmpfile(); assert(output); binary_stream(output);
     assert(serve_read_cmd(input,output,NULL)==0);
     assert(g_qn==1&&g_q[0].alen==0&&memcmp(g_q[0].payload,"a\nb",3)==0);
     fclose(input); fclose(output); reset_queue();
@@ -62,7 +62,7 @@ static void test_text_and_audio_submits_are_exact(void)
 
 static void test_controls_and_queue_full_preserve_behavior(void)
 {
-    FILE *output=tmpfile(); assert(output); binary_stream(output);
+    FILE *output=compat_tmpfile(); assert(output); binary_stream(output);
     static const char cancel[]="CANCEL live\n";
     FILE *input=bytes_input(cancel,sizeof(cancel)-1);
     assert(serve_read_cmd(input,output,"live")==1); fclose(input);
@@ -86,7 +86,7 @@ static void test_malformed_submit_cannot_become_control(void)
     static const char frame[]=
         "SUBMIT bad 0 12 0 0.7 0.95 4\nCANCEL liveWXYZ\n";
     FILE *input=bytes_input(frame,sizeof(frame)-1);
-    FILE *output=tmpfile(); assert(output); binary_stream(output);
+    FILE *output=compat_tmpfile(); assert(output); binary_stream(output);
     assert(serve_read_cmd(input,output,"live")==-2);
     assert(fgetc(input)=='C');
     fclose(input); fclose(output);
@@ -94,7 +94,7 @@ static void test_malformed_submit_cannot_become_control(void)
     static const char bad_term[]=
         "SUBMIT broken 0 1 4 0.7 0.95 4\nxWXYZXSTOP live\n";
     input=bytes_input(bad_term,sizeof(bad_term)-1);
-    output=tmpfile(); assert(output); binary_stream(output);
+    output=compat_tmpfile(); assert(output); binary_stream(output);
     assert(serve_read_cmd(input,output,"live")==-2);
     assert(fgetc(input)=='S');
     fclose(input); fclose(output);
