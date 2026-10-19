@@ -16,7 +16,7 @@ static void binary_stream(FILE *stream)
 
 static FILE *bytes_input(const void *data, size_t size)
 {
-    FILE *stream=tmpfile(); assert(stream); binary_stream(stream);
+    FILE *stream=compat_tmpfile(); assert(stream); binary_stream(stream);
     assert(fwrite(data,1,size,stream)==size); rewind(stream); return stream;
 }
 
@@ -40,7 +40,7 @@ static void test_submit_preserves_k3_wire_bytes(void)
     memcpy(frame+header,payload,sizeof(payload)-1);
     frame[header+sizeof(payload)-1]='\n';
     FILE *in=bytes_input(frame,(size_t)header+sizeof(payload));
-    FILE *out=tmpfile(); assert(out); binary_stream(out);
+    FILE *out=compat_tmpfile(); assert(out); binary_stream(out);
     ServeReq request={0};
 
     assert(serve_read_req(in,out,&request,NULL)==2);
@@ -57,7 +57,7 @@ static void test_submit_preserves_k3_wire_bytes(void)
 static void test_controls_match_only_active_request(void)
 {
     static const char *commands[]={"STOP req-7\n","CANCEL req-7\n"};
-    FILE *out=tmpfile(); assert(out); binary_stream(out);
+    FILE *out=compat_tmpfile(); assert(out); binary_stream(out);
     for(size_t i=0;i<2;i++){
         ServeReq request={0};
         FILE *match=bytes_input(commands[i],strlen(commands[i]));
@@ -72,7 +72,7 @@ static void test_errors_and_busy_payload_are_byte_exact(void)
 {
     static const char bad[]="SUBMIT bad 0 -1 4 0.7 0.95\n";
     FILE *in=bytes_input(bad,sizeof(bad)-1);
-    FILE *out=tmpfile(); assert(out); binary_stream(out);
+    FILE *out=compat_tmpfile(); assert(out); binary_stream(out);
     ServeReq request={0};
     assert(serve_read_req(in,out,&request,NULL)==-2);
     char output[128]; size_t count=read_output(out,output,sizeof(output));
@@ -81,7 +81,7 @@ static void test_errors_and_busy_payload_are_byte_exact(void)
     fclose(in); fclose(out);
 
     static const char busy[]="SUBMIT busy 0 3 1 0 1\nx\ny\n";
-    in=bytes_input(busy,sizeof(busy)-1); out=tmpfile(); assert(out); binary_stream(out);
+    in=bytes_input(busy,sizeof(busy)-1); out=compat_tmpfile(); assert(out); binary_stream(out);
     assert(serve_read_req(in,out,&request,"live")==2);
     assert(request.plen==3&&memcmp(request.payload,"x\ny",3)==0);
     fprintf(out,"ERROR %s engine busy\n",request.id); fflush(out);
@@ -101,7 +101,7 @@ static void test_malformed_submit_cannot_become_a_control(void)
     };
     for(size_t i=0;i<sizeof(frames)/sizeof(frames[0]);i++){
         FILE *in=bytes_input(frames[i],strlen(frames[i]));
-        FILE *out=tmpfile(); assert(out); binary_stream(out);
+        FILE *out=compat_tmpfile(); assert(out); binary_stream(out);
         ServeReq request={0};
         assert(serve_read_req(in,out,&request,"live")==-2);
         assert(fgetc(in)=='C');
@@ -114,7 +114,7 @@ static void test_malformed_submit_cannot_become_a_control(void)
     static const char bad_term[]=
         "SUBMIT broken 0 1 4 0.7 0.95\nxXSTOP live\n";
     FILE *in=bytes_input(bad_term,sizeof(bad_term)-1);
-    FILE *out=tmpfile(); assert(out); binary_stream(out);
+    FILE *out=compat_tmpfile(); assert(out); binary_stream(out);
     ServeReq request={0};
     assert(serve_read_req(in,out,&request,"live")==-2);
     assert(fgetc(in)=='S');

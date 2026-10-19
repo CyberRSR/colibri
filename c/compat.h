@@ -96,6 +96,7 @@ static inline int compat_open_direct(const char *path){
 #include <windows.h>
 #include <io.h>
 #include <direct.h>   /* _mkdir (for the mkdtemp shim below) */
+#include <sys/stat.h> /* _S_IREAD / _S_IWRITE (for the tmpfile shim below) */
 #include <process.h>
 #include <malloc.h>
 #include <fcntl.h>
@@ -374,7 +375,47 @@ static inline char *compat_mkdtemp(char *tmpl){
 }
 #define mkdtemp(tmpl) compat_mkdtemp(tmpl)
 
+/* --- compat_tmpfile: tmpfile() in the temporary directory, not the drive root ---
+ * msvcrt's tmpfile() creates "\sXXXX." in the ROOT of the current drive, and
+ * an account without administrator rights cannot create files in C:\, so for
+ * an ordinary user it returns NULL (EACCES) every time. UCRT's tmpfile() uses
+ * the temporary directory, which is why the UCRT64 CI (whose runners are
+ * administrators anyway) never saw it.
+ * Same contract as tmpfile(): a new, empty file, opened "w+b", deleted when
+ * the stream is closed -- _O_TEMPORARY is FILE_FLAG_DELETE_ON_CLOSE, which the
+ * kernel honours even when the process is killed. A name that is taken fails
+ * _O_EXCL with EEXIST, and the next one is tried. Wide calls, because the
+ * temporary directory is under the user's profile, whose name need not fit
+ * the ANSI codepage. Elsewhere compat_tmpfile() is tmpfile() itself. */
+static inline FILE *compat_tmpfile(void){
+    static volatile LONG serial;
+    wchar_t path[MAX_PATH + 32];
+    DWORD dir = GetTempPathW(MAX_PATH + 1, path);
+    if(dir == 0 || dir > MAX_PATH){ errno = ENOENT; return NULL; }
+    for(int attempt = 0; attempt < TMP_MAX; attempt++){
+        char name[32];
+        snprintf(name, sizeof name, "coli-%lx-%lx.tmp",
+                 (unsigned long)GetCurrentProcessId(),
+                 (unsigned long)InterlockedIncrement(&serial));
+        for(int i = 0; (path[dir + i] = (wchar_t)name[i]) != 0; i++) {}   /* ASCII */
+        int fd = _wopen(path, _O_CREAT|_O_EXCL|_O_RDWR|_O_BINARY|_O_TEMPORARY,
+                        _S_IREAD|_S_IWRITE);
+        if(fd < 0){
+            if(errno == EEXIST) continue;
+            return NULL;
+        }
+        FILE *f = _fdopen(fd, "w+b");
+        if(!f) _close(fd);
+        return f;
+    }
+    return NULL;
+}
+
 #endif /* _WIN32 */
+
+#ifndef _WIN32
+static inline FILE *compat_tmpfile(void){ return tmpfile(); }
+#endif
 
 #ifndef getenv_utf8
 #define getenv_utf8(name) getenv(name)

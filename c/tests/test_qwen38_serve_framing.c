@@ -10,7 +10,7 @@
 } } while(0)
 
 static FILE *input_with(const char *bytes){
-    FILE *file=tmpfile();
+    FILE *file=compat_tmpfile();
     if(!file)return NULL;
     size_t n=strlen(bytes);
     if(fwrite(bytes,1,n,file)!=n||fseek(file,0,SEEK_SET)){fclose(file);return NULL;}
@@ -24,7 +24,7 @@ int main(void){
     CHECK(fabs(q38_decode_rate(3,0.5)-4.0)<1e-12);
     CHECK(q38_decode_rate(1,0.5)==0.0);
     CHECK(q38_decode_rate(3,0.0)==0.0);
-    FILE *out=tmpfile();CHECK(out!=NULL);
+    FILE *out=compat_tmpfile();CHECK(out!=NULL);
     FILE *in=input_with("SUBMIT req 0 5 2 0 1\nHello\n");CHECK(in!=NULL);
     ServeReq q={0};
     CHECK(serve_read_req(in,out,&q,NULL)==2);
