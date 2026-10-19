@@ -61,6 +61,7 @@
 #include "serve_codec.h"
 #include "decide_serve.h"
 #include "omp_tune.h"
+#include "exp_f.h"
 
 /* ------------------------------------------------------------------ utils */
 
@@ -742,7 +743,7 @@ static void attention(const float *qkv, float *out, int T, int d, int heads, int
                 if (v > mx) mx = v;
             }
             double sum = 0;
-            for (int j = lo; j <= hi; j++) { float e = expf(score[j - lo] - mx); score[j - lo] = e; sum += e; }
+            for (int j = lo; j <= hi; j++) { float e = exp_f(score[j - lo] - mx); score[j - lo] = e; sum += e; }
             float inv = (float)(1.0 / sum);
             for (int t = 0; t < hd; t++) acc[t] = 0.f;
             for (int j = lo; j <= hi; j++) {

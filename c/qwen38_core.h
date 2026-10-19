@@ -14,6 +14,7 @@
 #include "kv_prefix.h"
 #include "spec_draft.h"   /* prompt-lookup drafts and the gate that decides when drafting pays */
 #include "expert_ffn.h"   /* the int4-g64 routed experts (experts-int4g64/ sidecar) run through its f32 kernel */
+#include "exp_f.h"        /* expf's bits without MinGW's two FLDCW (their cost moves with the code layout) */
 #include <pthread.h>   /* q38_ehit_mark publishes the lazy HITS table under a lock */
 #ifdef COLI_VULKAN
 #include "backend_vulkan.h" /* COLI_VULKAN=1: the int8 trunk on a Vulkan device */
@@ -632,11 +633,11 @@ static void q38_dense_matmul(Model *m,float *y,const float *x,const Q38Weight *w
 }
 
 static inline float q38_sigmoid(float x) {
-    if (x >= 0.f) { float z=expf(-x); return 1.f/(1.f+z); }
-    float z=expf(x); return z/(1.f+z);
+    if (x >= 0.f) { float z=exp_f_call(-x); return 1.f/(1.f+z); }
+    float z=exp_f_call(x); return z/(1.f+z);
 }
 static inline float q38_silu(float x) { return x * q38_sigmoid(x); }
-static inline float q38_softplus(float x) { return x > 20.f ? x : log1pf(expf(x)); }
+static inline float q38_softplus(float x) { return x > 20.f ? x : log1pf(exp_f(x)); }
 
 /* Qwen4-Exp RMSNorms are zero-centered: the learned scale is 1+weight. */
 static void q38_rms0(float *out, const float *x, const float *w, int n, float eps) {
@@ -2313,7 +2314,7 @@ static void q38_deltanet(Model *m,Layer *l,int layer,const float *x,int S,
         q38_dense_matmul(m,aa,x,&l->dn_a,1,H,VH);
         float egh[64],beta[64];
         for(int h=0;h<VH&&h<64;h++){
-            egh[h]=expf(-expf(l->dn_alog[h])*q38_softplus(aa[h]+l->dn_dtbias[h]));
+            egh[h]=exp_f(-exp_f(l->dn_alog[h])*q38_softplus(aa[h]+l->dn_dtbias[h]));
             beta[h]=q38_sigmoid(bb[h]);
         }
         q38_dn_gpu_push(m,layer);
@@ -2369,7 +2370,7 @@ static void q38_deltanet(Model *m,Layer *l,int layer,const float *x,int S,
                 const float *qh=q+(int64_t)h*KD;
                 const float *kh=k+(int64_t)h*KD;
                 const float *vh=vi+(int64_t)h*VD;
-                float alpha=expf(-expf(l->dn_alog[h])*
+                float alpha=exp_f(-exp_f(l->dn_alog[h])*
                                  q38_softplus(a_row[h]+l->dn_dtbias[h]));
                 float beta=q38_sigmoid(b_row[h]);
                 float delta[512];
@@ -2484,7 +2485,7 @@ static void q38_attention(Model *m,Layer *l,int layer,const float *x,int S,int p
             float *qh=falloc(D);memcpy(qh,qraw,(size_t)D*sizeof(float));q38_rms0(qh,qh,l->qn,D,c->eps);q38_rope(qh,D,c->rotary_dim,pos,theta);
             float *score=falloc(nsel);float mx=-INFINITY;
             int khidx=h/(QH/KVH);for(int j=0;j<nsel;j++){const float *kh=Kl+((int64_t)khidx*m->kv_cap+selected[j])*D;float a=0.f;for(int d=0;d<D;d++)a+=qh[d]*kh[d];a/=sqrtf((float)D);score[j]=a;if(a>mx)mx=a;}
-            float den=0.f;for(int j=0;j<nsel;j++){score[j]=expf(score[j]-mx);den+=score[j];}
+            float den=0.f;for(int j=0;j<nsel;j++){score[j]=exp_f(score[j]-mx);den+=score[j];}
             float *oh=heads+(int64_t)s*QH*D+(int64_t)h*D;memset(oh,0,(size_t)D*sizeof(float));
             for(int j=0;j<nsel;j++){float a=score[j]/den;const float *vh=Vl+((int64_t)khidx*m->kv_cap+selected[j])*D;for(int d=0;d<D;d++)oh[d]+=a*vh[d];}
             for(int d=0;d<D;d++)oh[d]*=q38_sigmoid(qraw[D+d]);free(qh);free(score);
@@ -2833,7 +2834,7 @@ static void q38_moe_decode_ex(Model *m,Layer *l,int layer,const float *x,int S,f
         if(logits_in)memcpy(logits,logits_in+(int64_t)s*E,(size_t)E*sizeof(float));
         else q38_dense_matmul(m,logits,xs,&l->router,1,H,E);
         float mx=logits[0];for(int e=1;e<E;e++)if(logits[e]>mx)mx=logits[e];
-        double all=0;for(int e=0;e<E;e++){logits[e]=expf(logits[e]-mx);all+=logits[e];}
+        double all=0;for(int e=0;e<E;e++){logits[e]=exp_f(logits[e]-mx);all+=logits[e];}
         int idx[Q38_MAX_TOPK];float val[Q38_MAX_TOPK];
         for(int z=0;z<K;z++){int best=-1;float bv=-1.f;for(int e=0;e<E;e++){int used=0;for(int j=0;j<z;j++)if(idx[j]==e)used=1;if(!used&&logits[e]>bv){bv=logits[e];best=e;}}idx[z]=rt_router_pick(best,z,E,layer);val[z]=logits[idx[z]];}
         double top=0;for(int z=0;z<K;z++)top+=val[z];double den=c->norm_topk?top:all;
@@ -3013,7 +3014,7 @@ static void q38_moe_prefill(Model *m,Layer *l,int layer,const float *x,
             for(int e=1;e<E;e++)if(probabilities[e]>maximum)maximum=probabilities[e];
             double total=0.0;
             for(int e=0;e<E;e++) {
-                probabilities[e]=expf(probabilities[e]-maximum);
+                probabilities[e]=exp_f(probabilities[e]-maximum);
                 total+=probabilities[e];
             }
             int selected[Q38_MAX_TOPK];

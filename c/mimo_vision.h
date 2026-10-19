@@ -261,7 +261,7 @@ static float *vision_run(Model *m, const float *patches, int gh, int gw, int *n_
                         if (s > best) best = s;
                     }
                     float den = 0;
-                    for (int j = lo; j <= hi; j++) { score[j - lo] = expf(score[j - lo] - best); den += score[j - lo]; }
+                    for (int j = lo; j <= hi; j++) { score[j - lo] = exp_f(score[j - lo] - best); den += score[j - lo]; }
                     float *o = ctx + (size_t)i * qd + (size_t)h * hd;
                     for (int e = 0; e < hd; e++) o[e] = 0;
                     for (int j = lo; j <= hi; j++) {

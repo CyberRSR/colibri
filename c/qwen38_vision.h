@@ -39,6 +39,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include "exp_f.h"
 
 typedef struct {
     const float *w, *b;        /* [out, in] riga-maggiore, bias [out] */
@@ -247,7 +248,7 @@ static int q38_vision_forward_dbg(const Q38Vision *v, const float *patches,
                     if (scores[j] > best) best = scores[j];
                 }
                 float sum = 0.f;
-                for (int j = 0; j < n; j++) { scores[j] = expf(scores[j] - best); sum += scores[j]; }
+                for (int j = 0; j < n; j++) { scores[j] = exp_f(scores[j] - best); sum += scores[j]; }
                 float inv = 1.f / sum;
                 float *dst = att + (size_t)i * H + (size_t)h * D;
                 for (int j = 0; j < n; j++) {

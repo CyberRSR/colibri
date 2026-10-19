@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "tok.h"
+#include "exp_f.h"
 
 /* ---- RNG (xorshift64*) -------------------------------------------------- */
 static uint64_t g_rng = 0x9E3779B97F4A7C15ULL;
@@ -54,7 +55,7 @@ static void dist_build(const float *lo, int V){
     double s = 0; float invt = 1.f / (g_temp > 1e-4f ? g_temp : 1e-4f);
     if (mxi >= 0) {
         for (int i = 0; i < V; i++) {
-            g_pbuf[i] = isfinite(lo[i]) ? expf((lo[i] - mx) * invt) : 0.f;
+            g_pbuf[i] = isfinite(lo[i]) ? exp_f((lo[i] - mx) * invt) : 0.f;
             s += g_pbuf[i];
         }
     }

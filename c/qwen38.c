@@ -80,6 +80,7 @@ static int qwen38_max_ctx(void) {
 #include "route_trace.h"             /* shared ROUTE_TRACE + .coli_usage contract */
 #include "serve_codec.h"             /* shared SUBMIT/STOP/CANCEL framing */
 #include "pin_pool.h"                /* piu scatti annidati dello stato */
+#include "exp_f.h"                   /* expf's bits without MinGW's two FLDCW (their cost moves with the code layout) */
 /* ---------- tokenizer (optional, for human-readable output) ---------- */
 static char **g_tok = NULL;   /* id -> piece string (strdup'd) */
 static int    g_tok_n = 0;
@@ -1336,7 +1337,7 @@ static int serve_sample(const float *lo, int V, float temp, float top_p){
     if(!rank){ fprintf(stderr,"OOM sampling\n"); exit(1); }
     for(int i=1;i<V;i++) if(lo[i]>mx) mx=lo[i];
     double sum=0;
-    for(int i=0;i<V;i++){ float p=expf((lo[i]-mx)/temp); sum+=p; rank[i]=(SampleProb){p,i}; }
+    for(int i=0;i<V;i++){ float p=exp_f((lo[i]-mx)/temp); sum+=p; rank[i]=(SampleProb){p,i}; }
     qsort(rank,(size_t)V,sizeof(SampleProb),sample_prob_desc);
     double cut=(top_p>0.f&&top_p<1.f)?top_p*sum:sum, kept=0; int n=0;
     while(n<V&&kept<cut) kept+=rank[n++].p;

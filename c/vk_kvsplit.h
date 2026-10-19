@@ -49,6 +49,7 @@
 #ifndef COLI_VK_KVSPLIT_H
 #define COLI_VK_KVSPLIT_H
 #include "vk_chain.h"
+#include "exp_f.h"
 #include <stdio.h>
 #include <stdlib.h>
 #ifdef _WIN32
@@ -553,7 +554,7 @@ static inline float vkc_kv_score(const VkcKvHostAttn *p, int s, int h, int grp, 
 static void vkc_kv_join(float *o, const float *c, int dv) {
     if (c[0] <= -1.0e38f) return;
     float mn = o[0] > c[0] ? o[0] : c[0];
-    float ea = o[0] > -1.0e38f ? expf(o[0] - mn) : 0.f, eb = expf(c[0] - mn);
+    float ea = o[0] > -1.0e38f ? exp_f(o[0] - mn) : 0.f, eb = exp_f(c[0] - mn);
     for (int d = 0; d < dv; d++) o[2 + d] = o[2 + d] * ea + c[2 + d] * eb;
     o[1] = o[1] * ea + c[1] * eb; o[0] = mn;
 }
@@ -592,7 +593,7 @@ static void vkc_kv_host_chunk(const VkcKvSplit *ks, const VkcKvHostAttn *p, int 
             float *og = o + (size_t)g * (dv + 2), *ac = og + 2, mx = -3.0e38f, l = 0.f;
             for (long j = j0; j < j1; j++) { float v = vkc_kv_score(p, s, h, grp, pos[j], qa, qb); if (v > mx) mx = v; }
             for (long j = j0; j < j1; j++) {
-                float e = expf(vkc_kv_score(p, s, h, grp, pos[j], qa, qb) - mx), w = vkc_kv_bf16(e);
+                float e = exp_f(vkc_kv_score(p, s, h, grp, pos[j], qa, qb) - mx), w = vkc_kv_bf16(e);
                 const float *vr = p->v + (size_t)grp * p->v_grp + (size_t)pos[j] * p->v_pos;
                 l += e;
                 for (int d = 0; d < dv; d++) ac[d] += w * vr[d];
@@ -614,11 +615,11 @@ static void vkc_kv_host_chunk(const VkcKvSplit *ks, const VkcKvHostAttn *p, int 
             }
             float *og = o + (size_t)g * (dv + 2), *ac = og + 2;
             float mn = og[0] > mt ? og[0] : mt;
-            float corr = og[0] > -1.0e38f ? expf(og[0] - mn) : 0.f;
+            float corr = og[0] > -1.0e38f ? exp_f(og[0] - mn) : 0.f;
             float l = og[1] * corr;
             if (corr != 1.f) for (int d = 0; d < dv; d++) ac[d] *= corr;
             for (int i = 0; i < n; i++) {
-                float e = expf(sc[i] - mn);
+                float e = exp_f(sc[i] - mn);
                 const float *vr = p->v + (size_t)grp * p->v_grp + (size_t)pos[t0 + i] * p->v_pos;
                 l += e;
                 for (int d = 0; d < dv; d++) ac[d] += e * vr[d];

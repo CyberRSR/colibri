@@ -77,6 +77,7 @@
 #include "decide_serve.h"
 #include "omp_tune.h"
 #include "gliner_unicode.h"
+#include "exp_f.h"
 
 /* ------------------------------------------------------------------ utils */
 
@@ -1053,7 +1054,7 @@ static void attention(const Gl *M, const GlLayer *E, const float *qkv, float *ou
                     if (x > mx) mx = x;
                 }
                 double sum = 0;
-                for (int j = 0; j < T; j++) { float e = expf(s[j] - mx); s[j] = e; sum += e; }
+                for (int j = 0; j < T; j++) { float e = exp_f(s[j] - mx); s[j] = e; sum += e; }
                 float norm = (float)(1.0 / sum);
                 for (int j = 0; j < T; j++) s[j] *= norm;
             }

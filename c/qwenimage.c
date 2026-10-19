@@ -42,6 +42,7 @@
 #include "tok.h"
 #include "qwen38_nfc.h"
 #include "qi_gemm.h"
+#include "exp_f.h"
 #include "serve_poll.h"
 #if defined(__has_include)
 #if __has_include("qwenimage_vae.h")
@@ -252,7 +253,7 @@ static void layernorm_mod(float *y, const float *x, const float *scale, int T, i
         for (int i = 0; i < D; i++) o[i] = (r[i] - mf) * inv * (1.f + scale[i]);
     }
 }
-static inline float silu(float x){ return x / (1.f + expf(-x)); }
+static inline float silu(float x){ return x / (1.f + exp_f(-x)); }
 static inline float gelu_tanh(float x){
     return 0.5f * x * (1.f + tanhf(0.7978845608028654f * (x + 0.044715f * x * x * x)));
 }
@@ -280,7 +281,7 @@ static void attention(float *out, int ldo, const float *Q, int ldq, int Tq,
             float mx = -INFINITY;
             for (int j = 0; j < lim; j++) { r[j] *= scale; if (r[j] > mx) mx = r[j]; }
             double sum = 0;
-            for (int j = 0; j < lim; j++) { r[j] = expf(r[j] - mx); sum += r[j]; }
+            for (int j = 0; j < lim; j++) { r[j] = exp_f(r[j] - mx); sum += r[j]; }
             float inv = (float)(1.0 / sum);
             for (int j = 0; j < lim; j++) r[j] *= inv;
             for (int j = lim; j < Tk; j++) r[j] = 0.f;

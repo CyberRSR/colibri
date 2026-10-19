@@ -31,6 +31,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include "exp_f.h"
 
 typedef struct {
     int depth, hidden, heads, head_dim, intermediate;
@@ -98,7 +99,7 @@ static inline void coli_vision_layernorm(float *out, const float *in, const floa
 }
 
 static inline float coli_vision_silu(float value) {
-    return value / (1.0f + expf(-value));
+    return value / (1.0f + exp_f(-value));
 }
 
 /* Exact GELU, the torch nn.GELU() default: erf-based, not the tanh
@@ -228,7 +229,7 @@ static inline int coli_vision_forward(float *out, const ColiVisionTower *tower,
                 }
                 float total = 0.0f;
                 for (int s = 0; s < tokens; s++) {
-                    scores[s] = expf(scores[s] - maximum);
+                    scores[s] = exp_f(scores[s] - maximum);
                     total += scores[s];
                 }
                 float *slot = result + (size_t)h * hd;

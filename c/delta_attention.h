@@ -33,6 +33,7 @@
 
 #include <math.h>
 #include <string.h>
+#include "exp_f.h"
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -58,7 +59,7 @@ static inline int coli_kda_scratch_floats(int heads, int k_dim, int v_dim) {
 }
 
 static inline float coli_kda_silu(float value) {
-    return value / (1.0f + expf(-value));
+    return value / (1.0f + exp_f(-value));
 }
 
 /* One token through one KDA layer.
@@ -154,7 +155,7 @@ static inline int coli_kda_step(float *out, float *state, float *window,
         memset(memory, 0, (size_t)v_dim * sizeof(*memory));
         for (int k = 0; k < k_dim; k++) {
             float *row = matrix + (size_t)k * v_dim;
-            const float alpha = expf(decay[k]);
+            const float alpha = exp_f(decay[k]);
             const float scaled_key = key[k] * key_norm;
             for (int v = 0; v < v_dim; v++) {
                 row[v] *= alpha;

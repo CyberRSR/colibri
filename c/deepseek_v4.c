@@ -1689,14 +1689,15 @@ int coli_v4_expert_store_open_planned(
 
 #include <limits.h>
 #include <math.h>
+#include "exp_f.h"
 #include <stdlib.h>
 
 static float sigmoidf_stable(float value) {
     if (value >= 0.0f) {
-        float decay = expf(-value);
+        float decay = exp_f(-value);
         return 1.0f / (1.0f + decay);
     }
-    float growth = expf(value);
+    float growth = exp_f(value);
     return growth / (1.0f + growth);
 }
 
@@ -1856,7 +1857,7 @@ int coli_v4_rope_apply(float *vectors, int vector_count, int dimension,
 }
 
 static float softplusf_stable(float value) {
-    return fmaxf(value, 0.0f) + log1pf(expf(-fabsf(value)));
+    return fmaxf(value, 0.0f) + log1pf(exp_f(-fabsf(value)));
 }
 
 int coli_v4_route(float *weights, int *indices, const float *hidden,
@@ -1940,6 +1941,7 @@ int coli_v4_swiglu(float *output, const float *gate, const float *up,
 #include "deepseek_v4_internal.h"
 
 #include <math.h>
+#include "exp_f.h"
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -2334,7 +2336,7 @@ static int attention_token_impl(float *output,
         float score = 0.0f;
         for (int i = 0; i < head_dim; i++) score += query[i] * kv[i];
         score *= 1.0f / sqrtf((float)head_dim);
-        float attention_weight = 1.0f / (1.0f + expf(sinks[head] - score));
+        float attention_weight = 1.0f / (1.0f + exp_f(sinks[head] - score));
         float *head_output = attended + (size_t)head * head_dim;
         for (int i = 0; i < head_dim; i++)
             head_output[i] = coli_bf16_round(kv[i] * attention_weight);
@@ -2443,6 +2445,7 @@ int coli_v4_attention_set_count(ColiDeepSeekV4WindowAttentionState *state, int c
 #include "deepseek_v4_internal.h"
 
 #include <math.h>
+#include "exp_f.h"
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -2771,7 +2774,7 @@ static int attention_token_impl(float *output,
         float score = 0.0f;
         for (int i = 0; i < head_dim; i++) score += query[i] * kv[i];
         score *= 1.0f / sqrtf((float)head_dim);
-        float attention_weight = 1.0f / (1.0f + expf(sinks[head] - score));
+        float attention_weight = 1.0f / (1.0f + exp_f(sinks[head] - score));
         float *head_output = attended + (size_t)head * head_dim;
         for (int i = 0; i < head_dim; i++)
             head_output[i] = coli_bf16_round(kv[i] * attention_weight);
@@ -3399,6 +3402,7 @@ int coli_v4_attention_window_batch_ref(
 #include "deepseek_v4_internal.h"
 
 #include <math.h>
+#include "exp_f.h"
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -3631,7 +3635,7 @@ static int compressor_pool_and_emit(ColiDeepSeekV4CompressorState *state,
             int source_column = column;
             if (state->ratio == 4 && row >= state->ratio)
                 source_column += dimension;
-            float weight = expf(state->score_state[
+            float weight = exp_f(state->score_state[
                 (size_t)row * projection + source_column] - maximum);
             total += weight;
             weighted += state->kv_state[
@@ -4455,6 +4459,7 @@ int coli_v4_indexer_set_count(ColiDeepSeekV4Indexer *state, int count) {
 #include "deepseek_v4_internal.h"
 
 #include <math.h>
+#include "exp_f.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -4496,12 +4501,12 @@ int coli_v4_sparse_attention_ref(float *output, const float *queries,
             free(scores);
             return -1;
         }
-        float denominator = expf(sinks[head] - maximum);
+        float denominator = exp_f(sinks[head] - maximum);
         float *head_output = output + (size_t)head * head_dimension;
         memset(head_output, 0, (size_t)head_dimension * sizeof(*head_output));
         for (int rank = 0; rank < topk; rank++) {
             if (indices[rank] < 0) continue;
-            float probability = expf(scores[rank] - maximum);
+            float probability = exp_f(scores[rank] - maximum);
             denominator += probability;
             /* TileLang casts the exp fragment to BF16 before value GEMM. */
             probability = coli_bf16_round(probability);
@@ -6813,6 +6818,7 @@ int coli_v4_block_window_rows_ref(
 #include "deepseek_v4_internal.h"
 
 #include <math.h>
+#include "exp_f.h"
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -7045,7 +7051,7 @@ static int compressor_pool_and_emit(ColiDeepSeekV4CompressorState *state,
             int source_column = column;
             if (state->ratio == 4 && row >= state->ratio)
                 source_column += dimension;
-            float weight = expf(state->score_state[
+            float weight = exp_f(state->score_state[
                 (size_t)row * projection + source_column] - maximum);
             total += weight;
             weighted += state->kv_state[
@@ -7618,6 +7624,7 @@ void coli_v4_indexer_snapshot_destroy(ColiV4IndexerSnapshot *snapshot) {
 #include "deepseek_v4_internal.h"
 
 #include <math.h>
+#include "exp_f.h"
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -7946,7 +7953,7 @@ static int attention_token_impl(float *output,
         float score = 0.0f;
         for (int i = 0; i < head_dim; i++) score += query[i] * kv[i];
         score *= 1.0f / sqrtf((float)head_dim);
-        float attention_weight = 1.0f / (1.0f + expf(sinks[head] - score));
+        float attention_weight = 1.0f / (1.0f + exp_f(sinks[head] - score));
         float *head_output = attended + (size_t)head * head_dim;
         for (int i = 0; i < head_dim; i++)
             head_output[i] = coli_bf16_round(kv[i] * attention_weight);
@@ -10346,6 +10353,7 @@ int coli_v4_expert_forward_batch_ref(float *outputs,
 #ifdef COLI_V4_UNIT_ROUTE_BF16
 /* ######## deepseek_v4_route_bf16.c ######## */
 #include <math.h>
+#include "exp_f.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10361,7 +10369,7 @@ static float route_bf16_decode(uint16_t value) {
 }
 
 static float route_softplus(float value) {
-    return fmaxf(value, 0.0f) + log1pf(expf(-fabsf(value)));
+    return fmaxf(value, 0.0f) + log1pf(exp_f(-fabsf(value)));
 }
 
 /* `logits`, when not NULL, are this position's gate logits already computed (a
@@ -12720,6 +12728,7 @@ int coli_v4_prompt_build(char **output, size_t *output_length,
 /* ---- begin include tools/deepseek_v4_first_token.c ---- */
 #include <float.h>
 #include <math.h>
+#include "exp_f.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12807,8 +12816,8 @@ static int final_hidden(float *output, const float *state,
         mix *= inverse_rms;
         float z = mix * scale.data[0] + base.data[copy];
         float sigmoid = z >= 0.0f
-            ? 1.0f / (1.0f + expf(-z))
-            : expf(z) / (1.0f + expf(z));
+            ? 1.0f / (1.0f + exp_f(-z))
+            : exp_f(z) / (1.0f + exp_f(z));
         pre[copy] = sigmoid + config->hc_eps;
     }
     for (int i = 0; i < d; i++) {
@@ -20186,6 +20195,7 @@ int coli_fp4_dual_matvec_rows16_v10(float *output_a, float *output_b,
 
 #include <float.h>
 #include <math.h>
+#include "exp_f.h"
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -20976,8 +20986,8 @@ static void deepseek_v4_edge_final_hidden(
         float z = mix * inverse_rms * engine->head_scale.data[0] +
                   engine->head_base.data[copy];
         float sigmoid = z >= 0.0f
-            ? 1.0f / (1.0f + expf(-z))
-            : expf(z) / (1.0f + expf(z));
+            ? 1.0f / (1.0f + exp_f(-z))
+            : exp_f(z) / (1.0f + exp_f(z));
         pre[copy] = sigmoid + engine->config.hc_eps;
     }
     for (int item = 0; item < hidden; item++) {

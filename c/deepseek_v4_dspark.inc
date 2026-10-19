@@ -510,9 +510,9 @@ static void v4_ds_sinkhorn(const float *mix, const float *scale,
                            float eps, float *pre, float *post, float *comb) {
     for (int j = 0; j < hc; j++) {
         float z = mix[j] * scale[0] + base[j];
-        pre[j] = 1.0f / (1.0f + expf(-z)) + eps;
+        pre[j] = 1.0f / (1.0f + exp_f_call(-z)) + eps;
         z = mix[j + hc] * scale[1] + base[j + hc];
-        post[j] = 2.0f / (1.0f + expf(-z));
+        post[j] = 2.0f / (1.0f + exp_f_call(-z));
     }
     for (int j = 0; j < hc; j++) {
         float maximum = -FLT_MAX;
@@ -524,7 +524,7 @@ static void v4_ds_sinkhorn(const float *mix, const float *scale,
         }
         float sum = 0.0f;
         for (int k = 0; k < hc; k++) {
-            comb[j * hc + k] = expf(comb[j * hc + k] - maximum);
+            comb[j * hc + k] = exp_f(comb[j * hc + k] - maximum);
             sum += comb[j * hc + k];
         }
         for (int k = 0; k < hc; k++)
@@ -772,9 +772,9 @@ static int v4_ds_attention(float *out, V4DSparkStage *stage,
             if (scores[count] > maximum) maximum = scores[count];
             count++;
         }
-        float denominator = expf(stage->attn_sink.data[head] - maximum);
+        float denominator = exp_f(stage->attn_sink.data[head] - maximum);
         for (int item = 0; item < count; item++) {
-            scores[item] = expf(scores[item] - maximum);
+            scores[item] = exp_f(scores[item] - maximum);
             denominator += scores[item];
         }
         float *result = attended + (size_t)head * head_dim;
@@ -981,7 +981,7 @@ static int v4_ds_final_hidden(float *out, const float *state,
         for (int i = 0; i < flat; i++) mix += weight[i] * state[i];
         float z = mix * inverse * g_v4ds_core.head_scale.data[0] +
                   g_v4ds_core.head_base.data[copy];
-        pre[copy] = 1.0f / (1.0f + expf(-z)) + config->hc_eps;
+        pre[copy] = 1.0f / (1.0f + exp_f_call(-z)) + config->hc_eps;
     }
     for (int i = 0; i < hidden; i++) {
         float sum = 0.0f;
@@ -1105,8 +1105,8 @@ static int v4_ds_heads(ColiV4Engine *engine,
             score += g_v4ds_core.confidence_proj.data[hidden + rank] *
                      embedding[rank];
         confidence[item] = score >= 0.0f
-            ? 1.0f / (1.0f + expf(-score))
-            : expf(score) / (1.0f + expf(score));
+            ? 1.0f / (1.0f + exp_f(-score))
+            : exp_f(score) / (1.0f + exp_f(score));
     }
     free(logits);
     free(hiddens);
