@@ -1,0 +1,3 @@
+**Binary search** is an efficient algorithm for finding a specific item in a **sorted** list.
+
+Instead of checking every item one by one, it works by

@@ -1,0 +1,657 @@
+{
+  "date": "2026-10-17",
+  "hardware": {
+    "cpu": "AMD Ryzen 9 7950X3D, 16 cores / 32 logical processors",
+    "ram": "192 GiB installed (4 x 48 GiB), DDR5 configured at 5400 MT/s; 191.08 GiB OS-visible; ~65 GB/s measured read bandwidth",
+    "storage": "C: one PCIe 5.0 x4 NVMe (88 shards, ~10.5 GB/s direct 19 MB reads); D: three PCIe 4.0 NVMe striped behind the chipset (42 shards, ~6.5 GB/s); ~17.7 GB/s together. Native Windows unbuffered reads.",
+    "os": "Windows 11 Pro for Workstations 10.0.26300; MinGW-w64 GCC 14.2 MSVCRT, MSVC 14.44; RTX 4090 24 GiB WDDM, driver 617.42, CUDA Toolkit 13.2, sm_89"
+  },
+  "arms": [
+    {
+      "arm": "stream",
+      "note": "series A: the engine before the packing (commit 10313e4f, measured in round 2)",
+      "commit": "10313e4f1d1011a66f35fa34b10e595c16180ef0",
+      "engine_sha256": "e4ed790eeb40b4a7dfe82335c5cc9c6accbbb0b1ffbfc1ca3b4fa36e1175b000",
+      "cuda_dll_sha256": "8db83a22d60940153c8a62bc0a2d9f26d75e4bbd9af1388e7c578f9cb5ad69f9",
+      "config": {
+        "SNAP": "D:\\AI\\Models\\MiMo-V2.6-Pro-MOPD",
+        "SERVE": "1",
+        "KV_SLOTS": "1",
+        "CTX": "16384",
+        "COLI_NO_OMP_TUNE": "1",
+        "COLI_KV_PREFIX": "0",
+        "OMP_NUM_THREADS": "16",
+        "MIMO_READ_THREADS": "16",
+        "MIMO_DENSE_BITS": "0",
+        "MIMO_IDOT": "0",
+        "MIMO_DIRECT": "1",
+        "MIMO_CHUNK": "64",
+        "MIMO_DIRS": "C:/AI/MiMoPro-Shards",
+        "MIMO_CUDA": "1",
+        "MIMO_CUDA_DENSE_GB": "20",
+        "MIMO_CUDA_RESERVE_GB": "2",
+        "MIMO_CUDA_RELEASE_HOST": "1",
+        "COLI_VULKAN": "0",
+        "COLI_VK_CHAIN": "1",
+        "COLI_VK_DENSE": "1",
+        "COLI_VK_TIER_RESERVE_GB": "2",
+        "COLI_VK_CHAIN_LAYERS": "32"
+      },
+      "cap": 104,
+      "median_tok_s": 1.7914227913968344,
+      "median_decode_tok_s": 2.0317621572489695,
+      "median_ttft_s": 4.726459399971645,
+      "samples_tok_s": [
+        1.786732409113859,
+        1.793178817821078,
+        1.7914227913968344
+      ],
+      "samples_decode_tok_s": [
+        2.0270314424098017,
+        2.0317621572489695,
+        2.032301745892662
+      ],
+      "median_expert_ram_hit_percent": 86.1,
+      "peak_process_rss_GB_decimal": 151.23,
+      "median_prof_s": {
+        "wall": 35.653,
+        "disk_stall": 6.626,
+        "experts": 17.16,
+        "attention": 10.158
+      },
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "streaming_last_request": "[mimo] streaming: 5535 demand reads, 9855 prefetched (6678 used, 3177 unused), predicted 77.3% of 34776 choices, 308.63 GB read, 6.63s stalled, 0.69s predicting; attention matmuls: qkv 1.39s, o_proj 7.73s; 3.34 experts a wave",
+      "phases_last_request": "[mimo] prompt 4.65s (stalled 1.57s, experts 2.61s, attention 0.37s, 2887 demand reads); generation 31.00s (stalled 5.05s, experts 14.55s, attention 9.79s, 2648 demand reads, 9855 prefetched)"
+    },
+    {
+      "arm": "pack-gpu-off",
+      "note": "series A: commit 71f5a0c4, MIMO_CUDA_BF16_PACK=0 (the CPU's packing alone)",
+      "commit": "71f5a0c4f6fb96477207a6a867067827f862c0f9",
+      "engine_sha256": "d93ff7a659a8f90d8ddef6457363496fcfaeaa9c2e7a4390d89e5a37da867d35",
+      "cuda_dll_sha256": "9576a514891d8951c0ed47130e41d014d3f0823e43fd8b2274d5163a197c2105",
+      "config": {
+        "SNAP": "D:\\AI\\Models\\MiMo-V2.6-Pro-MOPD",
+        "SERVE": "1",
+        "KV_SLOTS": "1",
+        "CTX": "16384",
+        "COLI_NO_OMP_TUNE": "1",
+        "COLI_KV_PREFIX": "0",
+        "OMP_NUM_THREADS": "16",
+        "MIMO_READ_THREADS": "16",
+        "MIMO_DENSE_BITS": "0",
+        "MIMO_IDOT": "0",
+        "MIMO_DIRECT": "1",
+        "MIMO_CHUNK": "64",
+        "MIMO_DIRS": "C:/AI/MiMoPro-Shards",
+        "MIMO_CUDA": "1",
+        "MIMO_CUDA_DENSE_GB": "20",
+        "MIMO_CUDA_RESERVE_GB": "2",
+        "MIMO_CUDA_RELEASE_HOST": "1",
+        "COLI_VULKAN": "0",
+        "COLI_VK_CHAIN": "1",
+        "COLI_VK_DENSE": "1",
+        "COLI_VK_TIER_RESERVE_GB": "2",
+        "COLI_VK_CHAIN_LAYERS": "32",
+        "MIMO_CUDA_BF16_PACK": "0"
+      },
+      "cap": 104,
+      "median_tok_s": 1.8241986056088662,
+      "median_decode_tok_s": 2.086941430082588,
+      "median_ttft_s": 4.896180899988394,
+      "samples_tok_s": [
+        1.8195688982977163,
+        1.8241986056088662,
+        1.8301679311191916
+      ],
+      "samples_decode_tok_s": [
+        2.084360121938318,
+        2.086941430082588,
+        2.093008131917771
+      ],
+      "median_expert_ram_hit_percent": 86.1,
+      "peak_process_rss_GB_decimal": 149.56,
+      "median_prof_s": {
+        "wall": 35.012,
+        "disk_stall": 6.658,
+        "experts": 17.13,
+        "attention": 9.511
+      },
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "streaming_last_request": "[mimo] streaming: 5524 demand reads, 9856 prefetched (6680 used, 3176 unused), predicted 77.3% of 34776 choices, 308.43 GB read, 6.66s stalled, 0.69s predicting; attention matmuls: qkv 1.40s, o_proj 7.00s; 3.33 experts a wave",
+      "phases_last_request": "[mimo] prompt 4.80s (stalled 1.56s, experts 2.59s, attention 0.54s, 2886 demand reads); generation 30.10s (stalled 5.10s, experts 14.52s, attention 8.89s, 2638 demand reads, 9856 prefetched)"
+    },
+    {
+      "arm": "pack-cpu-off",
+      "note": "series A: commit 71f5a0c4, MIMO_BF16_PACK=0 (the GPU's packing alone)",
+      "commit": "71f5a0c4f6fb96477207a6a867067827f862c0f9",
+      "engine_sha256": "d93ff7a659a8f90d8ddef6457363496fcfaeaa9c2e7a4390d89e5a37da867d35",
+      "cuda_dll_sha256": "9576a514891d8951c0ed47130e41d014d3f0823e43fd8b2274d5163a197c2105",
+      "config": {
+        "SNAP": "D:\\AI\\Models\\MiMo-V2.6-Pro-MOPD",
+        "SERVE": "1",
+        "KV_SLOTS": "1",
+        "CTX": "16384",
+        "COLI_NO_OMP_TUNE": "1",
+        "COLI_KV_PREFIX": "0",
+        "OMP_NUM_THREADS": "16",
+        "MIMO_READ_THREADS": "16",
+        "MIMO_DENSE_BITS": "0",
+        "MIMO_IDOT": "0",
+        "MIMO_DIRECT": "1",
+        "MIMO_CHUNK": "64",
+        "MIMO_DIRS": "C:/AI/MiMoPro-Shards",
+        "MIMO_CUDA": "1",
+        "MIMO_CUDA_DENSE_GB": "20",
+        "MIMO_CUDA_RESERVE_GB": "2",
+        "MIMO_CUDA_RELEASE_HOST": "1",
+        "COLI_VULKAN": "0",
+        "COLI_VK_CHAIN": "1",
+        "COLI_VK_DENSE": "1",
+        "COLI_VK_TIER_RESERVE_GB": "2",
+        "COLI_VK_CHAIN_LAYERS": "32",
+        "MIMO_BF16_PACK": "0"
+      },
+      "cap": 104,
+      "median_tok_s": 1.9181617258761645,
+      "median_decode_tok_s": 2.193898741831688,
+      "median_ttft_s": 4.64927669998724,
+      "samples_tok_s": [
+        1.9074495352173755,
+        1.921785094286047,
+        1.9181617258761645
+      ],
+      "samples_decode_tok_s": [
+        2.184128411022179,
+        2.197349152164817,
+        2.193898741831688
+      ],
+      "median_expert_ram_hit_percent": 86.1,
+      "peak_process_rss_GB_decimal": 148.28,
+      "median_prof_s": {
+        "wall": 33.295,
+        "disk_stall": 7.413,
+        "experts": 17.324,
+        "attention": 6.91
+      },
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "streaming_last_request": "[mimo] streaming: 5526 demand reads, 9824 prefetched (6671 used, 3153 unused), predicted 77.3% of 34776 choices, 307.83 GB read, 7.41s stalled, 0.69s predicting; attention matmuls: qkv 1.34s, o_proj 4.55s; 3.11 experts a wave",
+      "phases_last_request": "[mimo] prompt 4.58s (stalled 1.59s, experts 2.58s, attention 0.30s, 2886 demand reads); generation 28.72s (stalled 5.82s, experts 14.72s, attention 6.61s, 2640 demand reads, 9824 prefetched)"
+    },
+    {
+      "arm": "pack",
+      "note": "series A: commit 71f5a0c4, defaults (both packings)",
+      "commit": "71f5a0c4f6fb96477207a6a867067827f862c0f9",
+      "engine_sha256": "d93ff7a659a8f90d8ddef6457363496fcfaeaa9c2e7a4390d89e5a37da867d35",
+      "cuda_dll_sha256": "9576a514891d8951c0ed47130e41d014d3f0823e43fd8b2274d5163a197c2105",
+      "config": {
+        "SNAP": "D:\\AI\\Models\\MiMo-V2.6-Pro-MOPD",
+        "SERVE": "1",
+        "KV_SLOTS": "1",
+        "CTX": "16384",
+        "COLI_NO_OMP_TUNE": "1",
+        "COLI_KV_PREFIX": "0",
+        "OMP_NUM_THREADS": "16",
+        "MIMO_READ_THREADS": "16",
+        "MIMO_DENSE_BITS": "0",
+        "MIMO_IDOT": "0",
+        "MIMO_DIRECT": "1",
+        "MIMO_CHUNK": "64",
+        "MIMO_DIRS": "C:/AI/MiMoPro-Shards",
+        "MIMO_CUDA": "1",
+        "MIMO_CUDA_DENSE_GB": "20",
+        "MIMO_CUDA_RESERVE_GB": "2",
+        "MIMO_CUDA_RELEASE_HOST": "1",
+        "COLI_VULKAN": "0",
+        "COLI_VK_CHAIN": "1",
+        "COLI_VK_DENSE": "1",
+        "COLI_VK_TIER_RESERVE_GB": "2",
+        "COLI_VK_CHAIN_LAYERS": "32"
+      },
+      "cap": 104,
+      "median_tok_s": 1.9357171502523947,
+      "median_decode_tok_s": 2.2264084433842504,
+      "median_ttft_s": 4.763349899963941,
+      "samples_tok_s": [
+        1.928439282270752,
+        1.9367424099180468,
+        1.9357171502523947
+      ],
+      "samples_decode_tok_s": [
+        2.2162392284023626,
+        2.227578680700779,
+        2.2264084433842504
+      ],
+      "median_expert_ram_hit_percent": 86.1,
+      "peak_process_rss_GB_decimal": 147.35,
+      "median_prof_s": {
+        "wall": 32.991,
+        "disk_stall": 7.401,
+        "experts": 17.35,
+        "attention": 6.57
+      },
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "streaming_last_request": "[mimo] streaming: 5535 demand reads, 9820 prefetched (6673 used, 3147 unused), predicted 77.3% of 34776 choices, 307.93 GB read, 7.40s stalled, 0.69s predicting; attention matmuls: qkv 1.39s, o_proj 4.14s; 3.11 experts a wave",
+      "phases_last_request": "[mimo] prompt 4.69s (stalled 1.56s, experts 2.60s, attention 0.43s, 2885 demand reads); generation 28.30s (stalled 5.84s, experts 14.75s, attention 6.13s, 2650 demand reads, 9820 prefetched)"
+    },
+    {
+      "arm": "pack-global-v1",
+      "note": "series A: commit 71f5a0c4, MIMO_CACHE_GLOBAL=1 (the pool's first version)",
+      "commit": "71f5a0c4f6fb96477207a6a867067827f862c0f9",
+      "engine_sha256": "d93ff7a659a8f90d8ddef6457363496fcfaeaa9c2e7a4390d89e5a37da867d35",
+      "cuda_dll_sha256": "9576a514891d8951c0ed47130e41d014d3f0823e43fd8b2274d5163a197c2105",
+      "config": {
+        "SNAP": "D:\\AI\\Models\\MiMo-V2.6-Pro-MOPD",
+        "SERVE": "1",
+        "KV_SLOTS": "1",
+        "CTX": "16384",
+        "COLI_NO_OMP_TUNE": "1",
+        "COLI_KV_PREFIX": "0",
+        "OMP_NUM_THREADS": "16",
+        "MIMO_READ_THREADS": "16",
+        "MIMO_DENSE_BITS": "0",
+        "MIMO_IDOT": "0",
+        "MIMO_DIRECT": "1",
+        "MIMO_CHUNK": "64",
+        "MIMO_DIRS": "C:/AI/MiMoPro-Shards",
+        "MIMO_CUDA": "1",
+        "MIMO_CUDA_DENSE_GB": "20",
+        "MIMO_CUDA_RESERVE_GB": "2",
+        "MIMO_CUDA_RELEASE_HOST": "1",
+        "COLI_VULKAN": "0",
+        "COLI_VK_CHAIN": "1",
+        "COLI_VK_DENSE": "1",
+        "COLI_VK_TIER_RESERVE_GB": "2",
+        "COLI_VK_CHAIN_LAYERS": "32",
+        "MIMO_CACHE_GLOBAL": "1"
+      },
+      "cap": 104,
+      "median_tok_s": 1.9820963185835134,
+      "median_decode_tok_s": 2.319790730129258,
+      "median_ttft_s": 5.135849000012968,
+      "samples_tok_s": [
+        1.9824043217234244,
+        1.9820963185835134,
+        1.9784414918655773
+      ],
+      "samples_decode_tok_s": [
+        2.319790730129258,
+        2.32130781539224,
+        2.315083121517891
+      ],
+      "median_expert_ram_hit_percent": 85.9,
+      "peak_process_rss_GB_decimal": 147.35,
+      "median_prof_s": {
+        "wall": 32.217,
+        "disk_stall": 6.236,
+        "experts": 17.402,
+        "attention": 6.592
+      },
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "streaming_last_request": "[mimo] streaming: 5606 demand reads, 9546 prefetched (6350 used, 3196 unused), predicted 77.3% of 34776 choices, 303.86 GB read, 6.24s stalled, 0.92s predicting; attention matmuls: qkv 1.38s, o_proj 4.18s; 3.23 experts a wave",
+      "phases_last_request": "[mimo] prompt 5.06s (stalled 1.82s, experts 2.70s, attention 0.41s, 3230 demand reads); generation 27.21s (stalled 4.41s, experts 14.73s, attention 6.18s, 2376 demand reads, 9546 prefetched)"
+    },
+    {
+      "arm": "hybrid",
+      "note": "series B: the pool with its prompt-block rule, built before 0369c3b1 made it the default: here MIMO_CACHE_GLOBAL unset is 0",
+      "commit": "0369c3b11b11b4241a7bb0a07f604b2f66afa1fe",
+      "engine_sha256": "2c1596ce4777dd8447b9494c302c5c418ce17c43df99a868bf38b128936ec430",
+      "cuda_dll_sha256": "9576a514891d8951c0ed47130e41d014d3f0823e43fd8b2274d5163a197c2105",
+      "config": {
+        "SNAP": "D:\\AI\\Models\\MiMo-V2.6-Pro-MOPD",
+        "SERVE": "1",
+        "KV_SLOTS": "1",
+        "CTX": "16384",
+        "COLI_NO_OMP_TUNE": "1",
+        "COLI_KV_PREFIX": "0",
+        "OMP_NUM_THREADS": "16",
+        "MIMO_READ_THREADS": "16",
+        "MIMO_DENSE_BITS": "0",
+        "MIMO_IDOT": "0",
+        "MIMO_DIRECT": "1",
+        "MIMO_CHUNK": "64",
+        "MIMO_DIRS": "C:/AI/MiMoPro-Shards",
+        "MIMO_CUDA": "1",
+        "MIMO_CUDA_DENSE_GB": "20",
+        "MIMO_CUDA_RESERVE_GB": "2",
+        "MIMO_CUDA_RELEASE_HOST": "1",
+        "COLI_VULKAN": "0",
+        "COLI_VK_CHAIN": "1",
+        "COLI_VK_DENSE": "1",
+        "COLI_VK_TIER_RESERVE_GB": "2",
+        "COLI_VK_CHAIN_LAYERS": "32"
+      },
+      "cap": 104,
+      "median_tok_s": 1.9284403805007715,
+      "median_decode_tok_s": 2.217951011864855,
+      "median_ttft_s": 4.768487800029106,
+      "samples_tok_s": [
+        1.9284403805007715,
+        1.9279220379400885,
+        1.931873582890127
+      ],
+      "samples_decode_tok_s": [
+        2.214992541256513,
+        2.217951011864855,
+        2.221440690397977
+      ],
+      "median_expert_ram_hit_percent": 86.1,
+      "peak_process_rss_GB_decimal": 147.35,
+      "median_prof_s": {
+        "wall": 33.114,
+        "disk_stall": 7.392,
+        "experts": 17.383,
+        "attention": 6.614
+      },
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "streaming_last_request": "[mimo] streaming: 5536 demand reads, 9818 prefetched (6674 used, 3144 unused), predicted 77.3% of 34776 choices, 307.91 GB read, 7.38s stalled, 0.70s predicting; attention matmuls: qkv 1.41s, o_proj 4.17s; 3.12 experts a wave",
+      "phases_last_request": "[mimo] prompt 4.70s (stalled 1.56s, experts 2.61s, attention 0.43s, 2885 demand reads); generation 28.36s (stalled 5.82s, experts 14.77s, attention 6.18s, 2651 demand reads, 9818 prefetched)"
+    },
+    {
+      "arm": "hybrid-global",
+      "note": "series B: the same build, MIMO_CACHE_GLOBAL=1 (what 0369c3b1 does by default)",
+      "commit": "0369c3b11b11b4241a7bb0a07f604b2f66afa1fe",
+      "engine_sha256": "2c1596ce4777dd8447b9494c302c5c418ce17c43df99a868bf38b128936ec430",
+      "cuda_dll_sha256": "9576a514891d8951c0ed47130e41d014d3f0823e43fd8b2274d5163a197c2105",
+      "config": {
+        "SNAP": "D:\\AI\\Models\\MiMo-V2.6-Pro-MOPD",
+        "SERVE": "1",
+        "KV_SLOTS": "1",
+        "CTX": "16384",
+        "COLI_NO_OMP_TUNE": "1",
+        "COLI_KV_PREFIX": "0",
+        "OMP_NUM_THREADS": "16",
+        "MIMO_READ_THREADS": "16",
+        "MIMO_DENSE_BITS": "0",
+        "MIMO_IDOT": "0",
+        "MIMO_DIRECT": "1",
+        "MIMO_CHUNK": "64",
+        "MIMO_DIRS": "C:/AI/MiMoPro-Shards",
+        "MIMO_CUDA": "1",
+        "MIMO_CUDA_DENSE_GB": "20",
+        "MIMO_CUDA_RESERVE_GB": "2",
+        "MIMO_CUDA_RELEASE_HOST": "1",
+        "COLI_VULKAN": "0",
+        "COLI_VK_CHAIN": "1",
+        "COLI_VK_DENSE": "1",
+        "COLI_VK_TIER_RESERVE_GB": "2",
+        "COLI_VK_CHAIN_LAYERS": "32",
+        "MIMO_CACHE_GLOBAL": "1"
+      },
+      "cap": 104,
+      "median_tok_s": 1.9819060033406095,
+      "median_decode_tok_s": 2.3120555036581867,
+      "median_ttft_s": 5.003182400017977,
+      "samples_tok_s": [
+        1.9819060033406095,
+        1.9853108340382433,
+        1.9817876808646013
+      ],
+      "samples_decode_tok_s": [
+        2.3137667505697,
+        2.3120555036581867,
+        2.308462420901008
+      ],
+      "median_expert_ram_hit_percent": 86.2,
+      "peak_process_rss_GB_decimal": 147.35,
+      "median_prof_s": {
+        "wall": 32.218,
+        "disk_stall": 6.145,
+        "experts": 17.419,
+        "attention": 6.615
+      },
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "streaming_last_request": "[mimo] streaming: 5473 demand reads, 9545 prefetched (6350 used, 3195 unused), predicted 77.3% of 34776 choices, 301.17 GB read, 6.14s stalled, 0.92s predicting; attention matmuls: qkv 1.42s, o_proj 4.19s; 3.26 experts a wave",
+      "phases_last_request": "[mimo] prompt 4.93s (stalled 1.72s, experts 2.68s, attention 0.41s, 3099 demand reads); generation 27.29s (stalled 4.43s, experts 14.73s, attention 6.24s, 2374 demand reads, 9545 prefetched)"
+    },
+    {
+      "arm": "hybrid-rows64",
+      "note": "series B: the same build, MIMO_PREFETCH_ROWS=64",
+      "commit": "0369c3b11b11b4241a7bb0a07f604b2f66afa1fe",
+      "engine_sha256": "2c1596ce4777dd8447b9494c302c5c418ce17c43df99a868bf38b128936ec430",
+      "cuda_dll_sha256": "9576a514891d8951c0ed47130e41d014d3f0823e43fd8b2274d5163a197c2105",
+      "config": {
+        "SNAP": "D:\\AI\\Models\\MiMo-V2.6-Pro-MOPD",
+        "SERVE": "1",
+        "KV_SLOTS": "1",
+        "CTX": "16384",
+        "COLI_NO_OMP_TUNE": "1",
+        "COLI_KV_PREFIX": "0",
+        "OMP_NUM_THREADS": "16",
+        "MIMO_READ_THREADS": "16",
+        "MIMO_DENSE_BITS": "0",
+        "MIMO_IDOT": "0",
+        "MIMO_DIRECT": "1",
+        "MIMO_CHUNK": "64",
+        "MIMO_DIRS": "C:/AI/MiMoPro-Shards",
+        "MIMO_CUDA": "1",
+        "MIMO_CUDA_DENSE_GB": "20",
+        "MIMO_CUDA_RESERVE_GB": "2",
+        "MIMO_CUDA_RELEASE_HOST": "1",
+        "COLI_VULKAN": "0",
+        "COLI_VK_CHAIN": "1",
+        "COLI_VK_DENSE": "1",
+        "COLI_VK_TIER_RESERVE_GB": "2",
+        "COLI_VK_CHAIN_LAYERS": "32",
+        "MIMO_PREFETCH_ROWS": "64"
+      },
+      "cap": 104,
+      "median_tok_s": 1.8953801902552314,
+      "median_decode_tok_s": 2.2102406906513217,
+      "median_ttft_s": 5.265699199982919,
+      "samples_tok_s": [
+        1.8911815663332543,
+        1.8968096601027742,
+        1.8953801902552314
+      ],
+      "samples_decode_tok_s": [
+        2.2075171832827807,
+        2.21245413964308,
+        2.2102406906513217
+      ],
+      "median_expert_ram_hit_percent": 89.2,
+      "peak_process_rss_GB_decimal": 147.35,
+      "median_prof_s": {
+        "wall": 33.692,
+        "disk_stall": 7.77,
+        "experts": 17.455,
+        "attention": 6.689
+      },
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "streaming_last_request": "[mimo] streaming: 4297 demand reads, 12019 prefetched (8516 used, 3503 unused), predicted 79.6% of 44160 choices, 327.20 GB read, 7.74s stalled, 0.75s predicting; attention matmuls: qkv 1.44s, o_proj 4.28s; 3.12 experts a wave",
+      "phases_last_request": "[mimo] prompt 5.19s (stalled 1.92s, experts 2.65s, attention 0.46s, 1650 demand reads); generation 28.50s (stalled 5.82s, experts 14.78s, attention 6.31s, 2647 demand reads, 9795 prefetched)"
+    },
+    {
+      "arm": "hybrid-global-rows64",
+      "note": "series B: the same build, MIMO_CACHE_GLOBAL=1 MIMO_PREFETCH_ROWS=64",
+      "commit": "0369c3b11b11b4241a7bb0a07f604b2f66afa1fe",
+      "engine_sha256": "2c1596ce4777dd8447b9494c302c5c418ce17c43df99a868bf38b128936ec430",
+      "cuda_dll_sha256": "9576a514891d8951c0ed47130e41d014d3f0823e43fd8b2274d5163a197c2105",
+      "config": {
+        "SNAP": "D:\\AI\\Models\\MiMo-V2.6-Pro-MOPD",
+        "SERVE": "1",
+        "KV_SLOTS": "1",
+        "CTX": "16384",
+        "COLI_NO_OMP_TUNE": "1",
+        "COLI_KV_PREFIX": "0",
+        "OMP_NUM_THREADS": "16",
+        "MIMO_READ_THREADS": "16",
+        "MIMO_DENSE_BITS": "0",
+        "MIMO_IDOT": "0",
+        "MIMO_DIRECT": "1",
+        "MIMO_CHUNK": "64",
+        "MIMO_DIRS": "C:/AI/MiMoPro-Shards",
+        "MIMO_CUDA": "1",
+        "MIMO_CUDA_DENSE_GB": "20",
+        "MIMO_CUDA_RESERVE_GB": "2",
+        "MIMO_CUDA_RELEASE_HOST": "1",
+        "COLI_VULKAN": "0",
+        "COLI_VK_CHAIN": "1",
+        "COLI_VK_DENSE": "1",
+        "COLI_VK_TIER_RESERVE_GB": "2",
+        "COLI_VK_CHAIN_LAYERS": "32",
+        "MIMO_CACHE_GLOBAL": "1",
+        "MIMO_PREFETCH_ROWS": "64"
+      },
+      "cap": 104,
+      "median_tok_s": 1.9859928174810646,
+      "median_decode_tok_s": 2.306062555001009,
+      "median_ttft_s": 4.908371500030626,
+      "samples_tok_s": [
+        1.9858714493087035,
+        1.9859928174810646,
+        1.9873439601973992
+      ],
+      "samples_decode_tok_s": [
+        2.306062555001009,
+        2.304870007033755,
+        2.3089347429446265
+      ],
+      "median_expert_ram_hit_percent": 90.8,
+      "peak_process_rss_GB_decimal": 147.35,
+      "median_prof_s": {
+        "wall": 32.152,
+        "disk_stall": 5.998,
+        "experts": 17.31,
+        "attention": 6.747
+      },
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "streaming_last_request": "[mimo] streaming: 3614 demand reads, 11915 prefetched (8363 used, 3552 unused), predicted 79.6% of 44160 choices, 311.42 GB read, 6.02s stalled, 1.01s predicting; attention matmuls: qkv 1.41s, o_proj 4.26s; 3.45 experts a wave",
+      "phases_last_request": "[mimo] prompt 4.85s (stalled 1.63s, experts 2.56s, attention 0.46s, 1235 demand reads); generation 27.29s (stalled 4.40s, experts 14.73s, attention 6.26s, 2379 demand reads, 9545 prefetched)"
+    },
+    {
+      "arm": "pool",
+      "note": "series C: commit 0369c3b1, defaults (the pool on)",
+      "commit": "0369c3b11b11b4241a7bb0a07f604b2f66afa1fe",
+      "engine_sha256": "2b9426088828933dff9304b7c9a875297b04e798f53af8088b809f9554d12f7c",
+      "cuda_dll_sha256": "9576a514891d8951c0ed47130e41d014d3f0823e43fd8b2274d5163a197c2105",
+      "config": {
+        "SNAP": "D:\\AI\\Models\\MiMo-V2.6-Pro-MOPD",
+        "SERVE": "1",
+        "KV_SLOTS": "1",
+        "CTX": "16384",
+        "COLI_NO_OMP_TUNE": "1",
+        "COLI_KV_PREFIX": "0",
+        "OMP_NUM_THREADS": "16",
+        "MIMO_READ_THREADS": "16",
+        "MIMO_DENSE_BITS": "0",
+        "MIMO_IDOT": "0",
+        "MIMO_DIRECT": "1",
+        "MIMO_CHUNK": "64",
+        "MIMO_DIRS": "C:/AI/MiMoPro-Shards",
+        "MIMO_CUDA": "1",
+        "MIMO_CUDA_DENSE_GB": "20",
+        "MIMO_CUDA_RESERVE_GB": "2",
+        "MIMO_CUDA_RELEASE_HOST": "1",
+        "COLI_VULKAN": "0",
+        "COLI_VK_CHAIN": "1",
+        "COLI_VK_DENSE": "1",
+        "COLI_VK_TIER_RESERVE_GB": "2",
+        "COLI_VK_CHAIN_LAYERS": "32"
+      },
+      "cap": 104,
+      "median_tok_s": 1.9897695810452047,
+      "median_decode_tok_s": 2.321100822522137,
+      "median_ttft_s": 5.010834000015166,
+      "samples_tok_s": [
+        1.9853757224289459,
+        1.9897695810452047,
+        1.9928834443606576
+      ],
+      "samples_decode_tok_s": [
+        2.314059956487167,
+        2.321100822522137,
+        2.3226598082574945
+      ],
+      "median_expert_ram_hit_percent": 86.2,
+      "peak_process_rss_GB_decimal": 147.35,
+      "median_prof_s": {
+        "wall": 32.092,
+        "disk_stall": 6.171,
+        "experts": 17.386,
+        "attention": 6.565
+      },
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "streaming_last_request": "[mimo] streaming: 5475 demand reads, 9545 prefetched (6350 used, 3195 unused), predicted 77.3% of 34776 choices, 301.21 GB read, 6.19s stalled, 0.91s predicting; attention matmuls: qkv 1.34s, o_proj 4.16s; 3.26 experts a wave",
+      "phases_last_request": "[mimo] prompt 4.92s (stalled 1.71s, experts 2.67s, attention 0.42s, 3099 demand reads); generation 27.12s (stalled 4.48s, experts 14.67s, attention 6.11s, 2376 demand reads, 9545 prefetched)"
+    },
+    {
+      "arm": "pool-off",
+      "note": "series C: commit 0369c3b1, MIMO_CACHE_GLOBAL=0",
+      "commit": "0369c3b11b11b4241a7bb0a07f604b2f66afa1fe",
+      "engine_sha256": "2b9426088828933dff9304b7c9a875297b04e798f53af8088b809f9554d12f7c",
+      "cuda_dll_sha256": "9576a514891d8951c0ed47130e41d014d3f0823e43fd8b2274d5163a197c2105",
+      "config": {
+        "SNAP": "D:\\AI\\Models\\MiMo-V2.6-Pro-MOPD",
+        "SERVE": "1",
+        "KV_SLOTS": "1",
+        "CTX": "16384",
+        "COLI_NO_OMP_TUNE": "1",
+        "COLI_KV_PREFIX": "0",
+        "OMP_NUM_THREADS": "16",
+        "MIMO_READ_THREADS": "16",
+        "MIMO_DENSE_BITS": "0",
+        "MIMO_IDOT": "0",
+        "MIMO_DIRECT": "1",
+        "MIMO_CHUNK": "64",
+        "MIMO_DIRS": "C:/AI/MiMoPro-Shards",
+        "MIMO_CUDA": "1",
+        "MIMO_CUDA_DENSE_GB": "20",
+        "MIMO_CUDA_RESERVE_GB": "2",
+        "MIMO_CUDA_RELEASE_HOST": "1",
+        "COLI_VULKAN": "0",
+        "COLI_VK_CHAIN": "1",
+        "COLI_VK_DENSE": "1",
+        "COLI_VK_TIER_RESERVE_GB": "2",
+        "COLI_VK_CHAIN_LAYERS": "32",
+        "MIMO_CACHE_GLOBAL": "0"
+      },
+      "cap": 104,
+      "median_tok_s": 1.9400203484486573,
+      "median_decode_tok_s": 2.229737041662517,
+      "median_ttft_s": 4.734891900036018,
+      "samples_tok_s": [
+        1.9265615913553384,
+        1.9400203484486573,
+        1.9417215634076677
+      ],
+      "samples_decode_tok_s": [
+        2.21959130580502,
+        2.229737041662517,
+        2.2318625616462002
+      ],
+      "median_expert_ram_hit_percent": 86.1,
+      "peak_process_rss_GB_decimal": 147.35,
+      "median_prof_s": {
+        "wall": 32.918,
+        "disk_stall": 7.492,
+        "experts": 17.303,
+        "attention": 6.527
+      },
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "streaming_last_request": "[mimo] streaming: 5536 demand reads, 9827 prefetched (6668 used, 3159 unused), predicted 77.3% of 34776 choices, 308.09 GB read, 7.49s stalled, 0.69s predicting; attention matmuls: qkv 1.38s, o_proj 4.09s; 3.11 experts a wave",
+      "phases_last_request": "[mimo] prompt 4.66s (stalled 1.58s, experts 2.57s, attention 0.41s, 2884 demand reads); generation 28.23s (stalled 5.91s, experts 14.68s, attention 6.08s, 2652 demand reads, 9827 prefetched)"
+    }
+  ]
+}

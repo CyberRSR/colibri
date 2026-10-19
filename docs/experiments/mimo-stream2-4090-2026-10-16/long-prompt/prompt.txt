@@ -1,0 +1,83 @@
+<|im_start|>user
+Read the following notes and answer the question at the end.
+
+Binary search finds an item in a sorted array by repeatedly halving the search interval. It compares the target with the middle element; if they differ, the half in which the target cannot lie is eliminated and the search continues on the remaining half. It runs in logarithmic time, which makes it far faster than a linear scan for large arrays, but it requires the data to be sorted and to support random access.
+
+Пример на Python:
+
+def bsearch(a, x):
+    lo, hi = 0, len(a) - 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if a[mid] == x:
+            return mid
+        if a[mid] < x:
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return -1
+
+Колибри — самые маленькие птицы на Земле. Они умеют зависать в воздухе и даже летать назад, а их сердце может биться более тысячи раз в минуту. Некоторые виды совершают долгие перелёты через Мексиканский залив.
+
+The Mixture-of-Experts architecture routes each token to a small number of expert networks chosen by a learned router, so the number of parameters can grow much faster than the computation per token.
+
+
+Sorting algorithms such as quicksort, mergesort and heapsort differ in their stability, memory use and worst-case behaviour. Quicksort is usually fastest in practice but has a quadratic worst case; mergesort is stable and predictable but needs extra memory; heapsort sorts in place with guaranteed n log n time but poor cache locality.
+
+Hash tables give expected constant-time lookups by mapping keys to buckets with a hash function. Collisions are resolved by chaining or open addressing, and the table is resized when the load factor grows too large, which keeps operations fast on average.
+
+Деревья поиска, такие как красно-чёрные деревья и AVL-деревья, поддерживают упорядоченные данные и выполняют вставку, удаление и поиск за логарифмическое время. Они полезны, когда нужно перечислять элементы по порядку или искать ближайшие ключи.
+Binary search finds an item in a sorted array by repeatedly halving the search interval. It compares the target with the middle element; if they differ, the half in which the target cannot lie is eliminated and the search continues on the remaining half. It runs in logarithmic time, which makes it far faster than a linear scan for large arrays, but it requires the data to be sorted and to support random access.
+
+Пример на Python:
+
+def bsearch(a, x):
+    lo, hi = 0, len(a) - 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if a[mid] == x:
+            return mid
+        if a[mid] < x:
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return -1
+
+Колибри — самые маленькие птицы на Земле. Они умеют зависать в воздухе и даже летать назад, а их сердце может биться более тысячи раз в минуту. Некоторые виды совершают долгие перелёты через Мексиканский залив.
+
+The Mixture-of-Experts architecture routes each token to a small number of expert networks chosen by a learned router, so the number of parameters can grow much faster than the computation per token.
+
+
+Sorting algorithms such as quicksort, mergesort and heapsort differ in their stability, memory use and worst-case behaviour. Quicksort is usually fastest in practice but has a quadratic worst case; mergesort is stable and predictable but needs extra memory; heapsort sorts in place with guaranteed n log n time but poor cache locality.
+
+Hash tables give expected constant-time lookups by mapping keys to buckets with a hash function. Collisions are resolved by chaining or open addressing, and the table is resized when the load factor grows too large, which keeps operations fast on average.
+
+Деревья поиска, такие как красно-чёрные деревья и AVL-деревья, поддерживают упорядоченные данные и выполняют вставку, удаление и поиск за логарифмическое время. Они полезны, когда нужно перечислять элементы по порядку или искать ближайшие ключи.
+Binary search finds an item in a sorted array by repeatedly halving the search interval. It compares the target with the middle element; if they differ, the half in which the target cannot lie is eliminated and the search continues on the remaining half. It runs in logarithmic time, which makes it far faster than a linear scan for large arrays, but it requires the data to be sorted and to support random access.
+
+Пример на Python:
+
+def bsearch(a, x):
+    lo, hi = 0, len(a) - 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if a[mid] == x:
+            return mid
+        if a[mid] < x:
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return -1
+
+Колибри — самые маленькие птицы на Земле. Они умеют зависать в воздухе и даже летать назад, а их сердце может биться более тысячи раз в минуту. Некоторые виды совершают долгие перелёты через Мексиканский залив.
+
+The Mixture-of-Experts architecture routes each token to a small number of expert networks chosen by a learned router, so the number of parameters can grow much faster than the computation per token.
+
+
+Sorting algorithms such as quicksort, mergesort and heapsort differ in their stability, memory use and worst-case behaviour. Quicksort is usually fastest in practice but has a quadratic worst case; mergesort is stable and predictable but needs extra memory; heapsort sorts in place with guaranteed n log n time but poor cache locality.
+
+Hash tables give expected constant-time lookups by mapping keys to buckets with a hash function. Collisions are resolved by chaining or open addressing, and the table is resized when the load factor grows too large, which keeps operations fast on average.
+
+Деревья поиска, такие как красно-чёрные деревья и AVL-деревья, поддерживают упорядоченные данные и выполняют вставку, удаление и поиск за логарифмическое время. Они полезны, когда нужно перечислять элементы по порядку или искать ближайшие ключи.
+Question: summarize the notes in five bullet points.<|im_end|><|im_start|>assistant
+<think></think>

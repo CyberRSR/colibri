@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "hypothesis": "Reading the next MoE layer's predicted experts ahead (the router applied early to the residual) shortens the stalls the in-layer overlap leaves.",
+  "commit": "845474fc1856014ec331ac26825fdf6baaa402c9",
+  "model": "XiaomiMiMo/MiMo-V2.6-Pro-MOPD, all 70 layers, native MXFP4 experts and FP8/BF16 dense",
+  "command": "git checkout 845474fc\nc/build_mimo_cuda.bat\nmingw32-make -C c mimo CUDA_DLL=1 ARCH=native VK=0\npython c/tools/benchmark_mimo_cuda.py --engine c/mimo.exe --model D:/AI/Models/MiMo-V2.6-Pro-MOPD --shards C:/AI/MiMoPro-Shards --backend cuda --release-host --cap 104 --threads 16 --read-threads 16 --context 16384 --tokens 64 --runs 3 --env MIMO_PREFETCH=0|1 --output <dir>",
+  "prompt_hash": "c9d8ef2ce7780c8288730a94fa44438917740cd9f6581534780506dada6e006f",
+  "hardware": {
+    "cpu": "AMD Ryzen 9 7950X3D, 16 cores / 32 logical processors",
+    "ram": "192 GiB installed (4 x 48 GiB), DDR5 configured at 5400 MT/s; 191.08 GiB OS-visible; ~65 GB/s measured read bandwidth",
+    "storage": "C: one PCIe 5.0 x4 NVMe (88 shards, ~10.5 GB/s direct 19 MB reads); D: three PCIe 4.0 NVMe striped behind the chipset (42 shards, ~6.5 GB/s); ~17.7 GB/s together. Native Windows unbuffered reads.",
+    "os": "Windows 11 Pro for Workstations 10.0.26300; MinGW-w64 GCC 14.2 MSVCRT, MSVC 14.44; RTX 4090 24 GiB WDDM, driver 617.42, CUDA Toolkit 13.2, sm_89"
+  },
+  "warmup_runs": 1,
+  "changed_variables": [
+    "MIMO_PREFETCH"
+  ],
+  "baseline": {
+    "config": {
+      "SNAP": "D:\\AI\\Models\\MiMo-V2.6-Pro-MOPD",
+      "SERVE": "1",
+      "KV_SLOTS": "1",
+      "CTX": "16384",
+      "COLI_NO_OMP_TUNE": "1",
+      "COLI_KV_PREFIX": "0",
+      "OMP_NUM_THREADS": "16",
+      "MIMO_READ_THREADS": "16",
+      "MIMO_DENSE_BITS": "0",
+      "MIMO_IDOT": "0",
+      "MIMO_DIRECT": "1",
+      "MIMO_CHUNK": "64",
+      "MIMO_DIRS": "C:/AI/MiMoPro-Shards",
+      "MIMO_CUDA": "1",
+      "MIMO_CUDA_DENSE_GB": "20",
+      "MIMO_CUDA_RESERVE_GB": "2",
+      "MIMO_CUDA_RELEASE_HOST": "1",
+      "COLI_VULKAN": "0",
+      "COLI_VK_CHAIN": "1",
+      "COLI_VK_DENSE": "1",
+      "COLI_VK_TIER_RESERVE_GB": "2",
+      "COLI_VK_CHAIN_LAYERS": "32",
+      "MIMO_PREFETCH": "0",
+      "cap": 104
+    },
+    "samples": {
+      "tok_s": [
+        1.5825398340528636,
+        1.587076212245021,
+        1.587974783059505
+      ]
+    },
+    "median_tok_s": 1.587076212245021,
+    "quality": {
+      "method": "All measured 64-token greedy replies byte-identical to the release engine's (reply SHA-256 0305abcd...); tiny-oracle logits byte-identical to the pre-change engine; full 70-layer CPU/CUDA logit gate in correctness/.",
+      "passed": true
+    },
+    "evidence": {
+      "uri": "https://github.com/CyberRSR/colibri/blob/perf/mimo-cuda-4090/docs/experiments/mimo-stream-4090-2026-10-16/stream-noprefetch/samples.json",
+      "sha256": "cfb103358553b4da9801f6d0654c618bf03bb57a304aecaacc3155f6052ef052"
+    }
+  },
+  "trial": {
+    "config": {
+      "SNAP": "D:\\AI\\Models\\MiMo-V2.6-Pro-MOPD",
+      "SERVE": "1",
+      "KV_SLOTS": "1",
+      "CTX": "16384",
+      "COLI_NO_OMP_TUNE": "1",
+      "COLI_KV_PREFIX": "0",
+      "OMP_NUM_THREADS": "16",
+      "MIMO_READ_THREADS": "16",
+      "MIMO_DENSE_BITS": "0",
+      "MIMO_IDOT": "0",
+      "MIMO_DIRECT": "1",
+      "MIMO_CHUNK": "64",
+      "MIMO_DIRS": "C:/AI/MiMoPro-Shards",
+      "MIMO_CUDA": "1",
+      "MIMO_CUDA_DENSE_GB": "20",
+      "MIMO_CUDA_RESERVE_GB": "2",
+      "MIMO_CUDA_RELEASE_HOST": "1",
+      "COLI_VULKAN": "0",
+      "COLI_VK_CHAIN": "1",
+      "COLI_VK_DENSE": "1",
+      "COLI_VK_TIER_RESERVE_GB": "2",
+      "COLI_VK_CHAIN_LAYERS": "32",
+      "cap": 104,
+      "MIMO_PREFETCH": "1"
+    },
+    "samples": {
+      "tok_s": [
+        1.706506660051636,
+        1.7152147940708329,
+        1.709164211357617
+      ]
+    },
+    "median_tok_s": 1.709164211357617,
+    "quality": {
+      "method": "All measured 64-token greedy replies byte-identical to the release engine's (reply SHA-256 0305abcd...); tiny-oracle logits byte-identical to the pre-change engine; full 70-layer CPU/CUDA logit gate in correctness/.",
+      "passed": true
+    },
+    "evidence": {
+      "uri": "https://github.com/CyberRSR/colibri/blob/perf/mimo-cuda-4090/docs/experiments/mimo-stream-4090-2026-10-16/stream/samples.json",
+      "sha256": "86c3fed80a7c7cd7a2ca4c05438acbbd21d3c5923f76db37af6190bb3a2e84be"
+    }
+  },
+  "outcome": "improvement"
+}

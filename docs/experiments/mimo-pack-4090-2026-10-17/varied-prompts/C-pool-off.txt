@@ -1,0 +1,9 @@
+0: 64 tok in 41.5s (ttft 9.9s, decode 1.993 tok/s, hit 78.7%) disk 13.011 expert 19.400 attn 7.177
+1: 64 tok in 35.7s (ttft 7.8s, decode 2.262 tok/s, hit 82.0%) disk 8.388 expert 18.733 attn 6.742
+2: 64 tok in 35.3s (ttft 6.0s, decode 2.156 tok/s, hit 83.6%) disk 8.687 expert 18.207 attn 6.603
+3: 18 tok in 13.3s (ttft 5.1s, decode 2.085 tok/s, hit 73.4%) disk 3.589 expert 6.939 attn 2.123
+4: 64 tok in 33.2s (ttft 4.8s, decode 2.218 tok/s, hit 87.1%) disk 7.151 expert 17.652 attn 6.618
+5: 64 tok in 35.8s (ttft 6.5s, decode 2.155 tok/s, hit 82.0%) disk 8.761 expert 18.478 attn 6.724
+6: 64 tok in 35.1s (ttft 6.9s, decode 2.238 tok/s, hit 82.8%) disk 8.225 expert 18.360 attn 6.689
+7: 64 tok in 32.4s (ttft 4.8s, decode 2.287 tok/s, hit 86.1%) disk 7.186 expert 17.077 attn 6.394
+overall 1.7777 tok/s, mean decode 2.1741 tok/s over 8 prompts

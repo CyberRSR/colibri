@@ -601,9 +601,33 @@ Read **only** by `c/mimo.c` (and `MIMO_MAX_IMAGE_TOKENS` by the gateway). See [m
 | `MIMO_DENSE_BITS` | 0 | MiMo: 0 keeps the dense weights as released (FP8, BF16), exact; 8 is int8 per row, less RAM, not exact; 32 is f32, the oracle's configuration. |
 | `MIMO_IDOT` | 0 | MiMo: 1 quantizes the expert matmuls' activations to int8 per 32 (faster, not exact). |
 | `MIMO_DIRECT` | 1 | MiMo: 0 reads experts through the page cache instead of `O_DIRECT`. |
-| `MIMO_READ_THREADS` | 8 | MiMo: parallel expert reads per layer. |
-| `MIMO_CHUNK` | 64 | MiMo: prompt tokens per prefill block. |
+| `MIMO_IO_PER_DRIVE` | 2 | MiMo: expert readers per storage device the shards are on, each device with its own queue (demands before prefetches). |
+| `MIMO_IO_THREADS` | unset | MiMo: N readers on one shared queue instead; 0 reads each expert on the computing thread. |
+| `MIMO_PREFETCH` | 1 | MiMo: 0 off; 1 reads ahead the experts the next layer's router picks from the residual after this layer's attention; 2 also after this layer's MLP. |
+| `MIMO_PREFETCH_ATTN` | top-k | MiMo: experts predicted per row after the attention (0: none there). |
+| `MIMO_PREFETCH_MLP` | 0, top-k with `MIMO_PREFETCH=2` | MiMo: experts predicted per row after the MLP. |
+| `MIMO_PREFETCH_EXTRA` | 0 | MiMo: experts predicted beyond each point's size for each row. |
+| `MIMO_PREFETCH_ROWS` | 4 | MiMo: the largest step a prediction is made for. |
+| `MIMO_PREFETCH_LIMIT` | 64 | MiMo: prefetches waiting at once. |
+| `MIMO_IO_PIECE_MB` | unset | MiMo: cut each expert read into pieces of this size; unset, one read per expert. |
+| `MIMO_CACHE_DECAY` | 0 | MiMo: 0 is an LRU expert cache; 0 < d < 1 reuses the slot whose expert has the lowest use count decayed by d per step of its layer. |
+| `MIMO_MTP` | 2 (0 in a `VK=1` build) | MiMo: decode steps draft with the checkpoint's first N MTP layers (up to 3) and keep the drafts the trunk chooses (up to N + 1 tokens a step; the same greedy tokens and sampling distribution). 0 decodes one token a step. |
+| `MIMO_MTP_MIN_P` | 0.6 | MiMo: a step verifies its drafts while the probabilities the MTP layers give them multiply to at least this; 0 verifies every draft. |
+| `MIMO_MTP_TRACE` | unset | MiMo: append a line per decode step to this file (the position, drafts made, verified and kept, their probabilities). |
+| `MIMO_MTP_ORACLE`, `MIMO_MTP_ORACLE_MISS` | unset | Tests only (the by-hand path): the reference's ids from position 0 stand in for the MTP layers' drafts; `MIMO_MTP_ORACLE_MISS=m` makes every m-th draft one the trunk does not choose. |
+| `MIMO_CACHE_GLOBAL` | 1 (0 in a `VK=1` build) | MiMo: the MoE layers' expert caches are one pool (in a decode step a miss takes the least recently used buffer of any layer; a layer may grow to twice the cap). Faster decode, a slightly later first token; 0 keeps a fixed cap per layer. See mimo.md. |
+| `MIMO_BF16_PACK` | 1 | MiMo: the o_proj and the head the CPU computes are packed without loss (12 bits a weight, the same logits); 0 keeps plain bf16. |
+| `MIMO_CUDA_BF16_PACK` | 1 | MiMo, CUDA: BF16 matrices go to the GPU packed without loss (12 bits a weight, the same results), so more o_proj fit; 0 uploads plain bf16. |
+| `MIMO_CUDA_OPROJ_INT8` | 0 | MiMo, CUDA: 1 puts every o_proj on the GPU as int8 per 128 columns (not exact; see mimo-cuda.md). |
+| `MIMO_CUDA_OPROJ_SPREAD` | 1 | MiMo, CUDA: the o_proj that fit go up even layers first, so the CPU's are spread through the model; 0 places them in layer order. |
+| `MIMO_LARGE_PAGES` | 0 | MiMo, Windows: 1 keeps the expert cache in 2 MiB locked pages when the account has the lock-pages right. |
+| `MIMO_ROUTE_TRACE` | unset | MiMo: write every MoE step's routing for `tools/mimo_route_sim.py`. |
+| `MIMO_READ_THREADS` | -- | MiMo: no longer read; see `MIMO_IO_PER_DRIVE`. |
+| `MIMO_CHUNK` | 512 | MiMo: prompt tokens per prefill block (larger blocks read fewer experts per prompt token). |
 | `MIMO_CTX` | `CTX`, else 8192 | MiMo: context the KV cache is sized for, capped by the checkpoint. |
+| `MIMO_KV_STEP` | 4096 | MiMo, Windows: the full-attention caches' memory is committed this many positions at a time as a conversation reaches them, so a long context costs nothing until it is used. |
+| `MIMO_KV_SPARE_GB` | 4 | MiMo: the expert pool gives back buffers before the attention caches would leave less memory than this available. |
+| `MIMO_MEM_TEST_GB` | unset | MiMo tests: the memory available is this less the caches' and the pool's, instead of the OS's measure. |
 | `MIMO_CAP` | 64 | MiMo: expert cache slots per layer when no argument gives one; never below one routing step. |
 | `MIMO_MAX_IMAGE_TOKENS` | unset | MiMo, gateway: ceiling on what one picture costs in prompt tokens. |
 | `MIMO_LOGITS` | unset | MiMo, oracle: dump every prompt position's logits (f32) to this file. |

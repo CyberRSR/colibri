@@ -1,0 +1,53 @@
+{
+  "note": "Eight different prompts, one request of up to 64 tokens each, one cold engine process per run, drive_mimo.py over the SERVE pipe (this copy takes --temperature/--top-p; the greedy runs send 0 and 1, what the earlier copies sent). Greedy replies are compared with the engine before the packing (round 3, B-stream), itself the release engine's bytes. Sampled runs draw differently by construction.",
+  "runs": {
+    "mtp-off": {
+      "temperature": 0,
+      "top_p": 1.0,
+      "overall_tok_s": 1.843752469406549,
+      "mean_decode_tok_s": 2.301254245938345,
+      "mean_ttft_s": 6.74598361250537,
+      "tokens": 466,
+      "seconds": 252.745424200024,
+      "mtp_drafts": 0,
+      "mtp_kept": 0,
+      "replies_equal_to_round3_B_stream": 8
+    },
+    "mtp": {
+      "temperature": 0,
+      "top_p": 1.0,
+      "overall_tok_s": 1.9817968565008632,
+      "mean_decode_tok_s": 2.520085214695499,
+      "mean_ttft_s": 6.819686762508354,
+      "tokens": 466,
+      "seconds": 235.14014490001136,
+      "mtp_drafts": 250,
+      "mtp_kept": 213,
+      "replies_equal_to_round3_B_stream": 8
+    },
+    "mtp-off-t07": {
+      "temperature": 0.7,
+      "top_p": 0.9,
+      "overall_tok_s": 1.7696774603481324,
+      "mean_decode_tok_s": 2.186069042051178,
+      "mean_ttft_s": 6.8704256625060225,
+      "tokens": 469,
+      "seconds": 265.02004490001127,
+      "mtp_drafts": 0,
+      "mtp_kept": 0,
+      "replies_equal_to_round3_B_stream": null
+    },
+    "mtp-t07": {
+      "temperature": 0.7,
+      "top_p": 0.9,
+      "overall_tok_s": 1.9408094131193367,
+      "mean_decode_tok_s": 2.45123105469036,
+      "mean_ttft_s": 6.7526935125060845,
+      "tokens": 467,
+      "seconds": 240.62125670001842,
+      "mtp_drafts": 249,
+      "mtp_kept": 214,
+      "replies_equal_to_round3_B_stream": null
+    }
+  }
+}

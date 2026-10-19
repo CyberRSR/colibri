@@ -1,0 +1,524 @@
+{
+  "order": [
+    "g-before-1",
+    "g-after",
+    "g-before-2",
+    "b-before-1",
+    "b-after",
+    "b-before-2",
+    "b-bad-1",
+    "b-after-bad",
+    "b-bad-2"
+  ],
+  "varied_greedy": {
+    "g-before-1": {
+      "spinning_team": true,
+      "overall_tok_s": 2.2444,
+      "mean_decode_tok_s": 2.9848,
+      "decode_tok_s": [
+        2.655,
+        3.35,
+        2.904,
+        2.535,
+        2.988,
+        3.085,
+        3.084,
+        3.277
+      ],
+      "seconds": 207.63,
+      "tokens": 466,
+      "generation_s": 152.1,
+      "stalled_s": 21.14,
+      "generation_minus_stalled_s": 130.96,
+      "experts_s": 91.26,
+      "attention_s": 23.75,
+      "prompt_s": 54.44,
+      "prompt_stalled_s": 22.56,
+      "reads": {
+        "demand_reads": 51646,
+        "prefetched": 69089,
+        "used": 46586,
+        "unused": 22503,
+        "cancelled_unread": 5607
+      },
+      "gb_read": 2308.79,
+      "replies_equal_reference": 8,
+      "drafting_s": 8.02,
+      "kept": [
+        [
+          151,
+          162
+        ],
+        [
+          95,
+          102
+        ]
+      ]
+    },
+    "g-after": {
+      "spinning_team": true,
+      "overall_tok_s": 2.2513,
+      "mean_decode_tok_s": 2.9889,
+      "decode_tok_s": [
+        2.581,
+        3.346,
+        2.929,
+        2.566,
+        3.023,
+        3.119,
+        3.071,
+        3.277
+      ],
+      "seconds": 206.99,
+      "tokens": 466,
+      "generation_s": 152.15,
+      "stalled_s": 21.5,
+      "generation_minus_stalled_s": 130.65,
+      "experts_s": 91.43,
+      "attention_s": 23.96,
+      "prompt_s": 53.92,
+      "prompt_stalled_s": 23.63,
+      "reads": {
+        "demand_reads": 51631,
+        "prefetched": 69189,
+        "used": 46668,
+        "unused": 22521,
+        "cancelled_unread": 5692
+      },
+      "gb_read": 2308.77,
+      "replies_equal_reference": 8,
+      "drafting_s": 7.78,
+      "kept": [
+        [
+          151,
+          162
+        ],
+        [
+          95,
+          102
+        ]
+      ]
+    },
+    "g-before-2": {
+      "spinning_team": true,
+      "overall_tok_s": 2.2508,
+      "mean_decode_tok_s": 2.9775,
+      "decode_tok_s": [
+        2.632,
+        3.352,
+        2.898,
+        2.529,
+        2.981,
+        3.078,
+        3.076,
+        3.275
+      ],
+      "seconds": 207.03,
+      "tokens": 466,
+      "generation_s": 152.53,
+      "stalled_s": 22.62,
+      "generation_minus_stalled_s": 129.91,
+      "experts_s": 90.29,
+      "attention_s": 24.36,
+      "prompt_s": 53.93,
+      "prompt_stalled_s": 24.5,
+      "reads": {
+        "demand_reads": 51664,
+        "prefetched": 69128,
+        "used": 46606,
+        "unused": 22522,
+        "cancelled_unread": 5721
+      },
+      "gb_read": 2307.64,
+      "replies_equal_reference": 8,
+      "drafting_s": 7.67,
+      "kept": [
+        [
+          151,
+          162
+        ],
+        [
+          95,
+          102
+        ]
+      ]
+    }
+  },
+  "varied_greedy_after_vs_mean_before_pct": {
+    "overall": 0.16,
+    "mean_decode": 0.26,
+    "generation_minus_stalled": 0.16
+  },
+  "benchmark": {
+    "b-before-1": {
+      "engine_sha256": "347f0acd3275448cdf61eda90e6bc7afa7b9e3217799a56b03a78a5547b824f1",
+      "spinning_team": true,
+      "median_tok_s": 2.6061,
+      "median_decode_tok_s": 3.2239,
+      "tok_s": [
+        2.5784,
+        2.6097,
+        2.6061
+      ],
+      "decode_tok_s": [
+        3.2044,
+        3.2264,
+        3.2239
+      ],
+      "replies_0305abcd": true,
+      "measured_generation_minus_stalled_s": [
+        17.14,
+        16.95,
+        16.97
+      ],
+      "measured_experts_s": [
+        12.07,
+        11.96,
+        11.98
+      ],
+      "measured_attention_s": [
+        3.13,
+        3.11,
+        3.09
+      ],
+      "last_request": {
+        "prompt_s": 4.94,
+        "prompt_stalled_s": 2.07,
+        "prompt_experts_s": 2.37,
+        "prompt_attention_s": 0.39,
+        "prompt_demand_reads": 3125.0,
+        "generation_s": 19.54,
+        "stalled_s": 2.57,
+        "experts_s": 11.98,
+        "attention_s": 3.09,
+        "demand_reads": 2250.0,
+        "prefetched": 9168.0,
+        "generation_minus_stalled_s": 16.97,
+        "streaming": {
+          "demand_reads": 5375,
+          "prefetched": 9168,
+          "used": 6342,
+          "unused": 2826,
+          "cancelled_unread": 703,
+          "predicted_pct": 80.9,
+          "gb_read": 277.55,
+          "stalled_s": 4.64
+        },
+        "mtp_steps": 26,
+        "kept": "24 of 24, 12 of 13",
+        "drafting_s": 0.92
+      }
+    },
+    "b-after": {
+      "engine_sha256": "af1c7ca677b209cc4a4f96cb1eb5c02c6939a96a45a5a8dcfc509e4810fed397",
+      "spinning_team": true,
+      "median_tok_s": 2.6121,
+      "median_decode_tok_s": 3.232,
+      "tok_s": [
+        2.5735,
+        2.6123,
+        2.6121
+      ],
+      "decode_tok_s": [
+        3.1972,
+        3.232,
+        3.2357
+      ],
+      "replies_0305abcd": true,
+      "measured_generation_minus_stalled_s": [
+        17.19,
+        16.82,
+        16.82
+      ],
+      "measured_experts_s": [
+        12.13,
+        11.93,
+        11.93
+      ],
+      "measured_attention_s": [
+        3.13,
+        3.07,
+        3.06
+      ],
+      "last_request": {
+        "prompt_s": 4.96,
+        "prompt_stalled_s": 2.11,
+        "prompt_experts_s": 2.35,
+        "prompt_attention_s": 0.38,
+        "prompt_demand_reads": 3133.0,
+        "generation_s": 19.47,
+        "stalled_s": 2.65,
+        "experts_s": 11.93,
+        "attention_s": 3.06,
+        "demand_reads": 2250.0,
+        "prefetched": 9196.0,
+        "generation_minus_stalled_s": 16.82,
+        "streaming": {
+          "demand_reads": 5383,
+          "prefetched": 9196,
+          "used": 6359,
+          "unused": 2837,
+          "cancelled_unread": 741,
+          "predicted_pct": 80.9,
+          "gb_read": 277.51,
+          "stalled_s": 4.75
+        },
+        "mtp_steps": 26,
+        "kept": "24 of 24, 12 of 13",
+        "drafting_s": 0.91
+      }
+    },
+    "b-before-2": {
+      "engine_sha256": "347f0acd3275448cdf61eda90e6bc7afa7b9e3217799a56b03a78a5547b824f1",
+      "spinning_team": true,
+      "median_tok_s": 2.6108,
+      "median_decode_tok_s": 3.2295,
+      "tok_s": [
+        2.583,
+        2.6108,
+        2.618
+      ],
+      "decode_tok_s": [
+        3.2092,
+        3.2295,
+        3.2397
+      ],
+      "replies_0305abcd": true,
+      "measured_generation_minus_stalled_s": [
+        17.06,
+        16.94,
+        16.97
+      ],
+      "measured_experts_s": [
+        12.02,
+        11.97,
+        11.98
+      ],
+      "measured_attention_s": [
+        3.11,
+        3.08,
+        3.09
+      ],
+      "last_request": {
+        "prompt_s": 4.93,
+        "prompt_stalled_s": 2.05,
+        "prompt_experts_s": 2.38,
+        "prompt_attention_s": 0.39,
+        "prompt_demand_reads": 3132.0,
+        "generation_s": 19.45,
+        "stalled_s": 2.48,
+        "experts_s": 11.98,
+        "attention_s": 3.09,
+        "demand_reads": 2239.0,
+        "prefetched": 9169.0,
+        "generation_minus_stalled_s": 16.97,
+        "streaming": {
+          "demand_reads": 5371,
+          "prefetched": 9169,
+          "used": 6342,
+          "unused": 2827,
+          "cancelled_unread": 729,
+          "predicted_pct": 80.9,
+          "gb_read": 276.97,
+          "stalled_s": 4.53
+        },
+        "mtp_steps": 26,
+        "kept": "24 of 24, 12 of 13",
+        "drafting_s": 0.92
+      }
+    }
+  },
+  "benchmark_after_vs_mean_before_pct": {
+    "overall": 0.14,
+    "decode": 0.16,
+    "last_generation_minus_stalled": -0.88
+  },
+  "slow_exp_address": {
+    "b-bad-1": {
+      "engine_sha256": "cbb3a5a9690e223118146c7e9ae026e4385339362b705b90a64f43ae86f871f6",
+      "spinning_team": true,
+      "median_tok_s": 2.5816,
+      "median_decode_tok_s": 3.1887,
+      "tok_s": [
+        2.5354,
+        2.5816,
+        2.5874
+      ],
+      "decode_tok_s": [
+        3.1446,
+        3.1887,
+        3.1919
+      ],
+      "replies_0305abcd": true,
+      "measured_generation_minus_stalled_s": [
+        17.9,
+        17.6,
+        17.6
+      ],
+      "measured_experts_s": [
+        12.23,
+        12.08,
+        12.07
+      ],
+      "measured_attention_s": [
+        3.32,
+        3.26,
+        3.27
+      ],
+      "last_request": {
+        "prompt_s": 4.93,
+        "prompt_stalled_s": 1.94,
+        "prompt_experts_s": 2.44,
+        "prompt_attention_s": 0.39,
+        "prompt_demand_reads": 3121.0,
+        "generation_s": 19.74,
+        "stalled_s": 2.14,
+        "experts_s": 12.07,
+        "attention_s": 3.27,
+        "demand_reads": 2237.0,
+        "prefetched": 9165.0,
+        "generation_minus_stalled_s": 17.6,
+        "streaming": {
+          "demand_reads": 5358,
+          "prefetched": 9165,
+          "used": 6346,
+          "unused": 2819,
+          "cancelled_unread": 678,
+          "predicted_pct": 80.9,
+          "gb_read": 277.65,
+          "stalled_s": 4.07
+        },
+        "mtp_steps": 26,
+        "kept": "24 of 24, 12 of 13",
+        "drafting_s": 0.98
+      }
+    },
+    "b-after-bad": {
+      "engine_sha256": "fd8994af85b6b70a21e0ac314c91fea6e7bc024b9b856f3bffa5776c001909a2",
+      "spinning_team": true,
+      "median_tok_s": 2.6071,
+      "median_decode_tok_s": 3.2284,
+      "tok_s": [
+        2.5827,
+        2.6146,
+        2.6071
+      ],
+      "decode_tok_s": [
+        3.2066,
+        3.2359,
+        3.2284
+      ],
+      "replies_0305abcd": true,
+      "measured_generation_minus_stalled_s": [
+        17.19,
+        16.83,
+        16.84
+      ],
+      "measured_experts_s": [
+        12.14,
+        11.93,
+        11.95
+      ],
+      "measured_attention_s": [
+        3.13,
+        3.07,
+        3.07
+      ],
+      "last_request": {
+        "prompt_s": 4.96,
+        "prompt_stalled_s": 2.1,
+        "prompt_experts_s": 2.36,
+        "prompt_attention_s": 0.39,
+        "prompt_demand_reads": 3127.0,
+        "generation_s": 19.51,
+        "stalled_s": 2.67,
+        "experts_s": 11.95,
+        "attention_s": 3.07,
+        "demand_reads": 2243.0,
+        "prefetched": 9186.0,
+        "generation_minus_stalled_s": 16.84,
+        "streaming": {
+          "demand_reads": 5370,
+          "prefetched": 9186,
+          "used": 6357,
+          "unused": 2829,
+          "cancelled_unread": 730,
+          "predicted_pct": 80.9,
+          "gb_read": 277.27,
+          "stalled_s": 4.76
+        },
+        "mtp_steps": 26,
+        "kept": "24 of 24, 12 of 13",
+        "drafting_s": 0.9
+      }
+    },
+    "b-bad-2": {
+      "engine_sha256": "cbb3a5a9690e223118146c7e9ae026e4385339362b705b90a64f43ae86f871f6",
+      "spinning_team": true,
+      "median_tok_s": 2.5687,
+      "median_decode_tok_s": 3.1692,
+      "tok_s": [
+        2.5475,
+        2.5687,
+        2.5716
+      ],
+      "decode_tok_s": [
+        3.1564,
+        3.1692,
+        3.175
+      ],
+      "replies_0305abcd": true,
+      "measured_generation_minus_stalled_s": [
+        17.83,
+        17.61,
+        17.6
+      ],
+      "measured_experts_s": [
+        12.19,
+        12.06,
+        12.05
+      ],
+      "measured_attention_s": [
+        3.32,
+        3.29,
+        3.29
+      ],
+      "last_request": {
+        "prompt_s": 4.97,
+        "prompt_stalled_s": 1.96,
+        "prompt_experts_s": 2.45,
+        "prompt_attention_s": 0.4,
+        "prompt_demand_reads": 3129.0,
+        "generation_s": 19.84,
+        "stalled_s": 2.24,
+        "experts_s": 12.05,
+        "attention_s": 3.29,
+        "demand_reads": 2246.0,
+        "prefetched": 9178.0,
+        "generation_minus_stalled_s": 17.6,
+        "streaming": {
+          "demand_reads": 5375,
+          "prefetched": 9178,
+          "used": 6355,
+          "unused": 2823,
+          "cancelled_unread": 673,
+          "predicted_pct": 80.9,
+          "gb_read": 278.35,
+          "stalled_s": 4.2
+        },
+        "mtp_steps": 26,
+        "kept": "24 of 24, 12 of 13",
+        "drafting_s": 0.99
+      }
+    }
+  },
+  "after_bad_vs_mean_bad_pct": {
+    "overall": 1.24,
+    "decode": 1.56,
+    "last_generation_minus_stalled": -4.32
+  },
+  "mean_bad_vs_mean_before_pct": {
+    "overall": -1.28,
+    "last_generation_minus_stalled": 3.71
+  }
+}

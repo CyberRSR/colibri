@@ -30,6 +30,10 @@ layers with different KV head counts (2 and 4 heads over 2 chunks), a window
 of 8 that every case outgrows, the SWA sink logit, partial RoPE with the two
 thetas, the value scale, the dense layer 0 and MoE layers.
 
+--mtp N adds the release's multi-token-prediction layers (model_mtp.safetensors,
+indexed): the engine drafts with them, so every greedy check also checks that verified
+drafts never move a token, through windows of 8 that the drafted rows keep wrapping.
+
 No tokenizer.json on purpose: without one the engine prints raw generated
 token ids on stdout, which is what the token-exact test parses.  Greedy
 determinism is engineered, then verified by make_mimo_ref.py: the head is
@@ -303,6 +307,49 @@ def build_tensors(rng):
     return tensors
 
 
+def build_mtp(rng, layers):
+    """The multi-token-prediction layers, named and stored as the release's
+    model_mtp.safetensors: eh_proj and the norms BF16, one sliding-window attention block
+    (the pre-sharded FP8 qkv, a BF16 o_proj, the sink) and a dense FP8 MLP each. The
+    vendor's modeling code has no MTP, so the oracle never reads them; the engine drafts
+    with them, and its greedy tokens must not move."""
+    tensors = {}
+
+    def bf16(x):
+        return tag(bf16_bits(x), BF16)
+
+    def normal(*shape, s=0.02):
+        return (rng.standard_normal(shape) * s).astype(np.float32)
+
+    def fp8(rows, cols):
+        sign = rng.integers(0, 2, size=(rows, cols), dtype=np.uint8) << 7
+        exp = rng.integers(4, 10, size=(rows, cols), dtype=np.uint8) << 3
+        man = rng.integers(0, 8, size=(rows, cols), dtype=np.uint8)
+        return tag(sign | exp | man, F8)
+
+    def scales(rows, cols):
+        return rng.uniform(0.004, 0.012, size=(rows, cols)).astype(np.float32)
+
+    chunks = KV_HEADS
+    rows_per_chunk = ((SWA_HEADS // chunks) * HEAD_DIM + (SWA_KV_HEADS // chunks) * HEAD_DIM
+                      + (SWA_KV_HEADS // chunks) * V_HEAD_DIM)
+    for k in range(layers):
+        p = f"model.mtp.layers.{k}."
+        tensors[p + "eh_proj.weight"] = bf16(normal(HIDDEN, 2 * HIDDEN, s=0.05))
+        for n in ("enorm", "hnorm", "final_layernorm", "input_layernorm", "pre_mlp_layernorm"):
+            tensors[p + n + ".weight"] = bf16(1.0 + normal(HIDDEN, s=0.1))
+        tensors[p + "self_attn.qkv_proj.weight"] = fp8(chunks * rows_per_chunk, HIDDEN)
+        tensors[p + "self_attn.qkv_proj.weight_scale_inv"] = scales(
+            chunks * -(-rows_per_chunk // BLOCK), -(-HIDDEN // BLOCK))
+        tensors[p + "self_attn.o_proj.weight"] = bf16(normal(HIDDEN, SWA_HEADS * V_HEAD_DIM, s=0.05))
+        tensors[p + "self_attn.attention_sink_bias"] = bf16(normal(SWA_HEADS, s=1.0))
+        for n, out, inp in (("gate_proj", DENSE_INTER, HIDDEN), ("up_proj", DENSE_INTER, HIDDEN),
+                            ("down_proj", HIDDEN, DENSE_INTER)):
+            tensors[p + f"mlp.{n}.weight"] = fp8(out, inp)
+            tensors[p + f"mlp.{n}.weight_scale_inv"] = scales(-(-out // BLOCK), -(-inp // BLOCK))
+    return tensors
+
+
 def build_vision(rng):
     """The tower's tensors, named and shaped as in the release (BF16; the merger
     carries no biases and its LayerNorm no bias, as there)."""
@@ -376,6 +423,9 @@ def main():
     parser.add_argument("--vision", action="store_true",
                         help="add a tiny ViT, the image tokens, a test picture "
                              "and its patches (the vision fixture)")
+    parser.add_argument("--mtp", type=int, default=0, metavar="N",
+                        help="add N multi-token-prediction layers in model_mtp.safetensors, "
+                             "as the release carries them (the engine drafts with them)")
     args = parser.parse_args()
 
     out = Path(args.output)
@@ -421,14 +471,22 @@ def main():
     for shard, part in zip(shard_names, (first, second)):
         write_safetensors(out / shard, part)
         weight_map.update({n: shard for n in part})
+    mtp_path = out / "model_mtp.safetensors"
+    if args.mtp > 0:   # a file of its own, indexed, like the release's
+        mtp = build_mtp(np.random.default_rng(SEED + 3), args.mtp)
+        write_safetensors(mtp_path, mtp)
+        weight_map.update({n: mtp_path.name for n in mtp})
+        tensors.update(mtp)
+    elif mtp_path.exists():
+        mtp_path.unlink()   # --force without --mtp: the plain fixture
     total = sum(a.nbytes for a in tensors.values())
     (out / "model.safetensors.index.json").write_text(json.dumps(
         {"metadata": {"total_size": total}, "weight_map": weight_map},
         indent=1) + "\n")
     (out / "config.json").write_text(json.dumps(config, indent=2) + "\n")
-    print(f"{out}: {len(tensors)} tensors, {total / 1e6:.2f} MB in 2 shards, "
+    print(f"{out}: {len(tensors)} tensors, {total / 1e6:.2f} MB in {2 + (args.mtp > 0)} shards, "
           f"{LAYERS} layers (pattern {PATTERN}), {EXPERTS} experts top-{TOPK}, "
-          f"seed {SEED}")
+          f"{args.mtp} MTP layers, seed {SEED}")
     return 0
 
 

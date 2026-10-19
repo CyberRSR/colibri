@@ -1,0 +1,162 @@
+[
+ {
+  "i": 0,
+  "tokens": 64,
+  "seconds": 36.75309919996653,
+  "ttft": 9.68764249997912,
+  "decode_tok_s": 2.327690262105546,
+  "hit": 76.9,
+  "prof": [
+   "36.686",
+   "22",
+   "64",
+   "10.542",
+   "0.000",
+   "17.714",
+   "4.439",
+   "0.000",
+   "33"
+  ],
+  "text": "TCP (Transmission Control Protocol) is a connection-oriented protocol that prioritizes reliability and accuracy. It establishes a connection, guarantees that all data packets arrive in the correct order, and automatically retransmits lost data, making it ideal for web browsing and file transfers. Conversely, UDP (User Datagram Protocol) is connectionless and"
+ },
+ {
+  "i": 1,
+  "tokens": 64,
+  "seconds": 29.204513899981976,
+  "ttft": 7.908357099979185,
+  "decode_tok_s": 2.958280247072173,
+  "hit": 79.8,
+  "prof": [
+   "29.131",
+   "32",
+   "64",
+   "5.659",
+   "0.000",
+   "16.367",
+   "3.744",
+   "0.000",
+   "28"
+  ],
+  "text": "Конечно! Вот краткая и понятная инструкция, как заварить идеальный зелёный чай.\n\n### **Как заварить зелёный чай: 5 простых шагов**\n\nГлавный секрет — не заваривать зелёный чай к"
+ },
+ {
+  "i": 2,
+  "tokens": 64,
+  "seconds": 30.464788100041915,
+  "ttft": 6.59688460000325,
+  "decode_tok_s": 2.6395280171925424,
+  "hit": 81.8,
+  "prof": [
+   "30.392",
+   "22",
+   "64",
+   "6.134",
+   "0.000",
+   "17.000",
+   "3.873",
+   "0.000",
+   "30"
+  ],
+  "text": "Of course! Here is the answer to your question.\n\nThe capital of Australia is **Canberra**.\n\n### Why Canberra Was Chosen\n\nThe choice of Canberra is a fascinating story of political compromise and visionary planning. It wasn't chosen because it was a major city; in fact, it was little more than a rural"
+ },
+ {
+  "i": 3,
+  "tokens": 21,
+  "seconds": 14.804160600004252,
+  "ttft": 5.404464100021869,
+  "decode_tok_s": 2.1277282729327998,
+  "hit": 73.1,
+  "prof": [
+   "14.731",
+   "17",
+   "21",
+   "3.662",
+   "0.000",
+   "7.799",
+   "1.804",
+   "0.000",
+   "14"
+  ],
+  "text": "Crimson leaves descend,\nA soft grey veil on the world,\nPuddles hold the sky."
+ },
+ {
+  "i": 4,
+  "tokens": 64,
+  "seconds": 29.714858399995137,
+  "ttft": 6.095572700025514,
+  "decode_tok_s": 2.6673118230701203,
+  "hit": 83.7,
+  "prof": [
+   "29.642",
+   "22",
+   "64",
+   "5.301",
+   "0.000",
+   "16.947",
+   "3.947",
+   "0.000",
+   "31"
+  ],
+  "text": "In the city of Verona, two noble families, the Montagues and Capulets, are locked in a bitter feud that sparks street brawls. Romeo, a Montague, and Juliet, a Capulet, meet at a ball and fall instantly in love, secretly marrying with the help of Friar Laure"
+ },
+ {
+  "i": 5,
+  "tokens": 64,
+  "seconds": 30.212453300016932,
+  "ttft": 6.754362899984699,
+  "decode_tok_s": 2.685640600989134,
+  "hit": 79.7,
+  "prof": [
+   "30.141",
+   "23",
+   "64",
+   "6.314",
+   "0.000",
+   "16.971",
+   "3.625",
+   "0.000",
+   "27"
+  ],
+  "text": "Here is a short Python example:\n\n```python\nnumbers = [1, 2, 3, 4, 5, 6]\n\n# Square the number if it is even\nsquares = [n**2 for n in numbers if n % 2 == 0]\n\nprint(squares)\n#"
+ },
+ {
+  "i": 6,
+  "tokens": 64,
+  "seconds": 29.96555950003676,
+  "ttft": 7.003859000047669,
+  "decode_tok_s": 2.743699230813934,
+  "hit": 80.8,
+  "prof": [
+   "29.894",
+   "27",
+   "64",
+   "5.960",
+   "0.000",
+   "16.469",
+   "3.993",
+   "0.000",
+   "31"
+  ],
+  "text": "Коротко: из-за **рэлеевского рассеяния**.\n\nСолнечный свет состоит из всех цветов радуги. Когда он попадает в атмосферу, его рассеивают молекулы воздуха. Короткие вол"
+ },
+ {
+  "i": 7,
+  "tokens": 64,
+  "seconds": 28.15397030004533,
+  "ttft": 5.168729900033213,
+  "decode_tok_s": 2.7408893230443128,
+  "hit": 84.0,
+  "prof": [
+   "28.083",
+   "16",
+   "64",
+   "5.164",
+   "0.000",
+   "15.949",
+   "3.669",
+   "0.000",
+   "29"
+  ],
+  "text": "Here are four key benefits of regular exercise:\n\n1.  **Weight Management:** Exercise helps burn calories and build muscle, which boosts your metabolism and helps maintain a healthy weight or lose excess pounds.\n2.  **Improved Mental Health:** Physical activity stimulates the release of chemicals like endorphins and serotonin, which can reduce"
+ }
+]

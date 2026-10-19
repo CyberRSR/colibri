@@ -1,0 +1,64 @@
+# sim.py: the measured routing (IOLOG unions and the prefetcher's ranked candidates) replayed
+# through the pooled cache; reads in the measured generations, early = layers 1-32, late = 33-69.
+# The plain replay reproduces the engine's counts (11659 reads, 2316 demand, 6465 used, 2878
+# unused a benchmark request against the engine's 11660 / 2316 / 6464 / 2879).
+
+## benchmark (3 measured requests)
+-- LRU (HEAD)
+early 1-32: reads 21993 (demand 4167, prefetch used 12576, wasted 5250)
+late 33-69: reads 12984 (demand 2781, prefetch used 6819, wasted 3384)
+total reads 34977
+-- --bonus 1-32:2
+early 1-32: reads 20220 (demand 3849, prefetch used 11409, wasted 4962)
+late 33-69: reads 14208 (demand 3045, prefetch used 7509, wasted 3654)
+total reads 34428
+-- --bonus 1-32:4
+early 1-32: reads 19290 (demand 3666, prefetch used 10812, wasted 4812)
+late 33-69: reads 15345 (demand 3252, prefetch used 8262, wasted 3831)
+total reads 34635
+-- --bonus 1-32:8
+early 1-32: reads 17031 (demand 3249, prefetch used 9375, wasted 4407)
+late 33-69: reads 17877 (demand 3693, prefetch used 9903, wasted 4281)
+total reads 34908
+-- --pf-rank 7
+early 1-32: reads 20796 (demand 5535, prefetch used 11208, wasted 4053)
+late 33-69: reads 11757 (demand 3429, prefetch used 6171, wasted 2157)
+total reads 32553
+-- --reuse 2
+early 1-32: reads 21297 (demand 4050, prefetch used 12021, wasted 5226)
+late 33-69: reads 12510 (demand 2679, prefetch used 6534, wasted 3297)
+total reads 33807
+-- --reuse 4
+early 1-32: reads 20876 (demand 3984, prefetch used 11592, wasted 5300)
+late 33-69: reads 12041 (demand 2579, prefetch used 6192, wasted 3270)
+total reads 32917
+
+## eight varied prompts
+-- LRU (HEAD)
+early 1-32: reads 56747 (demand 10855, prefetch used 31612, wasted 14280)
+late 33-69: reads 31372 (demand 6813, prefetch used 15877, wasted 8682)
+total reads 88119
+-- --bonus 1-32:2
+early 1-32: reads 50239 (demand 9723, prefetch used 27496, wasted 13020)
+late 33-69: reads 35812 (demand 7693, prefetch used 18384, wasted 9735)
+total reads 86051
+-- --bonus 1-32:4
+early 1-32: reads 48120 (demand 9293, prefetch used 26215, wasted 12612)
+late 33-69: reads 38892 (demand 8267, prefetch used 20259, wasted 10366)
+total reads 87012
+-- --bonus 1-32:8
+early 1-32: reads 44232 (demand 8592, prefetch used 23839, wasted 11801)
+late 33-69: reads 44755 (demand 9369, prefetch used 23838, wasted 11548)
+total reads 88987
+-- --pf-rank 7
+early 1-32: reads 53711 (demand 14377, prefetch used 28081, wasted 11253)
+late 33-69: reads 28210 (demand 8449, prefetch used 14243, wasted 5518)
+total reads 81921
+-- --reuse 2
+early 1-32: reads 55966 (demand 10797, prefetch used 31020, wasted 14149)
+late 33-69: reads 31607 (demand 6868, prefetch used 15961, wasted 8778)
+total reads 87573
+-- --reuse 4
+early 1-32: reads 56515 (demand 10920, prefetch used 31349, wasted 14246)
+late 33-69: reads 31796 (demand 6910, prefetch used 16049, wasted 8837)
+total reads 88311

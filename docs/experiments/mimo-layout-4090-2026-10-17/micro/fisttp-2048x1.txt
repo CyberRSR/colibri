@@ -1,0 +1,2049 @@
+cpu 4: exp() 30.42 ns a call (12568.2), __expl_internal at 00007ff637e6924d
+   0 off 00000   14.48 ns
+   1 off 0x001   14.29 ns
+   2 off 0x002   14.29 ns
+   3 off 0x003   14.26 ns
+   4 off 0x004   14.53 ns
+   5 off 0x005   14.34 ns
+   6 off 0x006   14.36 ns
+   7 off 0x007   14.25 ns
+   8 off 0x008   14.26 ns
+   9 off 0x009   14.29 ns
+  10 off 0x00a   14.29 ns
+  11 off 0x00b   14.29 ns
+  12 off 0x00c   14.28 ns
+  13 off 0x00d   14.26 ns
+  14 off 0x00e   14.26 ns
+  15 off 0x00f   14.49 ns
+  16 off 0x010   14.43 ns
+  17 off 0x011   14.53 ns
+  18 off 0x012   14.44 ns
+  19 off 0x013   14.34 ns
+  20 off 0x014   14.34 ns
+  21 off 0x015   14.36 ns
+  22 off 0x016   14.36 ns
+  23 off 0x017   14.36 ns
+  24 off 0x018   14.36 ns
+  25 off 0x019   15.07 ns
+  26 off 0x01a   14.44 ns
+  27 off 0x01b   14.29 ns
+  28 off 0x01c   14.29 ns
+  29 off 0x01d   14.28 ns
+  30 off 0x01e   14.27 ns
+  31 off 0x01f   14.26 ns
+  32 off 0x020   14.26 ns
+  33 off 0x021   14.28 ns
+  34 off 0x022   14.28 ns
+  35 off 0x023   14.28 ns
+  36 off 0x024   16.19 ns
+  37 off 0x025   14.41 ns
+  38 off 0x026   14.38 ns
+  39 off 0x027   14.34 ns
+  40 off 0x028   14.35 ns
+  41 off 0x029   14.35 ns
+  42 off 0x02a   14.63 ns
+  43 off 0x02b   14.26 ns
+  44 off 0x02c   14.26 ns
+  45 off 0x02d   14.30 ns
+  46 off 0x02e   14.51 ns
+  47 off 0x02f   14.37 ns
+  48 off 0x030   14.29 ns
+  49 off 0x031   14.26 ns
+  50 off 0x032   14.29 ns
+  51 off 0x033   14.28 ns
+  52 off 0x034   14.37 ns
+  53 off 0x035   14.26 ns
+  54 off 0x036   14.26 ns
+  55 off 0x037   14.29 ns
+  56 off 0x038   14.29 ns
+  57 off 0x039   14.48 ns
+  58 off 0x03a   14.29 ns
+  59 off 0x03b   14.26 ns
+  60 off 0x03c   14.28 ns
+  61 off 0x03d   14.29 ns
+  62 off 0x03e   14.29 ns
+  63 off 0x03f   14.28 ns
+  64 off 0x040   14.26 ns
+  65 off 0x041   14.28 ns
+  66 off 0x042   14.29 ns
+  67 off 0x043   14.28 ns
+  68 off 0x044   14.62 ns
+  69 off 0x045   14.39 ns
+  70 off 0x046   14.26 ns
+  71 off 0x047   14.29 ns
+  72 off 0x048   14.28 ns
+  73 off 0x049   14.28 ns
+  74 off 0x04a   14.28 ns
+  75 off 0x04b   14.29 ns
+  76 off 0x04c   14.27 ns
+  77 off 0x04d   14.26 ns
+  78 off 0x04e   14.46 ns
+  79 off 0x04f   14.39 ns
+  80 off 0x050   14.51 ns
+  81 off 0x051   14.43 ns
+  82 off 0x052   14.41 ns
+  83 off 0x053   14.40 ns
+  84 off 0x054   14.44 ns
+  85 off 0x055   14.43 ns
+  86 off 0x056   14.45 ns
+  87 off 0x057   14.35 ns
+  88 off 0x058   14.34 ns
+  89 off 0x059   14.46 ns
+  90 off 0x05a   14.54 ns
+  91 off 0x05b   14.48 ns
+  92 off 0x05c   14.43 ns
+  93 off 0x05d   14.43 ns
+  94 off 0x05e   14.42 ns
+  95 off 0x05f   14.32 ns
+  96 off 0x060   14.33 ns
+  97 off 0x061   14.36 ns
+  98 off 0x062   14.35 ns
+  99 off 0x063   18.16 ns
+ 100 off 0x064   15.99 ns
+ 101 off 0x065   14.50 ns
+ 102 off 0x066   14.40 ns
+ 103 off 0x067   14.40 ns
+ 104 off 0x068   14.46 ns
+ 105 off 0x069   14.42 ns
+ 106 off 0x06a   14.35 ns
+ 107 off 0x06b   14.33 ns
+ 108 off 0x06c   14.36 ns
+ 109 off 0x06d   14.44 ns
+ 110 off 0x06e   14.49 ns
+ 111 off 0x06f   14.36 ns
+ 112 off 0x070   14.33 ns
+ 113 off 0x071   14.32 ns
+ 114 off 0x072   14.34 ns
+ 115 off 0x073   14.28 ns
+ 116 off 0x074   14.28 ns
+ 117 off 0x075   14.28 ns
+ 118 off 0x076   14.29 ns
+ 119 off 0x077   14.26 ns
+ 120 off 0x078   14.78 ns
+ 121 off 0x079   14.41 ns
+ 122 off 0x07a   14.36 ns
+ 123 off 0x07b   14.33 ns
+ 124 off 0x07c   14.26 ns
+ 125 off 0x07d   14.28 ns
+ 126 off 0x07e   14.28 ns
+ 127 off 0x07f   14.28 ns
+ 128 off 0x080   14.26 ns
+ 129 off 0x081   14.26 ns
+ 130 off 0x082   14.61 ns
+ 131 off 0x083   14.51 ns
+ 132 off 0x084   14.29 ns
+ 133 off 0x085   14.29 ns
+ 134 off 0x086   14.26 ns
+ 135 off 0x087   14.26 ns
+ 136 off 0x088   14.29 ns
+ 137 off 0x089   14.29 ns
+ 138 off 0x08a   14.29 ns
+ 139 off 0x08b   14.29 ns
+ 140 off 0x08c   14.29 ns
+ 141 off 0x08d   14.66 ns
+ 142 off 0x08e   14.28 ns
+ 143 off 0x08f   14.29 ns
+ 144 off 0x090   14.29 ns
+ 145 off 0x091   14.27 ns
+ 146 off 0x092   14.29 ns
+ 147 off 0x093   14.26 ns
+ 148 off 0x094   14.28 ns
+ 149 off 0x095   14.28 ns
+ 150 off 0x096   14.28 ns
+ 151 off 0x097   14.32 ns
+ 152 off 0x098   14.33 ns
+ 153 off 0x099   14.28 ns
+ 154 off 0x09a   14.29 ns
+ 155 off 0x09b   14.29 ns
+ 156 off 0x09c   14.26 ns
+ 157 off 0x09d   14.26 ns
+ 158 off 0x09e   14.29 ns
+ 159 off 0x09f   14.29 ns
+ 160 off 0x0a0   14.28 ns
+ 161 off 0x0a1   14.29 ns
+ 162 off 0x0a2   14.50 ns
+ 163 off 0x0a3   14.26 ns
+ 164 off 0x0a4   14.30 ns
+ 165 off 0x0a5   14.28 ns
+ 166 off 0x0a6   14.29 ns
+ 167 off 0x0a7   14.26 ns
+ 168 off 0x0a8   14.29 ns
+ 169 off 0x0a9   14.29 ns
+ 170 off 0x0aa   14.29 ns
+ 171 off 0x0ab   14.28 ns
+ 172 off 0x0ac   14.46 ns
+ 173 off 0x0ad   14.44 ns
+ 174 off 0x0ae   14.46 ns
+ 175 off 0x0af   14.33 ns
+ 176 off 0x0b0   14.36 ns
+ 177 off 0x0b1   14.71 ns
+ 178 off 0x0b2   14.34 ns
+ 179 off 0x0b3   14.35 ns
+ 180 off 0x0b4   14.30 ns
+ 181 off 0x0b5   14.28 ns
+ 182 off 0x0b6   14.29 ns
+ 183 off 0x0b7   14.49 ns
+ 184 off 0x0b8   15.07 ns
+ 185 off 0x0b9   14.26 ns
+ 186 off 0x0ba   14.26 ns
+ 187 off 0x0bb   14.30 ns
+ 188 off 0x0bc   14.28 ns
+ 189 off 0x0bd   14.30 ns
+ 190 off 0x0be   14.31 ns
+ 191 off 0x0bf   14.30 ns
+ 192 off 0x0c0   14.26 ns
+ 193 off 0x0c1   14.41 ns
+ 194 off 0x0c2   14.47 ns
+ 195 off 0x0c3   14.39 ns
+ 196 off 0x0c4   14.36 ns
+ 197 off 0x0c5   14.33 ns
+ 198 off 0x0c6   14.30 ns
+ 199 off 0x0c7   14.28 ns
+ 200 off 0x0c8   14.29 ns
+ 201 off 0x0c9   14.29 ns
+ 202 off 0x0ca   14.30 ns
+ 203 off 0x0cb   14.29 ns
+ 204 off 0x0cc   14.38 ns
+ 205 off 0x0cd   14.26 ns
+ 206 off 0x0ce   14.30 ns
+ 207 off 0x0cf   14.30 ns
+ 208 off 0x0d0   14.29 ns
+ 209 off 0x0d1   14.27 ns
+ 210 off 0x0d2   14.26 ns
+ 211 off 0x0d3   14.29 ns
+ 212 off 0x0d4   14.29 ns
+ 213 off 0x0d5   14.30 ns
+ 214 off 0x0d6   14.29 ns
+ 215 off 0x0d7   14.73 ns
+ 216 off 0x0d8   14.29 ns
+ 217 off 0x0d9   14.26 ns
+ 218 off 0x0da   14.30 ns
+ 219 off 0x0db   14.28 ns
+ 220 off 0x0dc   14.29 ns
+ 221 off 0x0dd   14.29 ns
+ 222 off 0x0de   14.29 ns
+ 223 off 0x0df   14.26 ns
+ 224 off 0x0e0   14.30 ns
+ 225 off 0x0e1   14.45 ns
+ 226 off 0x0e2   14.38 ns
+ 227 off 0x0e3   14.29 ns
+ 228 off 0x0e4   14.27 ns
+ 229 off 0x0e5   14.26 ns
+ 230 off 0x0e6   14.29 ns
+ 231 off 0x0e7   14.29 ns
+ 232 off 0x0e8   14.29 ns
+ 233 off 0x0e9   14.26 ns
+ 234 off 0x0ea   14.29 ns
+ 235 off 0x0eb   14.33 ns
+ 236 off 0x0ec   14.46 ns
+ 237 off 0x0ed   14.47 ns
+ 238 off 0x0ee   14.52 ns
+ 239 off 0x0ef   14.45 ns
+ 240 off 0x0f0   14.36 ns
+ 241 off 0x0f1   14.36 ns
+ 242 off 0x0f2   14.36 ns
+ 243 off 0x0f3   14.35 ns
+ 244 off 0x0f4   14.33 ns
+ 245 off 0x0f5   14.36 ns
+ 246 off 0x0f6   14.65 ns
+ 247 off 0x0f7   14.47 ns
+ 248 off 0x0f8   14.33 ns
+ 249 off 0x0f9   14.32 ns
+ 250 off 0x0fa   14.29 ns
+ 251 off 0x0fb   14.29 ns
+ 252 off 0x0fc   14.28 ns
+ 253 off 0x0fd   14.28 ns
+ 254 off 0x0fe   14.26 ns
+ 255 off 0x0ff   14.30 ns
+ 256 off 0x100   14.28 ns
+ 257 off 0x101   14.28 ns
+ 258 off 0x102   14.57 ns
+ 259 off 0x103   14.29 ns
+ 260 off 0x104   14.29 ns
+ 261 off 0x105   14.30 ns
+ 262 off 0x106   14.29 ns
+ 263 off 0x107   14.28 ns
+ 264 off 0x108   14.29 ns
+ 265 off 0x109   14.30 ns
+ 266 off 0x10a   14.29 ns
+ 267 off 0x10b   14.26 ns
+ 268 off 0x10c   14.34 ns
+ 269 off 0x10d   14.38 ns
+ 270 off 0x10e   14.43 ns
+ 271 off 0x10f   14.29 ns
+ 272 off 0x110   14.28 ns
+ 273 off 0x111   14.30 ns
+ 274 off 0x112   14.26 ns
+ 275 off 0x113   14.29 ns
+ 276 off 0x114   14.29 ns
+ 277 off 0x115   14.28 ns
+ 278 off 0x116   14.37 ns
+ 279 off 0x117   14.34 ns
+ 280 off 0x118   14.40 ns
+ 281 off 0x119   14.37 ns
+ 282 off 0x11a   14.29 ns
+ 283 off 0x11b   14.29 ns
+ 284 off 0x11c   14.28 ns
+ 285 off 0x11d   14.30 ns
+ 286 off 0x11e   14.27 ns
+ 287 off 0x11f   14.29 ns
+ 288 off 0x120   14.29 ns
+ 289 off 0x121   14.48 ns
+ 290 off 0x122   14.29 ns
+ 291 off 0x123   14.26 ns
+ 292 off 0x124   14.30 ns
+ 293 off 0x125   14.36 ns
+ 294 off 0x126   14.39 ns
+ 295 off 0x127   14.30 ns
+ 296 off 0x128   14.27 ns
+ 297 off 0x129   14.26 ns
+ 298 off 0x12a   14.58 ns
+ 299 off 0x12b   14.29 ns
+ 300 off 0x12c   14.43 ns
+ 301 off 0x12d   14.29 ns
+ 302 off 0x12e   14.26 ns
+ 303 off 0x12f   14.29 ns
+ 304 off 0x130   14.30 ns
+ 305 off 0x131   14.27 ns
+ 306 off 0x132   14.26 ns
+ 307 off 0x133   14.26 ns
+ 308 off 0x134   14.29 ns
+ 309 off 0x135   14.29 ns
+ 310 off 0x136   14.48 ns
+ 311 off 0x137   14.31 ns
+ 312 off 0x138   14.27 ns
+ 313 off 0x139   14.30 ns
+ 314 off 0x13a   14.29 ns
+ 315 off 0x13b   14.29 ns
+ 316 off 0x13c   14.29 ns
+ 317 off 0x13d   14.26 ns
+ 318 off 0x13e   14.30 ns
+ 319 off 0x13f   14.29 ns
+ 320 off 0x140   14.74 ns
+ 321 off 0x141   14.71 ns
+ 322 off 0x142   14.35 ns
+ 323 off 0x143   14.27 ns
+ 324 off 0x144   14.29 ns
+ 325 off 0x145   14.30 ns
+ 326 off 0x146   14.29 ns
+ 327 off 0x147   14.28 ns
+ 328 off 0x148   14.26 ns
+ 329 off 0x149   14.27 ns
+ 330 off 0x14a   14.29 ns
+ 331 off 0x14b   14.65 ns
+ 332 off 0x14c   14.29 ns
+ 333 off 0x14d   14.27 ns
+ 334 off 0x14e   14.29 ns
+ 335 off 0x14f   14.29 ns
+ 336 off 0x150   14.64 ns
+ 337 off 0x151   14.29 ns
+ 338 off 0x152   14.26 ns
+ 339 off 0x153   14.30 ns
+ 340 off 0x154   14.28 ns
+ 341 off 0x155   14.44 ns
+ 342 off 0x156   14.39 ns
+ 343 off 0x157   14.29 ns
+ 344 off 0x158   14.26 ns
+ 345 off 0x159   14.26 ns
+ 346 off 0x15a   14.29 ns
+ 347 off 0x15b   14.30 ns
+ 348 off 0x15c   14.29 ns
+ 349 off 0x15d   14.29 ns
+ 350 off 0x15e   14.29 ns
+ 351 off 0x15f   14.26 ns
+ 352 off 0x160   14.48 ns
+ 353 off 0x161   14.30 ns
+ 354 off 0x162   14.30 ns
+ 355 off 0x163   14.29 ns
+ 356 off 0x164   14.26 ns
+ 357 off 0x165   14.30 ns
+ 358 off 0x166   14.30 ns
+ 359 off 0x167   14.28 ns
+ 360 off 0x168   14.29 ns
+ 361 off 0x169   14.28 ns
+ 362 off 0x16a   14.26 ns
+ 363 off 0x16b   14.59 ns
+ 364 off 0x16c   14.37 ns
+ 365 off 0x16d   14.39 ns
+ 366 off 0x16e   14.79 ns
+ 367 off 0x16f   14.26 ns
+ 368 off 0x170   14.29 ns
+ 369 off 0x171   14.29 ns
+ 370 off 0x172   14.28 ns
+ 371 off 0x173   14.28 ns
+ 372 off 0x174   14.28 ns
+ 373 off 0x175   14.45 ns
+ 374 off 0x176   14.36 ns
+ 375 off 0x177   14.29 ns
+ 376 off 0x178   14.29 ns
+ 377 off 0x179   14.29 ns
+ 378 off 0x17a   14.29 ns
+ 379 off 0x17b   14.25 ns
+ 380 off 0x17c   14.56 ns
+ 381 off 0x17d   14.31 ns
+ 382 off 0x17e   14.29 ns
+ 383 off 0x17f   14.28 ns
+ 384 off 0x180   14.52 ns
+ 385 off 0x181   14.28 ns
+ 386 off 0x182   14.30 ns
+ 387 off 0x183   14.53 ns
+ 388 off 0x184   14.29 ns
+ 389 off 0x185   14.29 ns
+ 390 off 0x186   14.29 ns
+ 391 off 0x187   14.28 ns
+ 392 off 0x188   14.29 ns
+ 393 off 0x189   14.26 ns
+ 394 off 0x18a   14.61 ns
+ 395 off 0x18b   14.38 ns
+ 396 off 0x18c   14.53 ns
+ 397 off 0x18d   14.36 ns
+ 398 off 0x18e   14.34 ns
+ 399 off 0x18f   14.36 ns
+ 400 off 0x190   14.36 ns
+ 401 off 0x191   14.36 ns
+ 402 off 0x192   14.35 ns
+ 403 off 0x193   14.33 ns
+ 404 off 0x194   14.28 ns
+ 405 off 0x195   14.61 ns
+ 406 off 0x196   14.27 ns
+ 407 off 0x197   14.29 ns
+ 408 off 0x198   14.29 ns
+ 409 off 0x199   14.29 ns
+ 410 off 0x19a   14.26 ns
+ 411 off 0x19b   14.29 ns
+ 412 off 0x19c   14.30 ns
+ 413 off 0x19d   14.28 ns
+ 414 off 0x19e   14.28 ns
+ 415 off 0x19f   14.41 ns
+ 416 off 0x1a0   14.35 ns
+ 417 off 0x1a1   14.37 ns
+ 418 off 0x1a2   14.37 ns
+ 419 off 0x1a3   14.30 ns
+ 420 off 0x1a4   14.29 ns
+ 421 off 0x1a5   14.29 ns
+ 422 off 0x1a6   14.26 ns
+ 423 off 0x1a7   14.26 ns
+ 424 off 0x1a8   14.33 ns
+ 425 off 0x1a9   14.30 ns
+ 426 off 0x1aa   14.56 ns
+ 427 off 0x1ab   14.36 ns
+ 428 off 0x1ac   14.33 ns
+ 429 off 0x1ad   14.36 ns
+ 430 off 0x1ae   14.35 ns
+ 431 off 0x1af   14.29 ns
+ 432 off 0x1b0   14.62 ns
+ 433 off 0x1b1   14.26 ns
+ 434 off 0x1b2   14.26 ns
+ 435 off 0x1b3   14.30 ns
+ 436 off 0x1b4   14.29 ns
+ 437 off 0x1b5   14.37 ns
+ 438 off 0x1b6   14.30 ns
+ 439 off 0x1b7   14.26 ns
+ 440 off 0x1b8   14.29 ns
+ 441 off 0x1b9   14.28 ns
+ 442 off 0x1ba   14.29 ns
+ 443 off 0x1bb   14.29 ns
+ 444 off 0x1bc   14.26 ns
+ 445 off 0x1bd   14.26 ns
+ 446 off 0x1be   14.30 ns
+ 447 off 0x1bf   14.77 ns
+ 448 off 0x1c0   14.38 ns
+ 449 off 0x1c1   14.30 ns
+ 450 off 0x1c2   14.26 ns
+ 451 off 0x1c3   14.29 ns
+ 452 off 0x1c4   14.29 ns
+ 453 off 0x1c5   14.29 ns
+ 454 off 0x1c6   14.29 ns
+ 455 off 0x1c7   14.26 ns
+ 456 off 0x1c8   14.29 ns
+ 457 off 0x1c9   14.29 ns
+ 458 off 0x1ca   14.75 ns
+ 459 off 0x1cb   14.50 ns
+ 460 off 0x1cc   14.49 ns
+ 461 off 0x1cd   14.39 ns
+ 462 off 0x1ce   14.39 ns
+ 463 off 0x1cf   14.42 ns
+ 464 off 0x1d0   14.36 ns
+ 465 off 0x1d1   14.34 ns
+ 466 off 0x1d2   14.36 ns
+ 467 off 0x1d3   14.35 ns
+ 468 off 0x1d4   14.61 ns
+ 469 off 0x1d5   14.50 ns
+ 470 off 0x1d6   14.45 ns
+ 471 off 0x1d7   14.30 ns
+ 472 off 0x1d8   14.29 ns
+ 473 off 0x1d9   14.28 ns
+ 474 off 0x1da   14.26 ns
+ 475 off 0x1db   14.26 ns
+ 476 off 0x1dc   14.29 ns
+ 477 off 0x1dd   14.28 ns
+ 478 off 0x1de   14.28 ns
+ 479 off 0x1df   14.69 ns
+ 480 off 0x1e0   14.29 ns
+ 481 off 0x1e1   14.26 ns
+ 482 off 0x1e2   14.29 ns
+ 483 off 0x1e3   14.29 ns
+ 484 off 0x1e4   14.65 ns
+ 485 off 0x1e5   14.29 ns
+ 486 off 0x1e6   14.26 ns
+ 487 off 0x1e7   14.26 ns
+ 488 off 0x1e8   14.28 ns
+ 489 off 0x1e9   14.67 ns
+ 490 off 0x1ea   14.46 ns
+ 491 off 0x1eb   14.37 ns
+ 492 off 0x1ec   14.36 ns
+ 493 off 0x1ed   14.38 ns
+ 494 off 0x1ee   14.26 ns
+ 495 off 0x1ef   14.30 ns
+ 496 off 0x1f0   14.30 ns
+ 497 off 0x1f1   14.29 ns
+ 498 off 0x1f2   14.28 ns
+ 499 off 0x1f3   14.26 ns
+ 500 off 0x1f4   14.61 ns
+ 501 off 0x1f5   14.35 ns
+ 502 off 0x1f6   14.48 ns
+ 503 off 0x1f7   14.35 ns
+ 504 off 0x1f8   14.33 ns
+ 505 off 0x1f9   14.36 ns
+ 506 off 0x1fa   14.36 ns
+ 507 off 0x1fb   14.35 ns
+ 508 off 0x1fc   14.40 ns
+ 509 off 0x1fd   14.37 ns
+ 510 off 0x1fe   14.45 ns
+ 511 off 0x1ff   14.65 ns
+ 512 off 0x200   14.83 ns
+ 513 off 0x201   14.59 ns
+ 514 off 0x202   14.56 ns
+ 515 off 0x203   14.58 ns
+ 516 off 0x204   14.50 ns
+ 517 off 0x205   14.47 ns
+ 518 off 0x206   14.49 ns
+ 519 off 0x207   14.48 ns
+ 520 off 0x208   14.50 ns
+ 521 off 0x209   14.67 ns
+ 522 off 0x20a   14.43 ns
+ 523 off 0x20b   14.40 ns
+ 524 off 0x20c   14.52 ns
+ 525 off 0x20d   14.44 ns
+ 526 off 0x20e   14.43 ns
+ 527 off 0x20f   14.42 ns
+ 528 off 0x210   14.42 ns
+ 529 off 0x211   14.41 ns
+ 530 off 0x212   14.38 ns
+ 531 off 0x213   14.68 ns
+ 532 off 0x214   14.51 ns
+ 533 off 0x215   14.36 ns
+ 534 off 0x216   14.36 ns
+ 535 off 0x217   14.35 ns
+ 536 off 0x218   14.34 ns
+ 537 off 0x219   14.31 ns
+ 538 off 0x21a   14.26 ns
+ 539 off 0x21b   14.30 ns
+ 540 off 0x21c   14.29 ns
+ 541 off 0x21d   14.42 ns
+ 542 off 0x21e   14.39 ns
+ 543 off 0x21f   14.27 ns
+ 544 off 0x220   14.26 ns
+ 545 off 0x221   14.29 ns
+ 546 off 0x222   14.29 ns
+ 547 off 0x223   14.29 ns
+ 548 off 0x224   14.27 ns
+ 549 off 0x225   14.26 ns
+ 550 off 0x226   14.30 ns
+ 551 off 0x227   14.29 ns
+ 552 off 0x228   14.28 ns
+ 553 off 0x229   14.70 ns
+ 554 off 0x22a   14.32 ns
+ 555 off 0x22b   14.33 ns
+ 556 off 0x22c   14.29 ns
+ 557 off 0x22d   14.29 ns
+ 558 off 0x22e   14.29 ns
+ 559 off 0x22f   14.33 ns
+ 560 off 0x230   14.26 ns
+ 561 off 0x231   14.30 ns
+ 562 off 0x232   14.30 ns
+ 563 off 0x233   14.41 ns
+ 564 off 0x234   14.38 ns
+ 565 off 0x235   14.26 ns
+ 566 off 0x236   14.33 ns
+ 567 off 0x237   14.29 ns
+ 568 off 0x238   14.29 ns
+ 569 off 0x239   14.29 ns
+ 570 off 0x23a   14.26 ns
+ 571 off 0x23b   14.26 ns
+ 572 off 0x23c   14.30 ns
+ 573 off 0x23d   14.30 ns
+ 574 off 0x23e   14.69 ns
+ 575 off 0x23f   14.40 ns
+ 576 off 0x240   14.36 ns
+ 577 off 0x241   14.33 ns
+ 578 off 0x242   14.36 ns
+ 579 off 0x243   14.30 ns
+ 580 off 0x244   14.29 ns
+ 581 off 0x245   14.28 ns
+ 582 off 0x246   14.26 ns
+ 583 off 0x247   14.26 ns
+ 584 off 0x248   14.46 ns
+ 585 off 0x249   14.31 ns
+ 586 off 0x24a   14.29 ns
+ 587 off 0x24b   14.26 ns
+ 588 off 0x24c   14.29 ns
+ 589 off 0x24d   14.29 ns
+ 590 off 0x24e   14.29 ns
+ 591 off 0x24f   14.30 ns
+ 592 off 0x250   14.26 ns
+ 593 off 0x251   14.26 ns
+ 594 off 0x252   14.30 ns
+ 595 off 0x253   14.48 ns
+ 596 off 0x254   14.36 ns
+ 597 off 0x255   14.40 ns
+ 598 off 0x256   14.26 ns
+ 599 off 0x257   14.27 ns
+ 600 off 0x258   14.29 ns
+ 601 off 0x259   14.29 ns
+ 602 off 0x25a   14.29 ns
+ 603 off 0x25b   14.26 ns
+ 604 off 0x25c   14.30 ns
+ 605 off 0x25d   14.64 ns
+ 606 off 0x25e   14.30 ns
+ 607 off 0x25f   14.30 ns
+ 608 off 0x260   14.26 ns
+ 609 off 0x261   14.27 ns
+ 610 off 0x262   14.30 ns
+ 611 off 0x263   14.28 ns
+ 612 off 0x264   14.30 ns
+ 613 off 0x265   14.29 ns
+ 614 off 0x266   14.27 ns
+ 615 off 0x267   14.30 ns
+ 616 off 0x268   14.74 ns
+ 617 off 0x269   14.36 ns
+ 618 off 0x26a   14.36 ns
+ 619 off 0x26b   14.43 ns
+ 620 off 0x26c   14.35 ns
+ 621 off 0x26d   14.30 ns
+ 622 off 0x26e   14.29 ns
+ 623 off 0x26f   14.28 ns
+ 624 off 0x270   14.28 ns
+ 625 off 0x271   14.29 ns
+ 626 off 0x272   14.36 ns
+ 627 off 0x273   14.42 ns
+ 628 off 0x274   14.37 ns
+ 629 off 0x275   14.37 ns
+ 630 off 0x276   14.29 ns
+ 631 off 0x277   14.26 ns
+ 632 off 0x278   14.29 ns
+ 633 off 0x279   14.30 ns
+ 634 off 0x27a   14.63 ns
+ 635 off 0x27b   14.30 ns
+ 636 off 0x27c   14.29 ns
+ 637 off 0x27d   14.47 ns
+ 638 off 0x27e   14.38 ns
+ 639 off 0x27f   14.35 ns
+ 640 off 0x280   14.29 ns
+ 641 off 0x281   14.57 ns
+ 642 off 0x282   14.29 ns
+ 643 off 0x283   14.26 ns
+ 644 off 0x284   14.29 ns
+ 645 off 0x285   14.29 ns
+ 646 off 0x286   14.28 ns
+ 647 off 0x287   14.49 ns
+ 648 off 0x288   14.33 ns
+ 649 off 0x289   14.27 ns
+ 650 off 0x28a   14.29 ns
+ 651 off 0x28b   14.29 ns
+ 652 off 0x28c   14.56 ns
+ 653 off 0x28d   14.30 ns
+ 654 off 0x28e   14.26 ns
+ 655 off 0x28f   14.29 ns
+ 656 off 0x290   14.29 ns
+ 657 off 0x291   14.29 ns
+ 658 off 0x292   14.43 ns
+ 659 off 0x293   14.30 ns
+ 660 off 0x294   14.26 ns
+ 661 off 0x295   14.30 ns
+ 662 off 0x296   14.30 ns
+ 663 off 0x297   14.29 ns
+ 664 off 0x298   14.28 ns
+ 665 off 0x299   14.26 ns
+ 666 off 0x29a   14.30 ns
+ 667 off 0x29b   14.29 ns
+ 668 off 0x29c   14.28 ns
+ 669 off 0x29d   14.46 ns
+ 670 off 0x29e   14.26 ns
+ 671 off 0x29f   14.30 ns
+ 672 off 0x2a0   14.29 ns
+ 673 off 0x2a1   14.29 ns
+ 674 off 0x2a2   14.29 ns
+ 675 off 0x2a3   14.26 ns
+ 676 off 0x2a4   14.26 ns
+ 677 off 0x2a5   14.29 ns
+ 678 off 0x2a6   14.29 ns
+ 679 off 0x2a7   14.56 ns
+ 680 off 0x2a8   14.28 ns
+ 681 off 0x2a9   14.30 ns
+ 682 off 0x2aa   14.29 ns
+ 683 off 0x2ab   14.29 ns
+ 684 off 0x2ac   14.72 ns
+ 685 off 0x2ad   14.26 ns
+ 686 off 0x2ae   14.30 ns
+ 687 off 0x2af   14.29 ns
+ 688 off 0x2b0   14.29 ns
+ 689 off 0x2b1   14.26 ns
+ 690 off 0x2b2   14.50 ns
+ 691 off 0x2b3   14.31 ns
+ 692 off 0x2b4   14.30 ns
+ 693 off 0x2b5   14.31 ns
+ 694 off 0x2b6   14.33 ns
+ 695 off 0x2b7   14.28 ns
+ 696 off 0x2b8   14.26 ns
+ 697 off 0x2b9   14.30 ns
+ 698 off 0x2ba   14.28 ns
+ 699 off 0x2bb   14.29 ns
+ 700 off 0x2bc   15.53 ns
+ 701 off 0x2bd   14.40 ns
+ 702 off 0x2be   14.26 ns
+ 703 off 0x2bf   14.27 ns
+ 704 off 0x2c0   14.29 ns
+ 705 off 0x2c1   14.29 ns
+ 706 off 0x2c2   14.29 ns
+ 707 off 0x2c3   14.28 ns
+ 708 off 0x2c4   14.29 ns
+ 709 off 0x2c5   14.27 ns
+ 710 off 0x2c6   14.29 ns
+ 711 off 0x2c7   14.46 ns
+ 712 off 0x2c8   14.29 ns
+ 713 off 0x2c9   14.29 ns
+ 714 off 0x2ca   14.26 ns
+ 715 off 0x2cb   14.30 ns
+ 716 off 0x2cc   14.29 ns
+ 717 off 0x2cd   14.28 ns
+ 718 off 0x2ce   14.29 ns
+ 719 off 0x2cf   14.27 ns
+ 720 off 0x2d0   14.30 ns
+ 721 off 0x2d1   14.40 ns
+ 722 off 0x2d2   14.38 ns
+ 723 off 0x2d3   14.29 ns
+ 724 off 0x2d4   14.26 ns
+ 725 off 0x2d5   14.29 ns
+ 726 off 0x2d6   14.29 ns
+ 727 off 0x2d7   14.29 ns
+ 728 off 0x2d8   14.28 ns
+ 729 off 0x2d9   14.26 ns
+ 730 off 0x2da   14.26 ns
+ 731 off 0x2db   14.28 ns
+ 732 off 0x2dc   14.52 ns
+ 733 off 0x2dd   14.62 ns
+ 734 off 0x2de   14.51 ns
+ 735 off 0x2df   14.43 ns
+ 736 off 0x2e0   14.40 ns
+ 737 off 0x2e1   14.43 ns
+ 738 off 0x2e2   14.51 ns
+ 739 off 0x2e3   14.42 ns
+ 740 off 0x2e4   14.40 ns
+ 741 off 0x2e5   14.34 ns
+ 742 off 0x2e6   14.42 ns
+ 743 off 0x2e7   14.37 ns
+ 744 off 0x2e8   14.36 ns
+ 745 off 0x2e9   14.33 ns
+ 746 off 0x2ea   14.33 ns
+ 747 off 0x2eb   14.69 ns
+ 748 off 0x2ec   14.29 ns
+ 749 off 0x2ed   14.29 ns
+ 750 off 0x2ee   14.26 ns
+ 751 off 0x2ef   14.29 ns
+ 752 off 0x2f0   14.29 ns
+ 753 off 0x2f1   14.55 ns
+ 754 off 0x2f2   14.29 ns
+ 755 off 0x2f3   14.31 ns
+ 756 off 0x2f4   14.30 ns
+ 757 off 0x2f5   14.28 ns
+ 758 off 0x2f6   14.29 ns
+ 759 off 0x2f7   14.26 ns
+ 760 off 0x2f8   14.26 ns
+ 761 off 0x2f9   14.30 ns
+ 762 off 0x2fa   14.30 ns
+ 763 off 0x2fb   14.29 ns
+ 764 off 0x2fc   14.53 ns
+ 765 off 0x2fd   14.55 ns
+ 766 off 0x2fe   14.52 ns
+ 767 off 0x2ff   14.43 ns
+ 768 off 0x300   14.48 ns
+ 769 off 0x301   14.43 ns
+ 770 off 0x302   14.34 ns
+ 771 off 0x303   14.36 ns
+ 772 off 0x304   14.36 ns
+ 773 off 0x305   14.35 ns
+ 774 off 0x306   14.54 ns
+ 775 off 0x307   14.39 ns
+ 776 off 0x308   14.26 ns
+ 777 off 0x309   14.30 ns
+ 778 off 0x30a   14.29 ns
+ 779 off 0x30b   14.44 ns
+ 780 off 0x30c   14.29 ns
+ 781 off 0x30d   14.26 ns
+ 782 off 0x30e   14.30 ns
+ 783 off 0x30f   14.28 ns
+ 784 off 0x310   14.28 ns
+ 785 off 0x311   14.47 ns
+ 786 off 0x312   14.36 ns
+ 787 off 0x313   14.34 ns
+ 788 off 0x314   14.26 ns
+ 789 off 0x315   14.26 ns
+ 790 off 0x316   14.29 ns
+ 791 off 0x317   14.28 ns
+ 792 off 0x318   14.28 ns
+ 793 off 0x319   14.30 ns
+ 794 off 0x31a   14.28 ns
+ 795 off 0x31b   14.37 ns
+ 796 off 0x31c   14.49 ns
+ 797 off 0x31d   14.37 ns
+ 798 off 0x31e   14.38 ns
+ 799 off 0x31f   14.28 ns
+ 800 off 0x320   14.26 ns
+ 801 off 0x321   14.29 ns
+ 802 off 0x322   14.29 ns
+ 803 off 0x323   14.29 ns
+ 804 off 0x324   14.26 ns
+ 805 off 0x325   14.26 ns
+ 806 off 0x326   14.74 ns
+ 807 off 0x327   14.37 ns
+ 808 off 0x328   14.34 ns
+ 809 off 0x329   14.29 ns
+ 810 off 0x32a   14.26 ns
+ 811 off 0x32b   14.27 ns
+ 812 off 0x32c   14.33 ns
+ 813 off 0x32d   14.29 ns
+ 814 off 0x32e   14.29 ns
+ 815 off 0x32f   14.29 ns
+ 816 off 0x330   14.33 ns
+ 817 off 0x331   14.38 ns
+ 818 off 0x332   14.30 ns
+ 819 off 0x333   14.30 ns
+ 820 off 0x334   14.26 ns
+ 821 off 0x335   14.26 ns
+ 822 off 0x336   14.28 ns
+ 823 off 0x337   14.28 ns
+ 824 off 0x338   14.29 ns
+ 825 off 0x339   14.26 ns
+ 826 off 0x33a   14.25 ns
+ 827 off 0x33b   14.47 ns
+ 828 off 0x33c   14.28 ns
+ 829 off 0x33d   14.29 ns
+ 830 off 0x33e   14.29 ns
+ 831 off 0x33f   14.26 ns
+ 832 off 0x340   14.26 ns
+ 833 off 0x341   14.28 ns
+ 834 off 0x342   14.29 ns
+ 835 off 0x343   14.29 ns
+ 836 off 0x344   14.28 ns
+ 837 off 0x345   14.40 ns
+ 838 off 0x346   14.42 ns
+ 839 off 0x347   14.37 ns
+ 840 off 0x348   14.29 ns
+ 841 off 0x349   14.30 ns
+ 842 off 0x34a   14.28 ns
+ 843 off 0x34b   14.29 ns
+ 844 off 0x34c   14.26 ns
+ 845 off 0x34d   14.26 ns
+ 846 off 0x34e   14.29 ns
+ 847 off 0x34f   14.29 ns
+ 848 off 0x350   14.40 ns
+ 849 off 0x351   14.29 ns
+ 850 off 0x352   14.26 ns
+ 851 off 0x353   14.26 ns
+ 852 off 0x354   14.29 ns
+ 853 off 0x355   14.28 ns
+ 854 off 0x356   14.30 ns
+ 855 off 0x357   14.29 ns
+ 856 off 0x358   14.28 ns
+ 857 off 0x359   14.26 ns
+ 858 off 0x35a   14.26 ns
+ 859 off 0x35b   14.47 ns
+ 860 off 0x35c   14.30 ns
+ 861 off 0x35d   14.30 ns
+ 862 off 0x35e   14.29 ns
+ 863 off 0x35f   14.27 ns
+ 864 off 0x360   14.26 ns
+ 865 off 0x361   14.29 ns
+ 866 off 0x362   14.29 ns
+ 867 off 0x363   14.29 ns
+ 868 off 0x364   14.26 ns
+ 869 off 0x365   14.54 ns
+ 870 off 0x366   14.38 ns
+ 871 off 0x367   14.39 ns
+ 872 off 0x368   14.30 ns
+ 873 off 0x369   14.26 ns
+ 874 off 0x36a   14.26 ns
+ 875 off 0x36b   14.30 ns
+ 876 off 0x36c   14.29 ns
+ 877 off 0x36d   14.29 ns
+ 878 off 0x36e   14.29 ns
+ 879 off 0x36f   14.29 ns
+ 880 off 0x370   20.56 ns
+ 881 off 0x371   14.40 ns
+ 882 off 0x372   14.41 ns
+ 883 off 0x373   14.35 ns
+ 884 off 0x374   14.35 ns
+ 885 off 0x375   14.39 ns
+ 886 off 0x376   14.27 ns
+ 887 off 0x377   14.28 ns
+ 888 off 0x378   14.28 ns
+ 889 off 0x379   14.66 ns
+ 890 off 0x37a   14.62 ns
+ 891 off 0x37b   19.44 ns
+ 892 off 0x37c   14.60 ns
+ 893 off 0x37d   14.50 ns
+ 894 off 0x37e   14.51 ns
+ 895 off 0x37f   14.47 ns
+ 896 off 0x380   14.42 ns
+ 897 off 0x381   14.42 ns
+ 898 off 0x382   14.43 ns
+ 899 off 0x383   14.43 ns
+ 900 off 0x384   14.72 ns
+ 901 off 0x385   14.49 ns
+ 902 off 0x386   14.41 ns
+ 903 off 0x387   14.41 ns
+ 904 off 0x388   14.36 ns
+ 905 off 0x389   14.36 ns
+ 906 off 0x38a   14.36 ns
+ 907 off 0x38b   14.66 ns
+ 908 off 0x38c   14.33 ns
+ 909 off 0x38d   14.36 ns
+ 910 off 0x38e   14.42 ns
+ 911 off 0x38f   14.44 ns
+ 912 off 0x390   14.29 ns
+ 913 off 0x391   14.27 ns
+ 914 off 0x392   14.29 ns
+ 915 off 0x393   14.28 ns
+ 916 off 0x394   14.30 ns
+ 917 off 0x395   14.29 ns
+ 918 off 0x396   14.29 ns
+ 919 off 0x397   14.26 ns
+ 920 off 0x398   14.26 ns
+ 921 off 0x399   14.47 ns
+ 922 off 0x39a   14.30 ns
+ 923 off 0x39b   14.29 ns
+ 924 off 0x39c   14.29 ns
+ 925 off 0x39d   14.26 ns
+ 926 off 0x39e   14.30 ns
+ 927 off 0x39f   14.28 ns
+ 928 off 0x3a0   14.28 ns
+ 929 off 0x3a1   14.29 ns
+ 930 off 0x3a2   14.28 ns
+ 931 off 0x3a3   14.26 ns
+ 932 off 0x3a4   14.71 ns
+ 933 off 0x3a5   14.37 ns
+ 934 off 0x3a6   14.39 ns
+ 935 off 0x3a7   14.29 ns
+ 936 off 0x3a8   14.59 ns
+ 937 off 0x3a9   14.30 ns
+ 938 off 0x3aa   14.26 ns
+ 939 off 0x3ab   14.28 ns
+ 940 off 0x3ac   14.30 ns
+ 941 off 0x3ad   14.29 ns
+ 942 off 0x3ae   14.40 ns
+ 943 off 0x3af   14.27 ns
+ 944 off 0x3b0   14.29 ns
+ 945 off 0x3b1   14.29 ns
+ 946 off 0x3b2   14.58 ns
+ 947 off 0x3b3   14.26 ns
+ 948 off 0x3b4   14.26 ns
+ 949 off 0x3b5   14.30 ns
+ 950 off 0x3b6   14.29 ns
+ 951 off 0x3b7   14.28 ns
+ 952 off 0x3b8   14.28 ns
+ 953 off 0x3b9   14.45 ns
+ 954 off 0x3ba   14.26 ns
+ 955 off 0x3bb   14.26 ns
+ 956 off 0x3bc   14.30 ns
+ 957 off 0x3bd   14.29 ns
+ 958 off 0x3be   14.28 ns
+ 959 off 0x3bf   14.26 ns
+ 960 off 0x3c0   14.30 ns
+ 961 off 0x3c1   14.28 ns
+ 962 off 0x3c2   14.29 ns
+ 963 off 0x3c3   14.56 ns
+ 964 off 0x3c4   14.37 ns
+ 965 off 0x3c5   14.49 ns
+ 966 off 0x3c6   14.35 ns
+ 967 off 0x3c7   14.39 ns
+ 968 off 0x3c8   14.33 ns
+ 969 off 0x3c9   14.29 ns
+ 970 off 0x3ca   14.26 ns
+ 971 off 0x3cb   14.26 ns
+ 972 off 0x3cc   14.29 ns
+ 973 off 0x3cd   14.62 ns
+ 974 off 0x3ce   14.45 ns
+ 975 off 0x3cf   14.39 ns
+ 976 off 0x3d0   14.34 ns
+ 977 off 0x3d1   14.26 ns
+ 978 off 0x3d2   14.30 ns
+ 979 off 0x3d3   14.30 ns
+ 980 off 0x3d4   14.29 ns
+ 981 off 0x3d5   14.30 ns
+ 982 off 0x3d6   14.26 ns
+ 983 off 0x3d7   14.26 ns
+ 984 off 0x3d8   14.67 ns
+ 985 off 0x3d9   14.38 ns
+ 986 off 0x3da   14.29 ns
+ 987 off 0x3db   14.29 ns
+ 988 off 0x3dc   14.26 ns
+ 989 off 0x3dd   14.26 ns
+ 990 off 0x3de   14.30 ns
+ 991 off 0x3df   14.29 ns
+ 992 off 0x3e0   14.29 ns
+ 993 off 0x3e1   14.27 ns
+ 994 off 0x3e2   14.26 ns
+ 995 off 0x3e3   14.45 ns
+ 996 off 0x3e4   14.30 ns
+ 997 off 0x3e5   14.29 ns
+ 998 off 0x3e6   14.26 ns
+ 999 off 0x3e7   14.26 ns
+1000 off 0x3e8   14.28 ns
+1001 off 0x3e9   14.44 ns
+1002 off 0x3ea   14.33 ns
+1003 off 0x3eb   14.29 ns
+1004 off 0x3ec   14.29 ns
+1005 off 0x3ed   14.26 ns
+1006 off 0x3ee   14.38 ns
+1007 off 0x3ef   14.30 ns
+1008 off 0x3f0   14.29 ns
+1009 off 0x3f1   14.28 ns
+1010 off 0x3f2   14.26 ns
+1011 off 0x3f3   14.61 ns
+1012 off 0x3f4   14.30 ns
+1013 off 0x3f5   14.29 ns
+1014 off 0x3f6   14.29 ns
+1015 off 0x3f7   14.28 ns
+1016 off 0x3f8   14.45 ns
+1017 off 0x3f9   14.26 ns
+1018 off 0x3fa   14.29 ns
+1019 off 0x3fb   14.28 ns
+1020 off 0x3fc   14.30 ns
+1021 off 0x3fd   14.29 ns
+1022 off 0x3fe   14.26 ns
+1023 off 0x3ff   14.29 ns
+1024 off 0x400   14.29 ns
+1025 off 0x401   14.29 ns
+1026 off 0x402   14.29 ns
+1027 off 0x403   14.58 ns
+1028 off 0x404   14.53 ns
+1029 off 0x405   14.49 ns
+1030 off 0x406   14.42 ns
+1031 off 0x407   14.43 ns
+1032 off 0x408   14.42 ns
+1033 off 0x409   14.37 ns
+1034 off 0x40a   14.33 ns
+1035 off 0x40b   14.36 ns
+1036 off 0x40c   14.35 ns
+1037 off 0x40d   14.43 ns
+1038 off 0x40e   14.41 ns
+1039 off 0x40f   14.40 ns
+1040 off 0x410   14.44 ns
+1041 off 0x411   14.29 ns
+1042 off 0x412   14.29 ns
+1043 off 0x413   14.27 ns
+1044 off 0x414   14.27 ns
+1045 off 0x415   14.29 ns
+1046 off 0x416   14.28 ns
+1047 off 0x417   14.29 ns
+1048 off 0x418   14.47 ns
+1049 off 0x419   14.26 ns
+1050 off 0x41a   14.30 ns
+1051 off 0x41b   14.29 ns
+1052 off 0x41c   14.29 ns
+1053 off 0x41d   14.28 ns
+1054 off 0x41e   14.33 ns
+1055 off 0x41f   14.27 ns
+1056 off 0x420   14.30 ns
+1057 off 0x421   14.28 ns
+1058 off 0x422   14.50 ns
+1059 off 0x423   14.30 ns
+1060 off 0x424   14.28 ns
+1061 off 0x425   14.27 ns
+1062 off 0x426   14.29 ns
+1063 off 0x427   14.28 ns
+1064 off 0x428   14.29 ns
+1065 off 0x429   14.26 ns
+1066 off 0x42a   14.75 ns
+1067 off 0x42b   14.29 ns
+1068 off 0x42c   14.30 ns
+1069 off 0x42d   14.49 ns
+1070 off 0x42e   14.33 ns
+1071 off 0x42f   14.33 ns
+1072 off 0x430   14.31 ns
+1073 off 0x431   14.57 ns
+1074 off 0x432   14.29 ns
+1075 off 0x433   14.29 ns
+1076 off 0x434   14.26 ns
+1077 off 0x435   14.28 ns
+1078 off 0x436   14.28 ns
+1079 off 0x437   14.29 ns
+1080 off 0x438   14.39 ns
+1081 off 0x439   14.42 ns
+1082 off 0x43a   14.26 ns
+1083 off 0x43b   14.30 ns
+1084 off 0x43c   14.30 ns
+1085 off 0x43d   14.30 ns
+1086 off 0x43e   14.26 ns
+1087 off 0x43f   14.26 ns
+1088 off 0x440   14.30 ns
+1089 off 0x441   14.29 ns
+1090 off 0x442   14.85 ns
+1091 off 0x443   14.29 ns
+1092 off 0x444   14.26 ns
+1093 off 0x445   14.26 ns
+1094 off 0x446   14.30 ns
+1095 off 0x447   14.28 ns
+1096 off 0x448   14.29 ns
+1097 off 0x449   14.29 ns
+1098 off 0x44a   14.28 ns
+1099 off 0x44b   14.26 ns
+1100 off 0x44c   14.27 ns
+1101 off 0x44d   14.41 ns
+1102 off 0x44e   14.29 ns
+1103 off 0x44f   14.30 ns
+1104 off 0x450   14.28 ns
+1105 off 0x451   14.26 ns
+1106 off 0x452   14.26 ns
+1107 off 0x453   14.30 ns
+1108 off 0x454   14.29 ns
+1109 off 0x455   14.29 ns
+1110 off 0x456   14.28 ns
+1111 off 0x457   14.51 ns
+1112 off 0x458   14.42 ns
+1113 off 0x459   14.36 ns
+1114 off 0x45a   14.29 ns
+1115 off 0x45b   14.29 ns
+1116 off 0x45c   14.65 ns
+1117 off 0x45d   14.30 ns
+1118 off 0x45e   14.26 ns
+1119 off 0x45f   14.29 ns
+1120 off 0x460   14.28 ns
+1121 off 0x461   14.28 ns
+1122 off 0x462   15.02 ns
+1123 off 0x463   14.37 ns
+1124 off 0x464   14.34 ns
+1125 off 0x465   14.26 ns
+1126 off 0x466   14.61 ns
+1127 off 0x467   14.30 ns
+1128 off 0x468   14.29 ns
+1129 off 0x469   14.30 ns
+1130 off 0x46a   14.28 ns
+1131 off 0x46b   14.26 ns
+1132 off 0x46c   14.57 ns
+1133 off 0x46d   14.40 ns
+1134 off 0x46e   14.37 ns
+1135 off 0x46f   14.29 ns
+1136 off 0x470   14.42 ns
+1137 off 0x471   14.27 ns
+1138 off 0x472   14.29 ns
+1139 off 0x473   14.29 ns
+1140 off 0x474   14.56 ns
+1141 off 0x475   14.29 ns
+1142 off 0x476   14.29 ns
+1143 off 0x477   14.41 ns
+1144 off 0x478   14.29 ns
+1145 off 0x479   14.30 ns
+1146 off 0x47a   14.29 ns
+1147 off 0x47b   14.26 ns
+1148 off 0x47c   14.26 ns
+1149 off 0x47d   14.56 ns
+1150 off 0x47e   14.30 ns
+1151 off 0x47f   14.29 ns
+1152 off 0x480   14.28 ns
+1153 off 0x481   14.45 ns
+1154 off 0x482   14.35 ns
+1155 off 0x483   14.42 ns
+1156 off 0x484   14.30 ns
+1157 off 0x485   14.29 ns
+1158 off 0x486   14.29 ns
+1159 off 0x487   14.26 ns
+1160 off 0x488   14.26 ns
+1161 off 0x489   14.29 ns
+1162 off 0x48a   14.29 ns
+1163 off 0x48b   14.29 ns
+1164 off 0x48c   14.91 ns
+1165 off 0x48d   14.35 ns
+1166 off 0x48e   14.38 ns
+1167 off 0x48f   14.30 ns
+1168 off 0x490   14.29 ns
+1169 off 0x491   14.26 ns
+1170 off 0x492   14.27 ns
+1171 off 0x493   14.29 ns
+1172 off 0x494   14.29 ns
+1173 off 0x495   14.28 ns
+1174 off 0x496   14.85 ns
+1175 off 0x497   14.40 ns
+1176 off 0x498   14.29 ns
+1177 off 0x499   14.26 ns
+1178 off 0x49a   14.29 ns
+1179 off 0x49b   14.28 ns
+1180 off 0x49c   14.28 ns
+1181 off 0x49d   14.26 ns
+1182 off 0x49e   14.26 ns
+1183 off 0x49f   14.30 ns
+1184 off 0x4a0   14.29 ns
+1185 off 0x4a1   14.81 ns
+1186 off 0x4a2   14.52 ns
+1187 off 0x4a3   14.31 ns
+1188 off 0x4a4   14.26 ns
+1189 off 0x4a5   14.29 ns
+1190 off 0x4a6   14.30 ns
+1191 off 0x4a7   14.29 ns
+1192 off 0x4a8   14.28 ns
+1193 off 0x4a9   14.26 ns
+1194 off 0x4aa   14.64 ns
+1195 off 0x4ab   14.47 ns
+1196 off 0x4ac   14.37 ns
+1197 off 0x4ad   14.29 ns
+1198 off 0x4ae   14.28 ns
+1199 off 0x4af   14.26 ns
+1200 off 0x4b0   14.30 ns
+1201 off 0x4b1   14.57 ns
+1202 off 0x4b2   14.29 ns
+1203 off 0x4b3   14.29 ns
+1204 off 0x4b4   14.29 ns
+1205 off 0x4b5   14.26 ns
+1206 off 0x4b6   14.36 ns
+1207 off 0x4b7   14.30 ns
+1208 off 0x4b8   14.29 ns
+1209 off 0x4b9   14.26 ns
+1210 off 0x4ba   14.26 ns
+1211 off 0x4bb   14.29 ns
+1212 off 0x4bc   14.29 ns
+1213 off 0x4bd   14.29 ns
+1214 off 0x4be   14.28 ns
+1215 off 0x4bf   14.26 ns
+1216 off 0x4c0   14.39 ns
+1217 off 0x4c1   14.38 ns
+1218 off 0x4c2   14.29 ns
+1219 off 0x4c3   14.26 ns
+1220 off 0x4c4   14.26 ns
+1221 off 0x4c5   14.30 ns
+1222 off 0x4c6   14.28 ns
+1223 off 0x4c7   14.29 ns
+1224 off 0x4c8   14.27 ns
+1225 off 0x4c9   14.26 ns
+1226 off 0x4ca   14.30 ns
+1227 off 0x4cb   14.41 ns
+1228 off 0x4cc   14.40 ns
+1229 off 0x4cd   14.29 ns
+1230 off 0x4ce   14.26 ns
+1231 off 0x4cf   14.29 ns
+1232 off 0x4d0   14.28 ns
+1233 off 0x4d1   14.28 ns
+1234 off 0x4d2   14.28 ns
+1235 off 0x4d3   14.28 ns
+1236 off 0x4d4   14.29 ns
+1237 off 0x4d5   14.28 ns
+1238 off 0x4d6   14.55 ns
+1239 off 0x4d7   14.41 ns
+1240 off 0x4d8   14.40 ns
+1241 off 0x4d9   14.35 ns
+1242 off 0x4da   14.33 ns
+1243 off 0x4db   14.32 ns
+1244 off 0x4dc   14.28 ns
+1245 off 0x4dd   14.29 ns
+1246 off 0x4de   14.28 ns
+1247 off 0x4df   14.27 ns
+1248 off 0x4e0   14.42 ns
+1249 off 0x4e1   14.38 ns
+1250 off 0x4e2   14.48 ns
+1251 off 0x4e3   14.36 ns
+1252 off 0x4e4   14.34 ns
+1253 off 0x4e5   14.33 ns
+1254 off 0x4e6   14.29 ns
+1255 off 0x4e7   14.61 ns
+1256 off 0x4e8   14.29 ns
+1257 off 0x4e9   14.29 ns
+1258 off 0x4ea   14.26 ns
+1259 off 0x4eb   14.92 ns
+1260 off 0x4ec   14.44 ns
+1261 off 0x4ed   14.37 ns
+1262 off 0x4ee   14.36 ns
+1263 off 0x4ef   14.35 ns
+1264 off 0x4f0   14.33 ns
+1265 off 0x4f1   14.34 ns
+1266 off 0x4f2   14.29 ns
+1267 off 0x4f3   14.29 ns
+1268 off 0x4f4   14.29 ns
+1269 off 0x4f5   14.65 ns
+1270 off 0x4f6   14.39 ns
+1271 off 0x4f7   14.46 ns
+1272 off 0x4f8   14.35 ns
+1273 off 0x4f9   14.36 ns
+1274 off 0x4fa   14.36 ns
+1275 off 0x4fb   14.36 ns
+1276 off 0x4fc   14.28 ns
+1277 off 0x4fd   14.26 ns
+1278 off 0x4fe   14.26 ns
+1279 off 0x4ff   14.30 ns
+1280 off 0x500   14.55 ns
+1281 off 0x501   14.35 ns
+1282 off 0x502   14.37 ns
+1283 off 0x503   14.35 ns
+1284 off 0x504   14.26 ns
+1285 off 0x505   14.30 ns
+1286 off 0x506   14.29 ns
+1287 off 0x507   14.28 ns
+1288 off 0x508   14.29 ns
+1289 off 0x509   14.29 ns
+1290 off 0x50a   14.36 ns
+1291 off 0x50b   14.37 ns
+1292 off 0x50c   14.29 ns
+1293 off 0x50d   14.30 ns
+1294 off 0x50e   14.29 ns
+1295 off 0x50f   14.27 ns
+1296 off 0x510   14.29 ns
+1297 off 0x511   14.29 ns
+1298 off 0x512   14.28 ns
+1299 off 0x513   14.28 ns
+1300 off 0x514   14.28 ns
+1301 off 0x515   14.58 ns
+1302 off 0x516   14.43 ns
+1303 off 0x517   14.41 ns
+1304 off 0x518   14.37 ns
+1305 off 0x519   14.40 ns
+1306 off 0x51a   14.29 ns
+1307 off 0x51b   14.28 ns
+1308 off 0x51c   14.26 ns
+1309 off 0x51d   14.26 ns
+1310 off 0x51e   14.29 ns
+1311 off 0x51f   14.30 ns
+1312 off 0x520   14.65 ns
+1313 off 0x521   14.36 ns
+1314 off 0x522   14.34 ns
+1315 off 0x523   14.26 ns
+1316 off 0x524   14.29 ns
+1317 off 0x525   14.29 ns
+1318 off 0x526   14.28 ns
+1319 off 0x527   14.26 ns
+1320 off 0x528   14.31 ns
+1321 off 0x529   14.78 ns
+1322 off 0x52a   14.40 ns
+1323 off 0x52b   14.39 ns
+1324 off 0x52c   14.58 ns
+1325 off 0x52d   14.35 ns
+1326 off 0x52e   14.33 ns
+1327 off 0x52f   14.40 ns
+1328 off 0x530   14.37 ns
+1329 off 0x531   14.34 ns
+1330 off 0x532   14.28 ns
+1331 off 0x533   14.30 ns
+1332 off 0x534   14.29 ns
+1333 off 0x535   14.44 ns
+1334 off 0x536   14.30 ns
+1335 off 0x537   14.42 ns
+1336 off 0x538   14.29 ns
+1337 off 0x539   14.28 ns
+1338 off 0x53a   14.26 ns
+1339 off 0x53b   14.29 ns
+1340 off 0x53c   14.28 ns
+1341 off 0x53d   14.28 ns
+1342 off 0x53e   14.25 ns
+1343 off 0x53f   14.43 ns
+1344 off 0x540   14.39 ns
+1345 off 0x541   14.30 ns
+1346 off 0x542   14.29 ns
+1347 off 0x543   14.29 ns
+1348 off 0x544   14.26 ns
+1349 off 0x545   14.29 ns
+1350 off 0x546   14.28 ns
+1351 off 0x547   14.30 ns
+1352 off 0x548   14.29 ns
+1353 off 0x549   14.26 ns
+1354 off 0x54a   14.55 ns
+1355 off 0x54b   14.34 ns
+1356 off 0x54c   14.37 ns
+1357 off 0x54d   14.28 ns
+1358 off 0x54e   14.26 ns
+1359 off 0x54f   14.30 ns
+1360 off 0x550   14.29 ns
+1361 off 0x551   14.28 ns
+1362 off 0x552   14.26 ns
+1363 off 0x553   14.27 ns
+1364 off 0x554   14.29 ns
+1365 off 0x555   14.35 ns
+1366 off 0x556   14.48 ns
+1367 off 0x557   14.27 ns
+1368 off 0x558   14.29 ns
+1369 off 0x559   14.30 ns
+1370 off 0x55a   14.30 ns
+1371 off 0x55b   14.29 ns
+1372 off 0x55c   14.47 ns
+1373 off 0x55d   14.41 ns
+1374 off 0x55e   14.43 ns
+1375 off 0x55f   14.42 ns
+1376 off 0x560   14.46 ns
+1377 off 0x561   14.35 ns
+1378 off 0x562   14.33 ns
+1379 off 0x563   14.36 ns
+1380 off 0x564   14.29 ns
+1381 off 0x565   14.29 ns
+1382 off 0x566   14.30 ns
+1383 off 0x567   14.60 ns
+1384 off 0x568   14.27 ns
+1385 off 0x569   14.30 ns
+1386 off 0x56a   14.35 ns
+1387 off 0x56b   14.37 ns
+1388 off 0x56c   14.35 ns
+1389 off 0x56d   14.26 ns
+1390 off 0x56e   14.26 ns
+1391 off 0x56f   14.29 ns
+1392 off 0x570   14.30 ns
+1393 off 0x571   14.29 ns
+1394 off 0x572   14.30 ns
+1395 off 0x573   14.27 ns
+1396 off 0x574   14.46 ns
+1397 off 0x575   14.38 ns
+1398 off 0x576   14.30 ns
+1399 off 0x577   14.29 ns
+1400 off 0x578   14.25 ns
+1401 off 0x579   14.26 ns
+1402 off 0x57a   14.30 ns
+1403 off 0x57b   14.29 ns
+1404 off 0x57c   14.29 ns
+1405 off 0x57d   14.29 ns
+1406 off 0x57e   14.26 ns
+1407 off 0x57f   14.64 ns
+1408 off 0x580   14.30 ns
+1409 off 0x581   14.30 ns
+1410 off 0x582   14.29 ns
+1411 off 0x583   14.26 ns
+1412 off 0x584   14.29 ns
+1413 off 0x585   14.29 ns
+1414 off 0x586   14.29 ns
+1415 off 0x587   14.29 ns
+1416 off 0x588   14.26 ns
+1417 off 0x589   14.37 ns
+1418 off 0x58a   14.38 ns
+1419 off 0x58b   14.29 ns
+1420 off 0x58c   14.28 ns
+1421 off 0x58d   14.29 ns
+1422 off 0x58e   14.33 ns
+1423 off 0x58f   14.35 ns
+1424 off 0x590   14.37 ns
+1425 off 0x591   14.29 ns
+1426 off 0x592   14.29 ns
+1427 off 0x593   14.26 ns
+1428 off 0x594   14.48 ns
+1429 off 0x595   14.30 ns
+1430 off 0x596   14.29 ns
+1431 off 0x597   14.29 ns
+1432 off 0x598   14.29 ns
+1433 off 0x599   14.26 ns
+1434 off 0x59a   14.30 ns
+1435 off 0x59b   14.29 ns
+1436 off 0x59c   14.28 ns
+1437 off 0x59d   14.29 ns
+1438 off 0x59e   14.55 ns
+1439 off 0x59f   14.33 ns
+1440 off 0x5a0   14.29 ns
+1441 off 0x5a1   14.29 ns
+1442 off 0x5a2   14.29 ns
+1443 off 0x5a3   14.26 ns
+1444 off 0x5a4   14.26 ns
+1445 off 0x5a5   14.28 ns
+1446 off 0x5a6   14.30 ns
+1447 off 0x5a7   14.29 ns
+1448 off 0x5a8   14.65 ns
+1449 off 0x5a9   14.48 ns
+1450 off 0x5aa   14.42 ns
+1451 off 0x5ab   14.49 ns
+1452 off 0x5ac   14.37 ns
+1453 off 0x5ad   14.36 ns
+1454 off 0x5ae   14.35 ns
+1455 off 0x5af   14.63 ns
+1456 off 0x5b0   14.36 ns
+1457 off 0x5b1   14.33 ns
+1458 off 0x5b2   14.34 ns
+1459 off 0x5b3   14.37 ns
+1460 off 0x5b4   14.38 ns
+1461 off 0x5b5   14.39 ns
+1462 off 0x5b6   14.36 ns
+1463 off 0x5b7   14.26 ns
+1464 off 0x5b8   14.26 ns
+1465 off 0x5b9   14.29 ns
+1466 off 0x5ba   14.29 ns
+1467 off 0x5bb   14.29 ns
+1468 off 0x5bc   14.29 ns
+1469 off 0x5bd   14.26 ns
+1470 off 0x5be   14.43 ns
+1471 off 0x5bf   14.30 ns
+1472 off 0x5c0   14.29 ns
+1473 off 0x5c1   14.29 ns
+1474 off 0x5c2   14.30 ns
+1475 off 0x5c3   14.27 ns
+1476 off 0x5c4   14.26 ns
+1477 off 0x5c5   14.28 ns
+1478 off 0x5c6   14.28 ns
+1479 off 0x5c7   14.28 ns
+1480 off 0x5c8   14.28 ns
+1481 off 0x5c9   14.57 ns
+1482 off 0x5ca   14.36 ns
+1483 off 0x5cb   14.33 ns
+1484 off 0x5cc   14.37 ns
+1485 off 0x5cd   14.29 ns
+1486 off 0x5ce   14.28 ns
+1487 off 0x5cf   14.28 ns
+1488 off 0x5d0   14.29 ns
+1489 off 0x5d1   14.29 ns
+1490 off 0x5d2   14.26 ns
+1491 off 0x5d3   14.36 ns
+1492 off 0x5d4   14.31 ns
+1493 off 0x5d5   14.29 ns
+1494 off 0x5d6   14.29 ns
+1495 off 0x5d7   14.26 ns
+1496 off 0x5d8   14.29 ns
+1497 off 0x5d9   14.29 ns
+1498 off 0x5da   14.30 ns
+1499 off 0x5db   14.64 ns
+1500 off 0x5dc   14.26 ns
+1501 off 0x5dd   14.26 ns
+1502 off 0x5de   14.65 ns
+1503 off 0x5df   14.34 ns
+1504 off 0x5e0   14.30 ns
+1505 off 0x5e1   14.28 ns
+1506 off 0x5e2   14.26 ns
+1507 off 0x5e3   14.29 ns
+1508 off 0x5e4   14.28 ns
+1509 off 0x5e5   14.29 ns
+1510 off 0x5e6   14.61 ns
+1511 off 0x5e7   14.26 ns
+1512 off 0x5e8   14.30 ns
+1513 off 0x5e9   14.29 ns
+1514 off 0x5ea   14.44 ns
+1515 off 0x5eb   14.32 ns
+1516 off 0x5ec   14.26 ns
+1517 off 0x5ed   14.26 ns
+1518 off 0x5ee   14.30 ns
+1519 off 0x5ef   14.29 ns
+1520 off 0x5f0   14.28 ns
+1521 off 0x5f1   14.26 ns
+1522 off 0x5f2   14.29 ns
+1523 off 0x5f3   14.33 ns
+1524 off 0x5f4   14.49 ns
+1525 off 0x5f5   14.29 ns
+1526 off 0x5f6   14.26 ns
+1527 off 0x5f7   14.25 ns
+1528 off 0x5f8   14.29 ns
+1529 off 0x5f9   14.30 ns
+1530 off 0x5fa   14.29 ns
+1531 off 0x5fb   14.30 ns
+1532 off 0x5fc   14.58 ns
+1533 off 0x5fd   14.26 ns
+1534 off 0x5fe   14.50 ns
+1535 off 0x5ff   14.50 ns
+1536 off 0x600   14.48 ns
+1537 off 0x601   14.34 ns
+1538 off 0x602   14.36 ns
+1539 off 0x603   14.35 ns
+1540 off 0x604   14.36 ns
+1541 off 0x605   14.40 ns
+1542 off 0x606   14.34 ns
+1543 off 0x607   14.35 ns
+1544 off 0x608   14.46 ns
+1545 off 0x609   14.35 ns
+1546 off 0x60a   14.30 ns
+1547 off 0x60b   14.30 ns
+1548 off 0x60c   14.29 ns
+1549 off 0x60d   14.32 ns
+1550 off 0x60e   14.26 ns
+1551 off 0x60f   14.26 ns
+1552 off 0x610   14.30 ns
+1553 off 0x611   14.28 ns
+1554 off 0x612   14.29 ns
+1555 off 0x613   14.60 ns
+1556 off 0x614   14.39 ns
+1557 off 0x615   14.26 ns
+1558 off 0x616   14.29 ns
+1559 off 0x617   14.29 ns
+1560 off 0x618   14.29 ns
+1561 off 0x619   14.26 ns
+1562 off 0x61a   14.26 ns
+1563 off 0x61b   14.30 ns
+1564 off 0x61c   14.29 ns
+1565 off 0x61d   14.41 ns
+1566 off 0x61e   14.34 ns
+1567 off 0x61f   14.54 ns
+1568 off 0x620   14.39 ns
+1569 off 0x621   14.35 ns
+1570 off 0x622   14.35 ns
+1571 off 0x623   14.35 ns
+1572 off 0x624   14.36 ns
+1573 off 0x625   14.33 ns
+1574 off 0x626   14.35 ns
+1575 off 0x627   14.59 ns
+1576 off 0x628   14.47 ns
+1577 off 0x629   14.38 ns
+1578 off 0x62a   14.27 ns
+1579 off 0x62b   14.26 ns
+1580 off 0x62c   14.29 ns
+1581 off 0x62d   14.29 ns
+1582 off 0x62e   14.66 ns
+1583 off 0x62f   14.29 ns
+1584 off 0x630   14.26 ns
+1585 off 0x631   14.29 ns
+1586 off 0x632   14.47 ns
+1587 off 0x633   14.38 ns
+1588 off 0x634   14.28 ns
+1589 off 0x635   14.26 ns
+1590 off 0x636   14.30 ns
+1591 off 0x637   14.29 ns
+1592 off 0x638   14.30 ns
+1593 off 0x639   14.28 ns
+1594 off 0x63a   14.29 ns
+1595 off 0x63b   14.26 ns
+1596 off 0x63c   14.30 ns
+1597 off 0x63d   14.65 ns
+1598 off 0x63e   14.37 ns
+1599 off 0x63f   14.36 ns
+1600 off 0x640   14.29 ns
+1601 off 0x641   14.30 ns
+1602 off 0x642   14.26 ns
+1603 off 0x643   14.29 ns
+1604 off 0x644   14.29 ns
+1605 off 0x645   14.29 ns
+1606 off 0x646   14.26 ns
+1607 off 0x647   14.47 ns
+1608 off 0x648   14.39 ns
+1609 off 0x649   14.29 ns
+1610 off 0x64a   14.30 ns
+1611 off 0x64b   14.29 ns
+1612 off 0x64c   14.29 ns
+1613 off 0x64d   14.26 ns
+1614 off 0x64e   14.26 ns
+1615 off 0x64f   14.30 ns
+1616 off 0x650   14.28 ns
+1617 off 0x651   14.29 ns
+1618 off 0x652   14.46 ns
+1619 off 0x653   14.26 ns
+1620 off 0x654   14.26 ns
+1621 off 0x655   14.29 ns
+1622 off 0x656   14.28 ns
+1623 off 0x657   14.29 ns
+1624 off 0x658   14.43 ns
+1625 off 0x659   14.26 ns
+1626 off 0x65a   14.30 ns
+1627 off 0x65b   14.29 ns
+1628 off 0x65c   14.29 ns
+1629 off 0x65d   14.39 ns
+1630 off 0x65e   14.35 ns
+1631 off 0x65f   14.35 ns
+1632 off 0x660   14.29 ns
+1633 off 0x661   14.29 ns
+1634 off 0x662   14.28 ns
+1635 off 0x663   14.29 ns
+1636 off 0x664   14.25 ns
+1637 off 0x665   14.30 ns
+1638 off 0x666   14.30 ns
+1639 off 0x667   14.65 ns
+1640 off 0x668   14.37 ns
+1641 off 0x669   14.36 ns
+1642 off 0x66a   14.26 ns
+1643 off 0x66b   14.29 ns
+1644 off 0x66c   14.64 ns
+1645 off 0x66d   14.28 ns
+1646 off 0x66e   14.26 ns
+1647 off 0x66f   14.31 ns
+1648 off 0x670   14.29 ns
+1649 off 0x671   14.36 ns
+1650 off 0x672   14.31 ns
+1651 off 0x673   14.39 ns
+1652 off 0x674   14.34 ns
+1653 off 0x675   14.31 ns
+1654 off 0x676   14.29 ns
+1655 off 0x677   14.29 ns
+1656 off 0x678   14.28 ns
+1657 off 0x679   14.29 ns
+1658 off 0x67a   14.26 ns
+1659 off 0x67b   14.26 ns
+1660 off 0x67c   14.37 ns
+1661 off 0x67d   14.30 ns
+1662 off 0x67e   14.29 ns
+1663 off 0x67f   14.27 ns
+1664 off 0x680   14.26 ns
+1665 off 0x681   14.29 ns
+1666 off 0x682   14.30 ns
+1667 off 0x683   14.29 ns
+1668 off 0x684   14.29 ns
+1669 off 0x685   14.26 ns
+1670 off 0x686   14.29 ns
+1671 off 0x687   14.44 ns
+1672 off 0x688   14.30 ns
+1673 off 0x689   14.30 ns
+1674 off 0x68a   14.50 ns
+1675 off 0x68b   14.26 ns
+1676 off 0x68c   14.29 ns
+1677 off 0x68d   14.29 ns
+1678 off 0x68e   14.29 ns
+1679 off 0x68f   14.27 ns
+1680 off 0x690   14.30 ns
+1681 off 0x691   14.36 ns
+1682 off 0x692   14.38 ns
+1683 off 0x693   14.30 ns
+1684 off 0x694   14.26 ns
+1685 off 0x695   14.44 ns
+1686 off 0x696   14.30 ns
+1687 off 0x697   14.30 ns
+1688 off 0x698   14.30 ns
+1689 off 0x699   14.29 ns
+1690 off 0x69a   14.28 ns
+1691 off 0x69b   14.44 ns
+1692 off 0x69c   14.38 ns
+1693 off 0x69d   14.30 ns
+1694 off 0x69e   14.30 ns
+1695 off 0x69f   14.28 ns
+1696 off 0x6a0   14.29 ns
+1697 off 0x6a1   14.26 ns
+1698 off 0x6a2   14.26 ns
+1699 off 0x6a3   14.30 ns
+1700 off 0x6a4   14.29 ns
+1701 off 0x6a5   14.29 ns
+1702 off 0x6a6   14.30 ns
+1703 off 0x6a7   14.42 ns
+1704 off 0x6a8   14.26 ns
+1705 off 0x6a9   14.29 ns
+1706 off 0x6aa   14.29 ns
+1707 off 0x6ab   14.29 ns
+1708 off 0x6ac   14.29 ns
+1709 off 0x6ad   14.26 ns
+1710 off 0x6ae   14.28 ns
+1711 off 0x6af   14.30 ns
+1712 off 0x6b0   14.28 ns
+1713 off 0x6b1   14.52 ns
+1714 off 0x6b2   14.29 ns
+1715 off 0x6b3   14.26 ns
+1716 off 0x6b4   14.26 ns
+1717 off 0x6b5   14.29 ns
+1718 off 0x6b6   14.29 ns
+1719 off 0x6b7   14.28 ns
+1720 off 0x6b8   14.26 ns
+1721 off 0x6b9   14.26 ns
+1722 off 0x6ba   14.29 ns
+1723 off 0x6bb   14.29 ns
+1724 off 0x6bc   14.71 ns
+1725 off 0x6bd   14.36 ns
+1726 off 0x6be   14.33 ns
+1727 off 0x6bf   14.37 ns
+1728 off 0x6c0   14.35 ns
+1729 off 0x6c1   14.36 ns
+1730 off 0x6c2   14.36 ns
+1731 off 0x6c3   14.31 ns
+1732 off 0x6c4   14.26 ns
+1733 off 0x6c5   14.29 ns
+1734 off 0x6c6   14.41 ns
+1735 off 0x6c7   14.36 ns
+1736 off 0x6c8   14.41 ns
+1737 off 0x6c9   14.26 ns
+1738 off 0x6ca   14.45 ns
+1739 off 0x6cb   14.38 ns
+1740 off 0x6cc   14.80 ns
+1741 off 0x6cd   14.33 ns
+1742 off 0x6ce   14.34 ns
+1743 off 0x6cf   14.29 ns
+1744 off 0x6d0   14.28 ns
+1745 off 0x6d1   14.53 ns
+1746 off 0x6d2   14.29 ns
+1747 off 0x6d3   14.26 ns
+1748 off 0x6d4   14.26 ns
+1749 off 0x6d5   14.30 ns
+1750 off 0x6d6   14.29 ns
+1751 off 0x6d7   14.57 ns
+1752 off 0x6d8   14.29 ns
+1753 off 0x6d9   14.26 ns
+1754 off 0x6da   14.26 ns
+1755 off 0x6db   14.42 ns
+1756 off 0x6dc   14.38 ns
+1757 off 0x6dd   14.28 ns
+1758 off 0x6de   14.30 ns
+1759 off 0x6df   14.28 ns
+1760 off 0x6e0   14.29 ns
+1761 off 0x6e1   14.27 ns
+1762 off 0x6e2   14.30 ns
+1763 off 0x6e3   14.30 ns
+1764 off 0x6e4   14.28 ns
+1765 off 0x6e5   14.54 ns
+1766 off 0x6e6   14.52 ns
+1767 off 0x6e7   14.35 ns
+1768 off 0x6e8   14.27 ns
+1769 off 0x6e9   14.30 ns
+1770 off 0x6ea   14.32 ns
+1771 off 0x6eb   14.29 ns
+1772 off 0x6ec   14.26 ns
+1773 off 0x6ed   14.26 ns
+1774 off 0x6ee   14.30 ns
+1775 off 0x6ef   14.30 ns
+1776 off 0x6f0   14.42 ns
+1777 off 0x6f1   14.39 ns
+1778 off 0x6f2   14.26 ns
+1779 off 0x6f3   14.30 ns
+1780 off 0x6f4   14.61 ns
+1781 off 0x6f5   14.29 ns
+1782 off 0x6f6   14.28 ns
+1783 off 0x6f7   14.28 ns
+1784 off 0x6f8   14.26 ns
+1785 off 0x6f9   14.25 ns
+1786 off 0x6fa   14.30 ns
+1787 off 0x6fb   14.70 ns
+1788 off 0x6fc   14.36 ns
+1789 off 0x6fd   14.35 ns
+1790 off 0x6fe   14.35 ns
+1791 off 0x6ff   14.30 ns
+1792 off 0x700   14.30 ns
+1793 off 0x701   14.28 ns
+1794 off 0x702   14.29 ns
+1795 off 0x703   14.27 ns
+1796 off 0x704   14.26 ns
+1797 off 0x705   14.66 ns
+1798 off 0x706   14.39 ns
+1799 off 0x707   14.29 ns
+1800 off 0x708   14.29 ns
+1801 off 0x709   14.28 ns
+1802 off 0x70a   14.26 ns
+1803 off 0x70b   14.26 ns
+1804 off 0x70c   14.28 ns
+1805 off 0x70d   14.38 ns
+1806 off 0x70e   14.29 ns
+1807 off 0x70f   14.30 ns
+1808 off 0x710   14.76 ns
+1809 off 0x711   14.27 ns
+1810 off 0x712   14.29 ns
+1811 off 0x713   14.28 ns
+1812 off 0x714   14.28 ns
+1813 off 0x715   14.25 ns
+1814 off 0x716   14.42 ns
+1815 off 0x717   14.30 ns
+1816 off 0x718   14.29 ns
+1817 off 0x719   14.27 ns
+1818 off 0x71a   14.26 ns
+1819 off 0x71b   14.73 ns
+1820 off 0x71c   14.30 ns
+1821 off 0x71d   14.29 ns
+1822 off 0x71e   14.29 ns
+1823 off 0x71f   14.28 ns
+1824 off 0x720   14.26 ns
+1825 off 0x721   14.26 ns
+1826 off 0x722   14.29 ns
+1827 off 0x723   14.29 ns
+1828 off 0x724   14.28 ns
+1829 off 0x725   14.54 ns
+1830 off 0x726   14.38 ns
+1831 off 0x727   14.30 ns
+1832 off 0x728   14.29 ns
+1833 off 0x729   14.28 ns
+1834 off 0x72a   14.26 ns
+1835 off 0x72b   14.29 ns
+1836 off 0x72c   14.30 ns
+1837 off 0x72d   14.65 ns
+1838 off 0x72e   14.30 ns
+1839 off 0x72f   14.27 ns
+1840 off 0x730   14.57 ns
+1841 off 0x731   14.30 ns
+1842 off 0x732   14.29 ns
+1843 off 0x733   14.29 ns
+1844 off 0x734   14.26 ns
+1845 off 0x735   14.54 ns
+1846 off 0x736   14.29 ns
+1847 off 0x737   14.30 ns
+1848 off 0x738   14.30 ns
+1849 off 0x739   14.28 ns
+1850 off 0x73a   14.36 ns
+1851 off 0x73b   14.36 ns
+1852 off 0x73c   14.26 ns
+1853 off 0x73d   14.29 ns
+1854 off 0x73e   14.29 ns
+1855 off 0x73f   14.29 ns
+1856 off 0x740   14.29 ns
+1857 off 0x741   14.26 ns
+1858 off 0x742   14.29 ns
+1859 off 0x743   14.28 ns
+1860 off 0x744   14.29 ns
+1861 off 0x745   14.43 ns
+1862 off 0x746   14.35 ns
+1863 off 0x747   14.36 ns
+1864 off 0x748   14.36 ns
+1865 off 0x749   14.29 ns
+1866 off 0x74a   14.28 ns
+1867 off 0x74b   14.26 ns
+1868 off 0x74c   14.26 ns
+1869 off 0x74d   14.29 ns
+1870 off 0x74e   14.27 ns
+1871 off 0x74f   14.53 ns
+1872 off 0x750   14.35 ns
+1873 off 0x751   14.61 ns
+1874 off 0x752   14.53 ns
+1875 off 0x753   14.41 ns
+1876 off 0x754   14.42 ns
+1877 off 0x755   14.43 ns
+1878 off 0x756   14.43 ns
+1879 off 0x757   14.42 ns
+1880 off 0x758   14.35 ns
+1881 off 0x759   14.34 ns
+1882 off 0x75a   14.50 ns
+1883 off 0x75b   14.46 ns
+1884 off 0x75c   14.43 ns
+1885 off 0x75d   14.36 ns
+1886 off 0x75e   14.33 ns
+1887 off 0x75f   14.34 ns
+1888 off 0x760   14.35 ns
+1889 off 0x761   14.29 ns
+1890 off 0x762   14.28 ns
+1891 off 0x763   14.28 ns
+1892 off 0x764   14.49 ns
+1893 off 0x765   14.42 ns
+1894 off 0x766   14.34 ns
+1895 off 0x767   14.29 ns
+1896 off 0x768   14.29 ns
+1897 off 0x769   14.29 ns
+1898 off 0x76a   14.30 ns
+1899 off 0x76b   14.27 ns
+1900 off 0x76c   14.26 ns
+1901 off 0x76d   14.29 ns
+1902 off 0x76e   14.29 ns
+1903 off 0x76f   14.67 ns
+1904 off 0x770   14.46 ns
+1905 off 0x771   14.41 ns
+1906 off 0x772   14.33 ns
+1907 off 0x773   14.42 ns
+1908 off 0x774   14.44 ns
+1909 off 0x775   14.36 ns
+1910 off 0x776   14.32 ns
+1911 off 0x777   14.35 ns
+1912 off 0x778   14.29 ns
+1913 off 0x779   14.40 ns
+1914 off 0x77a   14.36 ns
+1915 off 0x77b   14.29 ns
+1916 off 0x77c   14.26 ns
+1917 off 0x77d   14.30 ns
+1918 off 0x77e   14.29 ns
+1919 off 0x77f   14.29 ns
+1920 off 0x780   14.29 ns
+1921 off 0x781   14.27 ns
+1922 off 0x782   14.30 ns
+1923 off 0x783   14.30 ns
+1924 off 0x784   14.39 ns
+1925 off 0x785   14.30 ns
+1926 off 0x786   14.26 ns
+1927 off 0x787   14.26 ns
+1928 off 0x788   14.29 ns
+1929 off 0x789   14.28 ns
+1930 off 0x78a   14.29 ns
+1931 off 0x78b   14.55 ns
+1932 off 0x78c   14.26 ns
+1933 off 0x78d   14.30 ns
+1934 off 0x78e   14.29 ns
+1935 off 0x78f   14.45 ns
+1936 off 0x790   14.29 ns
+1937 off 0x791   14.26 ns
+1938 off 0x792   14.30 ns
+1939 off 0x793   14.30 ns
+1940 off 0x794   14.29 ns
+1941 off 0x795   14.29 ns
+1942 off 0x796   14.28 ns
+1943 off 0x797   14.26 ns
+1944 off 0x798   14.26 ns
+1945 off 0x799   14.49 ns
+1946 off 0x79a   14.37 ns
+1947 off 0x79b   14.42 ns
+1948 off 0x79c   14.29 ns
+1949 off 0x79d   14.27 ns
+1950 off 0x79e   14.30 ns
+1951 off 0x79f   14.30 ns
+1952 off 0x7a0   14.29 ns
+1953 off 0x7a1   14.29 ns
+1954 off 0x7a2   14.29 ns
+1955 off 0x7a3   14.27 ns
+1956 off 0x7a4   14.83 ns
+1957 off 0x7a5   14.29 ns
+1958 off 0x7a6   14.29 ns
+1959 off 0x7a7   14.29 ns
+1960 off 0x7a8   14.26 ns
+1961 off 0x7a9   14.29 ns
+1962 off 0x7aa   14.32 ns
+1963 off 0x7ab   14.29 ns
+1964 off 0x7ac   14.29 ns
+1965 off 0x7ad   14.27 ns
+1966 off 0x7ae   14.51 ns
+1967 off 0x7af   14.36 ns
+1968 off 0x7b0   14.42 ns
+1969 off 0x7b1   14.29 ns
+1970 off 0x7b2   14.26 ns
+1971 off 0x7b3   14.29 ns
+1972 off 0x7b4   14.29 ns
+1973 off 0x7b5   14.29 ns
+1974 off 0x7b6   14.29 ns
+1975 off 0x7b7   14.82 ns
+1976 off 0x7b8   14.26 ns
+1977 off 0x7b9   14.52 ns
+1978 off 0x7ba   14.28 ns
+1979 off 0x7bb   14.28 ns
+1980 off 0x7bc   14.30 ns
+1981 off 0x7bd   14.28 ns
+1982 off 0x7be   14.26 ns
+1983 off 0x7bf   14.29 ns
+1984 off 0x7c0   14.29 ns
+1985 off 0x7c1   14.28 ns
+1986 off 0x7c2   14.29 ns
+1987 off 0x7c3   14.29 ns
+1988 off 0x7c4   14.35 ns
+1989 off 0x7c5   14.58 ns
+1990 off 0x7c6   14.44 ns
+1991 off 0x7c7   14.36 ns
+1992 off 0x7c8   14.36 ns
+1993 off 0x7c9   14.33 ns
+1994 off 0x7ca   14.35 ns
+1995 off 0x7cb   14.34 ns
+1996 off 0x7cc   14.35 ns
+1997 off 0x7cd   14.36 ns
+1998 off 0x7ce   14.44 ns
+1999 off 0x7cf   14.34 ns
+2000 off 0x7d0   14.29 ns
+2001 off 0x7d1   14.30 ns
+2002 off 0x7d2   14.30 ns
+2003 off 0x7d3   14.29 ns
+2004 off 0x7d4   14.26 ns
+2005 off 0x7d5   14.29 ns
+2006 off 0x7d6   14.29 ns
+2007 off 0x7d7   14.28 ns
+2008 off 0x7d8   14.29 ns
+2009 off 0x7d9   14.44 ns
+2010 off 0x7da   14.28 ns
+2011 off 0x7db   14.29 ns
+2012 off 0x7dc   14.29 ns
+2013 off 0x7dd   14.28 ns
+2014 off 0x7de   14.30 ns
+2015 off 0x7df   14.27 ns
+2016 off 0x7e0   14.26 ns
+2017 off 0x7e1   14.29 ns
+2018 off 0x7e2   14.28 ns
+2019 off 0x7e3   14.28 ns
+2020 off 0x7e4   14.64 ns
+2021 off 0x7e5   14.52 ns
+2022 off 0x7e6   14.42 ns
+2023 off 0x7e7   14.41 ns
+2024 off 0x7e8   14.42 ns
+2025 off 0x7e9   14.36 ns
+2026 off 0x7ea   14.36 ns
+2027 off 0x7eb   14.34 ns
+2028 off 0x7ec   14.33 ns
+2029 off 0x7ed   14.35 ns
+2030 off 0x7ee   14.66 ns
+2031 off 0x7ef   14.30 ns
+2032 off 0x7f0   14.32 ns
+2033 off 0x7f1   14.27 ns
+2034 off 0x7f2   14.26 ns
+2035 off 0x7f3   14.51 ns
+2036 off 0x7f4   14.30 ns
+2037 off 0x7f5   14.34 ns
+2038 off 0x7f6   14.31 ns
+2039 off 0x7f7   14.30 ns
+2040 off 0x7f8   14.52 ns
+2041 off 0x7f9   14.51 ns
+2042 off 0x7fa   14.31 ns
+2043 off 0x7fb   14.29 ns
+2044 off 0x7fc   14.30 ns
+2045 off 0x7fd   14.28 ns
+2046 off 0x7fe   14.26 ns
+2047 off 0x7ff   14.29 ns

@@ -1,0 +1,225 @@
+{
+ "note": "Runs on the way to the two commits, from working-tree builds that were not committed. The by-hand path (mimo.exe <model> --prompt ... --ngen N, greedy), the benchmark prompt, the RTX 4090 profile, one cold engine per run; the first request's numbers, not the benchmark's.",
+ "first_build_identity": [
+  {
+   "run": "0",
+   "build": "MIMO_MTP=0..3, every draft verified, before the fused kernels; 48 tokens",
+   "reply_sha256": "e4949db6eaaeab17b500a0adca86671bcde1c00c28fc022e1cba076f91c0c8e6",
+   "lines": [
+    "[mimo] prefill 17 tokens 8.20s, decode 48 tokens 23.64s (2.03 tok/s), experts 24038 hits 6879 misses 287033.1 MB read, rss 147.33 GB"
+   ]
+  },
+  {
+   "run": "1",
+   "build": "MIMO_MTP=0..3, every draft verified, before the fused kernels; 48 tokens",
+   "reply_sha256": "e4949db6eaaeab17b500a0adca86671bcde1c00c28fc022e1cba076f91c0c8e6",
+   "lines": [
+    "[mimo] prefill 17 tokens 8.17s, decode 48 tokens 20.66s (2.32 tok/s), experts 22025 hits 6881 misses 290181.6 MB read, rss 148.06 GB",
+    "[mimo] MTP: 25 drafts, 23 kept (92.0%), 0.70s drafting",
+    "[mimo] decode 48 tokens in 25 verified steps"
+   ]
+  },
+  {
+   "run": "2",
+   "build": "MIMO_MTP=0..3, every draft verified, before the fused kernels; 48 tokens",
+   "reply_sha256": "e4949db6eaaeab17b500a0adca86671bcde1c00c28fc022e1cba076f91c0c8e6",
+   "lines": [
+    "[mimo] prefill 17 tokens 8.13s, decode 48 tokens 20.99s (2.29 tok/s), experts 21649 hits 6948 misses 301131.1 MB read, rss 148.79 GB",
+    "[mimo] MTP: 18 steps of 2 drafts, 30 kept (17 of 18, 13 of 17), 2.67 tokens a step, 1.32s drafting",
+    "[mimo] decode 48 tokens in 18 verified steps"
+   ]
+  },
+  {
+   "run": "3",
+   "build": "MIMO_MTP=0..3, every draft verified, before the fused kernels; 48 tokens",
+   "reply_sha256": "e4949db6eaaeab17b500a0adca86671bcde1c00c28fc022e1cba076f91c0c8e6",
+   "lines": [
+    "[mimo] prefill 17 tokens 8.12s, decode 48 tokens 21.61s (2.22 tok/s), experts 22304 hits 7048 misses 314086.0 MB read, rss 149.52 GB",
+    "[mimo] MTP: 15 steps of 3 drafts, 33 kept (14 of 15, 10 of 14, 9 of 10), 3.20 tokens a step, 1.91s drafting",
+    "[mimo] decode 48 tokens in 15 verified steps"
+   ]
+  }
+ ],
+ "which_hidden_state": {
+  "note": "MIMO_MTP=3, every draft verified, 64 tokens. The MIMO_MTP_CHAIN switch these ran (0: every layer the trunk's hidden state; 1: the layer before's residual; 2: the layer before's output after its final norm, what vLLM chains when it repeats its one layer) was dropped: 0 is the code.",
+  "runs": [
+   {
+    "run": "3_MIMO_MTP_CHAIN-0",
+    "build": "the first build, before the fused kernels",
+    "reply_sha256": "a8317d32aa7324ced244f4a94daf64627e1959a75215bd8de6fc509f832b8fe7",
+    "lines": [
+     "[mimo] prefill 17 tokens 8.02s, decode 64 tokens 27.95s (2.29 tok/s), experts 30099 hits 7661 misses 373265.4 MB read, rss 149.54 GB",
+     "[mimo] MTP: 20 steps of 3 drafts, 46 kept (19 of 20, 14 of 19, 13 of 14), 3.30 tokens a step, 2.54s drafting",
+     "[mimo] decode 64 tokens in 20 verified steps"
+    ]
+   },
+   {
+    "run": "3_MIMO_MTP_CHAIN-1",
+    "build": "the first build, before the fused kernels",
+    "reply_sha256": "a8317d32aa7324ced244f4a94daf64627e1959a75215bd8de6fc509f832b8fe7",
+    "lines": [
+     "[mimo] prefill 17 tokens 8.07s, decode 64 tokens 33.64s (1.90 tok/s), experts 38395 hits 8529 misses 450954.7 MB read, rss 149.55 GB",
+     "[mimo] MTP: 25 steps of 3 drafts, 40 kept (23 of 25, 14 of 23, 3 of 14), 2.60 tokens a step, 2.51s drafting",
+     "[mimo] decode 64 tokens in 25 verified steps"
+    ]
+   },
+   {
+    "run": "3_MIMO_MTP_CHAIN-2",
+    "build": "the first build, before the fused kernels",
+    "reply_sha256": "a8317d32aa7324ced244f4a94daf64627e1959a75215bd8de6fc509f832b8fe7",
+    "lines": [
+     "[mimo] prefill 17 tokens 8.07s, decode 64 tokens 36.20s (1.77 tok/s), experts 41611 hits 8828 misses 483462.2 MB read, rss 149.55 GB",
+     "[mimo] MTP: 27 steps of 3 drafts, 38 kept (26 of 27, 11 of 26, 1 of 11), 2.41 tokens a step, 2.57s drafting",
+     "[mimo] decode 64 tokens in 27 verified steps"
+    ]
+   }
+  ]
+ },
+ "turn_end_cap": [
+  {
+   "run": "2",
+   "build": "drafts capped at the tokens still to go out; CTX=65 = prompt + 48 tokens, the context full at the end",
+   "reply_sha256": "e4949db6eaaeab17b500a0adca86671bcde1c00c28fc022e1cba076f91c0c8e6",
+   "lines": [
+    "[mimo] prefill 17 tokens 8.02s, decode 48 tokens 18.47s (2.60 tok/s), experts 20425 hits 6865 misses 292066.7 MB read, rss 148.79 GB",
+    "[mimo] MTP: 17 steps of 2 drafts, 29 kept (16 of 17, 13 of 16), 2.71 tokens a step, 0.93s drafting",
+    "[mimo] decode 48 tokens in 17 verified steps"
+   ]
+  },
+  {
+   "run": "3_CTX-65",
+   "build": "drafts capped at the tokens still to go out; CTX=65 = prompt + 48 tokens, the context full at the end",
+   "reply_sha256": "e4949db6eaaeab17b500a0adca86671bcde1c00c28fc022e1cba076f91c0c8e6",
+   "lines": [
+    "[mimo] prefill 17 tokens 8.07s, decode 48 tokens 19.86s (2.42 tok/s), experts 20784 hits 6928 misses 302294.2 MB read, rss 149.52 GB",
+    "[mimo] MTP: 14 steps of 3 drafts, 32 kept (13 of 14, 10 of 13, 9 of 10), 3.29 tokens a step, 1.41s drafting",
+    "[mimo] decode 48 tokens in 14 verified steps"
+   ]
+  }
+ ],
+ "window_ring_bug": {
+  "note": "The eight varied prompts at 128 tokens, MIMO_MTP=3, before the rings kept MIMO_MTP - 1 extra positions: each engine died once its first reply passed the window of 128.",
+  "greedy": [
+   "[mimo] 70 layers (60 sliding window 128, 10 full), 384 experts top-8, cache 104/layer, dense native, ctx 16384, vision -- loaded in 15.27s",
+   "[mimo] window ring lost position 9",
+   "[CUDA] mimo host copies: 125 released (22.807 GiB), 0 restored from checkpoint (0.000 GiB)"
+  ],
+  "sampled": [
+   "[mimo] 70 layers (60 sliding window 128, 10 full), 384 experts top-8, cache 104/layer, dense native, ctx 16384, vision -- loaded in 16.61s",
+   "[mimo] window ring lost position 5",
+   "[CUDA] mimo host copies: 125 released (22.807 GiB), 0 restored from checkpoint (0.000 GiB)"
+  ]
+ },
+ "past_the_window": [
+  {
+   "run": "0",
+   "build": "the ring fix; 200 tokens (217 positions), every draft verified",
+   "reply_sha256": "4055338231e2847d490b6a6e7ac4d18d05fa54a8fc8264d85e881cccd76c2071",
+   "lines": [
+    "[mimo] prefill 17 tokens 8.24s, decode 200 tokens 91.51s (2.19 tok/s), experts 102205 hits 12616 misses 848104.4 MB read, rss 147.40 GB"
+   ]
+  },
+  {
+   "run": "1",
+   "build": "the ring fix; 200 tokens (217 positions), every draft verified",
+   "reply_sha256": "4055338231e2847d490b6a6e7ac4d18d05fa54a8fc8264d85e881cccd76c2071",
+   "lines": [
+    "[mimo] prefill 17 tokens 8.31s, decode 200 tokens 75.84s (2.64 tok/s), experts 92768 hits 12594 misses 845537.5 MB read, rss 148.13 GB",
+    "[mimo] MTP: 103 drafts, 95 kept (92.2%), 2.42s drafting",
+    "[mimo] decode 200 tokens in 103 verified steps"
+   ]
+  },
+  {
+   "run": "2",
+   "build": "the ring fix; 200 tokens (217 positions), every draft verified",
+   "reply_sha256": "4055338231e2847d490b6a6e7ac4d18d05fa54a8fc8264d85e881cccd76c2071",
+   "lines": [
+    "[mimo] prefill 17 tokens 8.39s, decode 200 tokens 72.55s (2.76 tok/s), experts 88021 hits 12820 misses 877122.6 MB read, rss 148.86 GB",
+    "[mimo] MTP: 71 steps of 2 drafts, 127 kept (70 of 71, 57 of 70), 2.79 tokens a step, 3.77s drafting",
+    "[mimo] decode 200 tokens in 71 verified steps"
+   ]
+  },
+  {
+   "run": "3",
+   "build": "the ring fix; 200 tokens (217 positions), every draft verified",
+   "reply_sha256": "4055338231e2847d490b6a6e7ac4d18d05fa54a8fc8264d85e881cccd76c2071",
+   "lines": [
+    "[mimo] prefill 17 tokens 8.29s, decode 200 tokens 81.07s (2.47 tok/s), experts 92965 hits 13441 misses 940713.8 MB read, rss 149.60 GB",
+    "[mimo] MTP: 60 steps of 3 drafts, 138 kept (56 of 60, 45 of 56, 37 of 45), 3.30 tokens a step, 5.70s drafting",
+    "[mimo] decode 200 tokens in 60 verified steps"
+   ]
+  }
+ ],
+ "the_cut": [
+  {
+   "run": "2_MIMO_MTP_MIN_P-0.6",
+   "build": "MIMO_MTP_MIN_P=0.6; 48 tokens (the benchmark prompt's second drafts are often below the cut: 2.45 tok/s against 2.60 verifying both, on this one cold request; the warm benchmark favours the cut)",
+   "reply_sha256": "e4949db6eaaeab17b500a0adca86671bcde1c00c28fc022e1cba076f91c0c8e6",
+   "lines": [
+    "[mimo] prefill 17 tokens 8.22s, decode 48 tokens 19.59s (2.45 tok/s), experts 20008 hits 6820 misses 284506.3 MB read, rss 148.79 GB",
+    "[mimo] MTP: 20 steps of 2 drafts, 26 kept (18 of 18, 8 of 9), 2.30 tokens a step, 1.18s drafting",
+    "[mimo] decode 48 tokens in 20 verified steps"
+   ]
+  },
+  {
+   "run": "3_MIMO_MTP_MIN_P-0.6",
+   "build": "MIMO_MTP_MIN_P=0.6; 48 tokens (the benchmark prompt's second drafts are often below the cut: 2.45 tok/s against 2.60 verifying both, on this one cold request; the warm benchmark favours the cut)",
+   "reply_sha256": "e4949db6eaaeab17b500a0adca86671bcde1c00c28fc022e1cba076f91c0c8e6",
+   "lines": [
+    "[mimo] prefill 17 tokens 8.26s, decode 48 tokens 20.36s (2.36 tok/s), experts 20036 hits 6816 misses 284787.1 MB read, rss 149.52 GB",
+    "[mimo] MTP: 20 steps of 3 drafts, 26 kept (16 of 16, 8 of 9, 2 of 2), 2.30 tokens a step, 1.80s drafting",
+    "[mimo] decode 48 tokens in 20 verified steps"
+   ]
+  },
+  {
+   "run": "1_MIMO_MTP_MIN_P-0.6",
+   "build": "MIMO_MTP_MIN_P=0.6; 48 tokens (the benchmark prompt's second drafts are often below the cut: 2.45 tok/s against 2.60 verifying both, on this one cold request; the warm benchmark favours the cut)",
+   "reply_sha256": "e4949db6eaaeab17b500a0adca86671bcde1c00c28fc022e1cba076f91c0c8e6",
+   "lines": [
+    "[mimo] prefill 17 tokens 8.23s, decode 48 tokens 20.02s (2.40 tok/s), experts 21093 hits 6830 misses 284526.4 MB read, rss 148.06 GB",
+    "[mimo] MTP: 20 drafts, 20 kept (100.0%), 0.71s drafting",
+    "[mimo] decode 48 tokens in 26 verified steps"
+   ]
+  }
+ ],
+ "first_correctness_run": {
+  "build": "the fused kernels, MIMO_MTP=1, --cap 104 (the CPU run's RSS 169 GB: its disk stalls 20.9 s against the earlier run's 6.0 s at --cap 64)",
+  "result": {
+   "passed": true,
+   "positions": 17,
+   "argmax_matches": 17,
+   "max_abs_logit_difference": 4.57763671875e-05,
+   "max_kl_cpu_to_cuda": 1.4709953778534417e-11,
+   "greedy_reply_equal": true,
+   "requested_tokens": 32,
+   "prompt_sha256": "c9d8ef2ce7780c8288730a94fa44438917740cd9f6581534780506dada6e006f",
+   "config": {
+    "MIMO_DIRS": "C:/AI/MiMoPro-Shards",
+    "MIMO_DENSE_BITS": "0",
+    "MIMO_IDOT": "0",
+    "MIMO_DIRECT": "1",
+    "MIMO_READ_THREADS": "16",
+    "MIMO_CHUNK": "64",
+    "OMP_NUM_THREADS": "16",
+    "COLI_NO_OMP_TUNE": "1",
+    "COLI_TEMP": "0",
+    "MIMO_CTX": "16384",
+    "COLI_VULKAN": "0",
+    "MIMO_CUDA_DENSE_GB": "20",
+    "MIMO_CUDA_RESERVE_GB": "2",
+    "SERVE": "0",
+    "MIMO_CUDA_RELEASE_HOST": "1"
+   },
+   "engine_sha256": "4a8bf9edeefd262a412ae6c65c09076c32c3746e015df601efa4f7fa401ed882",
+   "files": {
+    "cpu.f32": "cebbf3a80f8c5ae076f255e9ea2a84a5cfd38bf63348905b136102fa7e95feb4",
+    "cpu.log": "443901645a69e5330d859a6782d83782aa8d2e6abf64a19b2be3d5245042ef2e",
+    "cpu.txt": "63ed99846816797ba35192500956feedcfba7df134b42cad4a1b41595364c669",
+    "cuda.f32": "01479691813946771dca571984e6ceac62dff3b73ef58b9003edefa7f19ffc87",
+    "cuda.log": "c52f7758d9a728b254e76290acbc2ee21fb6545df8c864a85952d2b54a0a2277",
+    "cuda.txt": "63ed99846816797ba35192500956feedcfba7df134b42cad4a1b41595364c669"
+   },
+   "cuda_dll_sha256": "b6d8d11e55cbe94fc23a82d11585220044478383a5f53e3cfe10ec7d4675ddf4"
+  }
+ }
+}

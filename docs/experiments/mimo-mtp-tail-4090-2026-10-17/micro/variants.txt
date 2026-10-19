@@ -1,0 +1,10 @@
+threads 16, 100 drafts: old 4.406 ms; d differs 0
+  CH  256: static 0.753 ms (p differs 0), dynamic 0.553 ms (p differs 0)
+  CH  512: static 0.682 ms (p differs 0), dynamic 0.516 ms (p differs 0)
+  CH 1024: static 0.644 ms (p differs 0), dynamic 0.513 ms (p differs 0)
+  CH 2048: static 0.608 ms (p differs 0), dynamic 0.543 ms (p differs 0)
+silu n= 1: old 0.510 ms, static 0.191 ms, dynamic(512) 0.124 ms; bits same
+silu n= 2: old 1.018 ms, static 0.270 ms, dynamic(512) 0.189 ms; bits same
+silu n= 3: old 1.545 ms, static 0.334 ms, dynamic(512) 0.236 ms; bits same
+silu n= 4: old 2.042 ms, static 0.392 ms, dynamic(512) 0.279 ms; bits same
+silu n=50: old 26.412 ms, static 2.018 ms, dynamic(512) 2.036 ms; bits same

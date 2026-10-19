@@ -1,0 +1,9 @@
+[SPLIT] +C:/AI/MiMoPro-Shards -> 88 shard(s)
+[SPLIT] model across 2 dir(s): 130 shard(s) total (primary D:\AI\Models\MiMo-V2.6-Pro-MOPD -> 42 shard(s)), no duplication
+[mimo] expert cache: one pool of 4416 slots for every layer (MIMO_CACHE_GLOBAL)
+[mimo] expert readers: 4 on 2 device(s)
+[mimo] 71 bf16 matrices packed without loss for the CPU: 11.98 GB for 15.97 GB
+[mimo] 70 layers (60 sliding window 128, 10 full), 384 experts top-8, cache 64/layer, dense native, ctx 16384, vision -- loaded in 11.82s
+[mimo] prefill 17 tokens 10.59s, decode 32 tokens 24.62s (1.30 tok/s), experts 15428 hits 6657 misses 268623.5 MB read, rss 114.07 GB
+[mimo] time: expert reads 6.97s (38.54 GB/s), expert matmuls 10.25s, attention 15.90s, the rest (dense MLP, router, head) 2.09s
+[mimo] streaming: 6657 demand reads, 6738 prefetched (4715 used, 2023 unused), predicted 78.0% of 17112 choices, 268.62 GB read, 6.97s stalled, 0.43s predicting; attention matmuls: qkv 8.50s, o_proj 6.87s; 2.46 experts a wave

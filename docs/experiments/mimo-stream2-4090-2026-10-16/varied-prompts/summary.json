@@ -1,0 +1,76 @@
+{
+  "note": "Eight different prompts (prompts.txt), each one request of up to 64 greedy tokens, one engine process per arm started cold (no warmup request), run by drive_mimo.py over the SERVE pipe with the benchmark profile (cap 104, 16 workers, MIMO_CHUNK 64, CUDA budget 20 GiB, host copies released).",
+  "arms": {
+    "release": {
+      "overall_tok_s": 1.0607077181427353,
+      "mean_decode_tok_s": 1.3279306033819327,
+      "mean_ttft_s": 12.005413012491772,
+      "tokens": 466,
+      "seconds": 439.3293194999569,
+      "texts_sha256": [
+        "95bc4387d16ae931b5528ace5a896467f3968bc1c5dce219881b6dd70693dcc8",
+        "0d806d9b074f3e369e4928775d652d23ce66d2f07c7ae1cf99a9bc3591392af6",
+        "8ccbc709584089938c1044447e6ba5f1a03c85bda42e368fd230b5f3e1034508",
+        "9adee34196c8ac093190566232b61c475f6d9c5d81a0234e41fbc54b829615aa",
+        "65790ac58d480310e67630bec2acbc478cb5c8eeed53d387a41bc421b8698834",
+        "c4ac514083771db6ede06def91b1869e649f5d540abaea825f5fd6cb8f98ea90",
+        "f418e1327e50563b1fcb0e43cc639aa2dd978cce32b23cdbb5e46ea2dba4ac73",
+        "fcac510ddcead57b12ec8c425d258af10ced9a904744147a18ef487c6c176b24"
+      ]
+    },
+    "stream": {
+      "overall_tok_s": 1.6792885634752677,
+      "mean_decode_tok_s": 2.0176020566951003,
+      "mean_ttft_s": 6.386850574999698,
+      "tokens": 466,
+      "seconds": 277.4984658000758,
+      "texts_sha256": [
+        "95bc4387d16ae931b5528ace5a896467f3968bc1c5dce219881b6dd70693dcc8",
+        "0d806d9b074f3e369e4928775d652d23ce66d2f07c7ae1cf99a9bc3591392af6",
+        "8ccbc709584089938c1044447e6ba5f1a03c85bda42e368fd230b5f3e1034508",
+        "9adee34196c8ac093190566232b61c475f6d9c5d81a0234e41fbc54b829615aa",
+        "65790ac58d480310e67630bec2acbc478cb5c8eeed53d387a41bc421b8698834",
+        "c4ac514083771db6ede06def91b1869e649f5d540abaea825f5fd6cb8f98ea90",
+        "f418e1327e50563b1fcb0e43cc639aa2dd978cce32b23cdbb5e46ea2dba4ac73",
+        "fcac510ddcead57b12ec8c425d258af10ced9a904744147a18ef487c6c176b24"
+      ]
+    },
+    "stream-int8": {
+      "overall_tok_s": 1.9760025875323388,
+      "mean_decode_tok_s": 2.4561591647932906,
+      "mean_ttft_s": 6.246968749990629,
+      "tokens": 466,
+      "seconds": 235.8296506999759,
+      "texts_sha256": [
+        "95bc4387d16ae931b5528ace5a896467f3968bc1c5dce219881b6dd70693dcc8",
+        "0d806d9b074f3e369e4928775d652d23ce66d2f07c7ae1cf99a9bc3591392af6",
+        "0e5e26adafdcdd4be2c089a1997f303ab1b14d4009fdd14b34775b2b89389684",
+        "b8c8664863b6ec44c0592018e043e262a75e1d16e8857f663308d07e1c4ac88d",
+        "65790ac58d480310e67630bec2acbc478cb5c8eeed53d387a41bc421b8698834",
+        "72328785b13aef66da0ed34de696bf732bc3d0540db35a2b226b17b43f5e56e0",
+        "c9e032066e7aca960b1ee58e4e7d9f86dc02d8262afb178027c60cd725e08478",
+        "4de38807cbc7e409cb425a58f1e8ad7d5715a65c614c82d04f8a714100a729a2"
+      ]
+    }
+  },
+  "stream_replies_equal_to_release": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+  ],
+  "int8_replies_equal_to_release": [
+    true,
+    true,
+    false,
+    false,
+    true,
+    false,
+    false,
+    false
+  ]
+}

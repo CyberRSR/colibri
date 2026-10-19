@@ -1,0 +1,4 @@
+time: 16 threads: region 1.62 us, two barriers 1.52 us more, nested region 0.078 us a task
+time: 16 threads: region 1.06 us, two barriers 1.95 us more, nested region 0.086 us a task
+time: 16 threads: region 1.02 us, two barriers 1.90 us more, nested region 0.077 us a task
+[OMP] spinning team: 16 threads spin 2000 us between regions (COLI_OMP_SPIN_US; COLI_OMP_SPIN=0: libgomp's team)

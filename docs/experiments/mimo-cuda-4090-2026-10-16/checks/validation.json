@@ -1,0 +1,38 @@
+{
+  "code_commit": "17ae94762b491d153d17774d035194838e6c07c2",
+  "engine_sha256": "41c8b2aa61cb167506449c5b9eb0f0ce4989a7f21776e6c1cc79ba2a3403b70a",
+  "cuda_dll_sha256": "803d0bae1de0d1f03cea33dae5b1c701dc8edeb9aa587efcb5d9201fcee3eb71",
+  "cpu_default_build_exit": 0,
+  "cpu_tiny_oracle_exit": 0,
+  "cuda_vulkan_combined_syntax_exit": 0,
+  "targeted_python_tests": {
+    "ran": 4,
+    "passed": 4
+  },
+  "cuda_kernel_reference_cases": 17,
+  "released_host_prefix_tests": 14,
+  "fallback_tests": 6,
+  "general_suite": {
+    "make_check_passed": false,
+    "c_binaries": 17,
+    "failed_c_binary": "test_v4_serve_framing.exe: tmpfile() returned NULL",
+    "python_tests": 2416,
+    "python_failures": 8,
+    "python_errors": 10,
+    "python_skipped": 319,
+    "local_log_sha256": {
+      "make-check.log": "38e61bea7478d8dda67a06d97b3a11f29c5560db05e5065e519de95d0d63270d",
+      "python-suite.log": "68110e685ab3dc047390abc2c680070f85ded27c198ba674ea7d0d9a43c9ccb8"
+    }
+  },
+  "api_smoke": {
+    "passed": true,
+    "workers": 16,
+    "cache_per_layer": 104,
+    "server_stopped": true
+  },
+  "commands": {
+    "cpu_build": "gcc -D_FILE_OFFSET_BITS=64 -O3 -march=native -fopenmp -Wall -Wextra -Wno-unused-parameter -Wno-misleading-indentation -Wno-unused-function mimo.c -o build/mimo-cuda/mimo-default-final.exe -lm -fopenmp -static -lpsapi",
+    "combined_syntax": "gcc -D_FILE_OFFSET_BITS=64 -O3 -march=native -fopenmp -Wall -Wextra -Wno-unused-parameter -Wno-misleading-indentation -Wno-unused-function -DCOLI_MIMO_CUDA -DCOLI_VULKAN -fsyntax-only mimo.c"
+  }
+}

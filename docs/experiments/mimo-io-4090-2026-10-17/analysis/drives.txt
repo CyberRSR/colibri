@@ -1,0 +1,17 @@
+# drivebench.c: unbuffered 20 MiB reads at random 4 KiB-aligned offsets of 12 shards of one
+# drive, N threads with their own handles, 6 s each; measured 2026-10-17 ~19:00 with no engine
+# running (the engine's expert reads are the same size, unbuffered, one handle per reader).
+# C: = C:/AI/MiMoPro-Shards (ep100-ep127 files), D: = D:/AI/Models/MiMo-V2.6-Pro-MOPD (ep1x-ep2x)
+C: 1 threads: 8.46 GB/s (50.9 GB in 6.0 s)
+C: 2 threads: 10.42 GB/s (62.6 GB in 6.0 s)
+C: 3 threads: 10.39 GB/s (62.5 GB in 6.0 s)
+C: 4 threads: 10.33 GB/s (62.1 GB in 6.0 s)
+C: 6 threads: 10.22 GB/s (61.5 GB in 6.0 s)
+D: 1 threads: 5.78 GB/s (34.7 GB in 6.0 s)
+D: 2 threads: 6.30 GB/s (37.9 GB in 6.0 s)
+D: 3 threads: 6.55 GB/s (39.4 GB in 6.0 s)
+D: 4 threads: 6.57 GB/s (39.4 GB in 6.0 s)
+D: 6 threads: 6.58 GB/s (39.6 GB in 6.0 s)
+both at once, 2 + 2 threads: C: 10.43 GB/s, D: 6.28 GB/s (16.7 GB/s together: independent)
+# The engine's two readers a drive already take C: to its ceiling; a third would add 4% on D:,
+# which is not the drive the steps wait for.

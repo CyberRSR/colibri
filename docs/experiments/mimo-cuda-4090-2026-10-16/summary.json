@@ -1,0 +1,235 @@
+{
+  "date": "2026-10-16",
+  "hardware": {
+    "cpu": "AMD Ryzen 9 7950X3D, 16 cores / 32 logical processors",
+    "ram": "192 GiB installed (4 x 48 GiB), DDR5 configured at 5400 MT/s; 191.08 GiB OS-visible",
+    "storage": "Two model volumes: C: ~4 TB NVMe and D: ~12.29 TB volume; 88 and 42 shards respectively. Native Windows direct reads, 16 readers.",
+    "os": "Windows 11 Pro for Workstations 10.0.26300; MinGW-w64 GCC 14.2 MSVCRT, MSVC 14.44; RTX4090 24 GiB WDDM, driver617.42, CUDA Toolkit13.1, sm_89"
+  },
+  "arms": [
+    {
+      "arm": "final-cpu-24t",
+      "median_tok_s": 0.8097126653630483,
+      "median_decode_tok_s": 0.916104994938776,
+      "median_ttft_s": 10.27097400004277,
+      "samples_tok_s": [
+        0.8074669547772694,
+        0.8100981396303474,
+        0.8097126653630483
+      ],
+      "peak_process_rss_GB_decimal": 150.76,
+      "median_expert_ram_hit_percent": 65.4,
+      "gpu_util_mean_percent_including_warmup": 0.0,
+      "gpu_memory_peak_MiB": 1542.0,
+      "gpu_valid_samples": 596,
+      "gpu_incomplete_final_rows": 0,
+      "median_expert_reads_s": 25.172,
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "engine_sha256": "439f1800c31515609df946434aed76da8202c82af4a1f55fbb2d841984863848",
+      "cuda_dll_sha256": null,
+      "commit": "00a98fa02e18949785857a8bdba8b0dfba67924d"
+    },
+    {
+      "arm": "final-vulkan-24t",
+      "median_tok_s": 1.0586023749221802,
+      "median_decode_tok_s": 1.1989758234333716,
+      "median_ttft_s": 7.865481799992267,
+      "samples_tok_s": [
+        1.0557511934918167,
+        1.0599281575065191,
+        1.0586023749221802
+      ],
+      "peak_process_rss_GB_decimal": 139.03,
+      "median_expert_ram_hit_percent": 62.2,
+      "gpu_util_mean_percent_including_warmup": 4.894,
+      "gpu_memory_peak_MiB": 23126.0,
+      "gpu_valid_samples": 500,
+      "gpu_incomplete_final_rows": 0,
+      "median_expert_reads_s": 24.973,
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "engine_sha256": "4f1d4280fddb5f3ecd0f4ac55711e21ce4ec9c955d4743ae45b4073d62b81ba8",
+      "cuda_dll_sha256": null,
+      "commit": "00a98fa02e18949785857a8bdba8b0dfba67924d"
+    },
+    {
+      "arm": "final-cuda-24t",
+      "median_tok_s": 1.0671739567001715,
+      "median_decode_tok_s": 1.2417105889433744,
+      "median_ttft_s": 9.253630799998064,
+      "samples_tok_s": [
+        1.0529332010150962,
+        1.0671739567001715,
+        1.0673622933566453
+      ],
+      "peak_process_rss_GB_decimal": 150.89,
+      "median_expert_ram_hit_percent": 65.4,
+      "gpu_util_mean_percent_including_warmup": 7.549397590361446,
+      "gpu_memory_peak_MiB": 22570.0,
+      "gpu_valid_samples": 415,
+      "gpu_incomplete_final_rows": 1,
+      "median_expert_reads_s": 24.964,
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "engine_sha256": "439f1800c31515609df946434aed76da8202c82af4a1f55fbb2d841984863848",
+      "cuda_dll_sha256": "803d0bae1de0d1f03cea33dae5b1c701dc8edeb9aa587efcb5d9201fcee3eb71",
+      "commit": "00a98fa02e18949785857a8bdba8b0dfba67924d"
+    },
+    {
+      "arm": "final-cuda-16t",
+      "median_tok_s": 1.0992886283427932,
+      "median_decode_tok_s": 1.2904906787844592,
+      "median_ttft_s": 9.41977819998283,
+      "samples_tok_s": [
+        1.095509852595951,
+        1.0992886283427932,
+        1.099905126823732
+      ],
+      "peak_process_rss_GB_decimal": 150.88,
+      "median_expert_ram_hit_percent": 65.4,
+      "gpu_util_mean_percent_including_warmup": 6.862980769230769,
+      "gpu_memory_peak_MiB": 22502.0,
+      "gpu_valid_samples": 416,
+      "gpu_incomplete_final_rows": 0,
+      "median_expert_reads_s": 24.939,
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "engine_sha256": "439f1800c31515609df946434aed76da8202c82af4a1f55fbb2d841984863848",
+      "cuda_dll_sha256": "803d0bae1de0d1f03cea33dae5b1c701dc8edeb9aa587efcb5d9201fcee3eb71",
+      "commit": "00a98fa02e18949785857a8bdba8b0dfba67924d"
+    },
+    {
+      "arm": "release-cuda-cap88",
+      "median_tok_s": 1.0659447307258512,
+      "median_decode_tok_s": 1.2413011047073985,
+      "median_ttft_s": 9.254804400028661,
+      "samples_tok_s": [
+        1.0621868828662402,
+        1.0659447307258512,
+        1.0681200647597227
+      ],
+      "peak_process_rss_GB_decimal": 129.93,
+      "median_expert_ram_hit_percent": 65.4,
+      "gpu_util_mean_percent_including_warmup": 6.478365384615385,
+      "gpu_memory_peak_MiB": 22502.0,
+      "gpu_valid_samples": 416,
+      "gpu_incomplete_final_rows": 0,
+      "median_expert_reads_s": 25.004,
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "engine_sha256": "41c8b2aa61cb167506449c5b9eb0f0ce4989a7f21776e6c1cc79ba2a3403b70a",
+      "cuda_dll_sha256": "803d0bae1de0d1f03cea33dae5b1c701dc8edeb9aa587efcb5d9201fcee3eb71",
+      "commit": "17ae94762b491d153d17774d035194838e6c07c2"
+    },
+    {
+      "arm": "release-cuda-cap104",
+      "median_tok_s": 1.1194892520595714,
+      "median_decode_tok_s": 1.3014573862343433,
+      "median_ttft_s": 8.733456600049976,
+      "samples_tok_s": [
+        1.1159975373277968,
+        1.1194892520595714,
+        1.1204150591594095
+      ],
+      "peak_process_rss_GB_decimal": 151.56,
+      "median_expert_ram_hit_percent": 69.8,
+      "gpu_util_mean_percent_including_warmup": 6.951923076923077,
+      "gpu_memory_peak_MiB": 22491.0,
+      "gpu_valid_samples": 416,
+      "gpu_incomplete_final_rows": 0,
+      "median_expert_reads_s": 22.25,
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "engine_sha256": "41c8b2aa61cb167506449c5b9eb0f0ce4989a7f21776e6c1cc79ba2a3403b70a",
+      "cuda_dll_sha256": "803d0bae1de0d1f03cea33dae5b1c701dc8edeb9aa587efcb5d9201fcee3eb71",
+      "commit": "17ae94762b491d153d17774d035194838e6c07c2"
+    },
+    {
+      "arm": "release-cuda-cap104-16t",
+      "median_tok_s": 1.0827025580126741,
+      "median_decode_tok_s": 1.267971373384863,
+      "median_ttft_s": 9.42567660001805,
+      "samples_tok_s": [
+        1.0880026118586923,
+        1.0827025580126741,
+        1.0725426379855805
+      ],
+      "peak_process_rss_GB_decimal": 151.55,
+      "median_expert_ram_hit_percent": 69.8,
+      "gpu_util_mean_percent_including_warmup": 8.420289855072463,
+      "gpu_memory_peak_MiB": 23044.0,
+      "gpu_valid_samples": 414,
+      "gpu_incomplete_final_rows": 1,
+      "median_expert_reads_s": 22.497,
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "engine_sha256": "41c8b2aa61cb167506449c5b9eb0f0ce4989a7f21776e6c1cc79ba2a3403b70a",
+      "cuda_dll_sha256": "803d0bae1de0d1f03cea33dae5b1c701dc8edeb9aa587efcb5d9201fcee3eb71",
+      "commit": "17ae94762b491d153d17774d035194838e6c07c2"
+    },
+    {
+      "arm": "confirm-vulkan-24t",
+      "median_tok_s": 1.0054881143778813,
+      "median_decode_tok_s": 1.1374651186842168,
+      "median_ttft_s": 8.289307700004429,
+      "samples_tok_s": [
+        1.0019701363051277,
+        1.0054881143778813,
+        1.0089321345164821
+      ],
+      "peak_process_rss_GB_decimal": 139.02,
+      "median_expert_ram_hit_percent": 62.2,
+      "gpu_util_mean_percent_including_warmup": 4.848,
+      "gpu_memory_peak_MiB": 23688.0,
+      "gpu_valid_samples": 500,
+      "gpu_incomplete_final_rows": 0,
+      "median_expert_reads_s": 25.315,
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "engine_sha256": "4f1d4280fddb5f3ecd0f4ac55711e21ce4ec9c955d4743ae45b4073d62b81ba8",
+      "cuda_dll_sha256": null,
+      "commit": "17ae94762b491d153d17774d035194838e6c07c2"
+    },
+    {
+      "arm": "confirm-cuda-24t",
+      "median_tok_s": 1.0560829065212496,
+      "median_decode_tok_s": 1.2282326780440924,
+      "median_ttft_s": 9.254947300010826,
+      "samples_tok_s": [
+        1.050347951473563,
+        1.0560829065212496,
+        1.0574873469125057
+      ],
+      "peak_process_rss_GB_decimal": 151.56,
+      "median_expert_ram_hit_percent": 69.8,
+      "gpu_util_mean_percent_including_warmup": 8.492957746478874,
+      "gpu_memory_peak_MiB": 23081.0,
+      "gpu_valid_samples": 497,
+      "gpu_incomplete_final_rows": 0,
+      "median_expert_reads_s": 22.51,
+      "reply_sha256": [
+        "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+      ],
+      "engine_sha256": "41c8b2aa61cb167506449c5b9eb0f0ce4989a7f21776e6c1cc79ba2a3403b70a",
+      "cuda_dll_sha256": "803d0bae1de0d1f03cea33dae5b1c701dc8edeb9aa587efcb5d9201fcee3eb71",
+      "commit": "17ae94762b491d153d17774d035194838e6c07c2"
+    }
+  ],
+  "timing_policy": "One warmup request excluded, then three identical greedy 64-token requests per persistent engine. Prefix reuse disabled. 17 prompt tokens, 70 model layers, native weights; context allocation16384, not a 16K-prompt speed claim.",
+  "all_measured_replies_equal": true,
+  "model_metadata_sha256": {
+    "config.json": "a9dc00e2a0c2c172efd198f42e81e41c95472021b57c65366c06587d44038b62",
+    "model.safetensors.index.json": "e855ee9dd7ae748a6258b0725ca217d382a93561d17fc3dbf84d83a152deb54b"
+  },
+  "weight_files_hashed": false,
+  "raw_logit_arrays": "Kept locally in c/build/mimo-cuda/{real-correctness,release-correctness}; hashes in results. Regenerate with check_mimo_cuda.py."
+}

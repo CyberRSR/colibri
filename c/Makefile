@@ -1423,16 +1423,55 @@ ifneq ($(EXE),)
 .PHONY: mimo
 mimo: mimo$(EXE)
 endif
-mimo$(EXE): mimo.c $(VK_OBJ) $(VK_SPV) .build-config
-	$(CC) $(CFLAGS) mimo.c $(VK_OBJ) -o mimo$(EXE) $(LDFLAGS)
+MIMO_CUDA_OBJ =
+MIMO_CUDA_FLAGS =
+ifeq ($(CUDA),1)
+MIMO_CUDA_OBJ = backend_cuda_mimo.o
+MIMO_CUDA_FLAGS = -DCOLI_MIMO_CUDA
+endif
+ifneq ($(IS_WIN),)
+ifeq ($(CUDA_DLL),1)
+MIMO_CUDA_OBJ = backend_cuda_mimo_loader.o
+MIMO_CUDA_FLAGS = -DCOLI_MIMO_CUDA
+endif
+endif
+# MinGW's libgomp parks its team on semaphores (~80 us a region at 16 threads, ~7 us a
+# region met inside one): omp_spin.c runs the engine's regions on a team that spins
+# between them (COLI_OMP_SPIN=0: libgomp's team). --wrap sends GCC's calls there.
+MIMO_OMP_OBJ =
+MIMO_OMP_LDFLAGS =
+ifneq ($(IS_WIN),)
+OMP_SPIN_WRAP = GOMP_parallel GOMP_barrier GOMP_loop_end_nowait \
+	GOMP_loop_nonmonotonic_dynamic_start GOMP_loop_nonmonotonic_dynamic_next \
+	GOMP_loop_ull_nonmonotonic_dynamic_start GOMP_loop_ull_nonmonotonic_dynamic_next \
+	omp_get_thread_num omp_get_num_threads omp_in_parallel
+MIMO_OMP_OBJ = omp_spin.o
+MIMO_OMP_LDFLAGS = $(foreach s,$(OMP_SPIN_WRAP),-Wl,--wrap=$(s))
+endif
+omp_spin.o: omp_spin.c .build-config
+	$(CC) $(CFLAGS) -c $< -o $@
+backend_cuda_mimo_loader.o: backend_cuda_mimo_loader.c backend_cuda_mimo.h .build-config
+	$(CC) $(CFLAGS) -c $< -o $@
+backend_cuda_mimo.o: backend_cuda_mimo.cu backend_cuda_mimo.h .build-config
+	"$(NVCC)" $(NVCCFLAGS) -c $< -o $@
+.PHONY: cuda-mimo-test
+cuda-mimo-test:
+	"$(NVCC)" $(NVCCFLAGS) tests/test_mimo_cuda.cu backend_cuda_mimo.cu -o tests/test_mimo_cuda$(EXE)
+	./tests/test_mimo_cuda$(EXE)
+.PHONY: cuda-mimo-dll
+cuda-mimo-dll: backend_cuda_mimo.cu backend_cuda_mimo.h
+	"$(NVCC)" $(NVCCFLAGS) -shared --cudart=static -DMIMO_CUDA_BUILDING_DLL backend_cuda_mimo.cu -o coli_cuda_mimo.dll
+mimo$(EXE): mimo.c backend_cuda_mimo.h $(MIMO_CUDA_OBJ) $(MIMO_OMP_OBJ) $(VK_OBJ) $(VK_SPV) .build-config
+	$(CC) $(CFLAGS) $(MIMO_CUDA_FLAGS) mimo.c $(MIMO_CUDA_OBJ) $(MIMO_OMP_OBJ) $(VK_OBJ) -o mimo$(EXE) $(LDFLAGS) $(MIMO_OMP_LDFLAGS)
 
 # Tiny MiMo fixture + vendor oracle, the Kimi K3 pattern: the generator is numpy (and
 # Pillow for the test picture) and deterministic; ref.json is committed and comes from
 # Xiaomi's own modeling code (tools/make_mimo_ref.py, maintainer-run, SHA-256-pinned),
-# so CI needs neither torch nor network. The fixture carries the vision tower too.
+# so CI needs neither torch nor network. The fixture carries the vision tower too, and
+# the release's three MTP layers, which the engine drafts with (the oracle never reads them).
 .PHONY: mimo-tiny-generate mimo-tiny-check
 mimo-tiny-generate:
-	$(PYTHON) tools/make_mimo_tiny.py --output ./mimo_tiny --force --vision
+	$(PYTHON) tools/make_mimo_tiny.py --output ./mimo_tiny --force --vision --mtp 3
 
 mimo-tiny-check: mimo-tiny-generate mimo$(EXE)
 	$(PYTHON) tests/mimo_tiny_harness.py --binary ./mimo$(EXE) --fixture ./mimo_tiny

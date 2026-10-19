@@ -1,0 +1,148 @@
+# Where the main thread is (winsample2, ~1 kHz, the 72 s after the benchmark's warmup; runs/s1:
+# m-v3 then m-v2). sym2.py SAMPLES EXE --top 20 --blocks 10, and the offsets in __expl_internal
+# (its FLDCW end at +0x3a and +0x44; F2XM1 at +0x68).
+
+## v2
+67918 samples of threads 0
+by module: exe 56.5%, ntdll.dll 36.9%, nvcuda64.dll 5.2%, msvcrt.dll 0.6%, win32u.dll 0.4%, coli_cuda_mimo.dll 0.3%, KERNELBASE.dll 0.1%, KERNEL32.DLL 0.0%
+   32.1%    21827  matmul_mxfp4._omp_fn.1
+   27.1%    18438  ntdll.dll!ZwWaitForMultipleObjects
+   10.3%     6965  matmul_mxfp4._omp_fn.0
+    6.0%     4086  matmul_bf16p._omp_fn.1
+    3.5%     2401  ntdll.dll!ZwCreateSemaphore
+    2.8%     1926  ntdll.dll!ZwClose
+    2.5%     1664  nvcuda64.dll!NVAON_SharedMemory_Destroy
+    2.2%     1512  nvcuda64.dll!cuProfilerStop
+    1.9%     1295  ntdll.dll!ZwReleaseSemaphore
+    1.6%     1082  matmul_fp8_rows._omp_fn.0
+    1.5%      991  __expl_internal
+    0.9%      614  slot_entry_global
+    0.7%      493  matmul_router._omp_fn.0
+    0.6%      389  msvcrt.dll!memmove
+    0.5%      322  nvcuda64.dll!?
+    0.5%      318  moe
+    0.4%      288  ntdll.dll!ZwWaitForSingleObject
+    0.4%      262  pk_unpack_row
+    0.3%      225  coli_cuda_mimo.dll!mimo_cuda_upload
+    0.3%      214  matmul_bf16p._omp_fn.0
+hot blocks:
+   15.3%  matmul_mxfp4._omp_fn.1+0x2c0
+   11.7%  matmul_mxfp4._omp_fn.1+0x340
+    5.0%  matmul_mxfp4._omp_fn.1+0x300
+    3.2%  matmul_mxfp4._omp_fn.0+0x940
+    3.0%  matmul_mxfp4._omp_fn.0+0x800
+    2.2%  matmul_bf16p._omp_fn.1+0x280
+    2.0%  matmul_bf16p._omp_fn.1+0x240
+    1.9%  matmul_mxfp4._omp_fn.0+0x900
+    1.2%  matmul_bf16p._omp_fn.1+0x200
+    1.0%  __expl_internal+0x40
+  offsets in __expl_internal:
+  +0x2 21
+  +0xb 8
+  +0x14 16
+  +0x17 44
+  +0x19 8
+  +0x1c 35
+  +0x1f 23
+  +0x21 9
+  +0x23 6
+  +0x2b 1
+  +0x30 6
+  +0x3a 46
+  +0x3c 3
+  +0x44 8
+  +0x48 3
+  +0x50 18
+  +0x52 10
+  +0x54 1
+  +0x56 4
+  +0x5a 6
+  +0x5c 2
+  +0x5e 18
+  +0x64 16
+  +0x66 9
+  +0x68 7
+  +0x6a 364
+  +0x6e 19
+  +0x70 11
+  +0x72 60
+  +0x74 12
+  +0x76 3
+  +0x79 85
+  +0x7d 12
+  +0x80 59
+  +0x82 33
+  +0x86 5
+
+## v3
+68203 samples of threads 0
+by module: exe 59.1%, ntdll.dll 33.9%, nvcuda64.dll 5.6%, msvcrt.dll 0.6%, win32u.dll 0.3%, coli_cuda_mimo.dll 0.3%, KERNELBASE.dll 0.0%, nvdxgdmal64.dll 0.0%
+   31.6%    21561  matmul_mxfp4._omp_fn.1
+   24.5%    16694  ntdll.dll!ZwWaitForMultipleObjects
+    9.6%     6568  matmul_mxfp4._omp_fn.0
+    5.8%     3937  matmul_bf16p._omp_fn.1
+    5.5%     3721  __expl_internal
+    3.3%     2271  ntdll.dll!ZwCreateSemaphore
+    2.6%     1773  nvcuda64.dll!NVAON_SharedMemory_Destroy
+    2.6%     1765  ntdll.dll!ZwClose
+    2.4%     1647  nvcuda64.dll!cuProfilerStop
+    1.9%     1311  ntdll.dll!ZwReleaseSemaphore
+    1.6%     1082  matmul_fp8_rows._omp_fn.0
+    1.0%      672  slot_entry_global
+    0.7%      477  matmul_router._omp_fn.0
+    0.6%      402  msvcrt.dll!memmove
+    0.6%      384  nvcuda64.dll!?
+    0.5%      324  moe
+    0.5%      311  ntdll.dll!ZwWaitForSingleObject
+    0.4%      263  pk_unpack_row
+    0.3%      220  coli_cuda_mimo.dll!mimo_cuda_upload
+    0.3%      219  matmul_bf16p._omp_fn.0
+hot blocks:
+   14.3%  matmul_mxfp4._omp_fn.1+0x2c0
+   11.8%  matmul_mxfp4._omp_fn.1+0x340
+    5.3%  matmul_mxfp4._omp_fn.1+0x300
+    3.3%  __expl_internal+0x40
+    3.1%  matmul_mxfp4._omp_fn.0+0x940
+    2.7%  matmul_mxfp4._omp_fn.0+0x800
+    2.1%  matmul_bf16p._omp_fn.1+0x280
+    2.0%  __expl_internal+0x0
+    1.9%  matmul_bf16p._omp_fn.1+0x240
+    1.8%  matmul_mxfp4._omp_fn.0+0x900
+  offsets in __expl_internal:
+  +0xb 6
+  +0x14 11
+  +0x17 38
+  +0x19 8
+  +0x1c 32
+  +0x1f 26
+  +0x21 3
+  +0x23 3
+  +0x30 5
+  +0x33 2
+  +0x3a 1089
+  +0x3c 141
+  +0x40 2
+  +0x44 1023
+  +0x48 150
+  +0x4a 16
+  +0x50 87
+  +0x52 8
+  +0x54 26
+  +0x56 52
+  +0x5c 4
+  +0x5e 47
+  +0x64 16
+  +0x66 8
+  +0x68 24
+  +0x6a 548
+  +0x6e 50
+  +0x70 10
+  +0x72 65
+  +0x74 9
+  +0x76 5
+  +0x79 62
+  +0x7d 9
+  +0x80 84
+  +0x82 43
+  +0x86 8
+  +0x8b 1

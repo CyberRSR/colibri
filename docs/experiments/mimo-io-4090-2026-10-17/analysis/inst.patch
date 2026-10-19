@@ -1,0 +1,254 @@
+diff --git a/c/mimo.c b/c/mimo.c
+index 2d0fa3a..c844138 100644
+--- a/c/mimo.c
++++ b/c/mimo.c
+@@ -949,5 +949,38 @@ typedef struct {
+     int qdrive, qn;        /* a prefetch's pieces: qn jobs from qpos in drive qdrive's queue */
+     unsigned qpos;
++    int rid;               /* IOLOG: the read's id */
+ } Slot;
++
++/* ---- IOLOG (scratch instrumentation): every read's submit/start/end and the MoE steps'
++ * phases, into MIMO_IOLOG at each request's report. Nothing computed changes. */
++typedef struct { double t; int32_t k, a, b, c, d, e; } IoEv;
++static IoEv *g_ev; static _Atomic long g_nev; static long g_evcap; static const char *g_evpath;
++static _Atomic int g_rid, g_reader_id;
++static int g_cur_li = -1;
++enum { EV_SUBMIT = 1, EV_START, EV_END, EV_PROMOTE, EV_DEMAND, EV_DEMAND_END, EV_MOE_BEGIN, EV_WAIT_BEGIN,
++       EV_WAIT_END, EV_MOE_END, EV_PRED, EV_FWD, EV_REQ, EV_USED, EV_WASTE, EV_EVICT, EV_WAVE_BEGIN, EV_WAVE_END,
++       EV_ATTN_BEGIN, EV_ATTN_END, EV_HIT, EV_FWD_END, EV_PRED_RANK };
++static double now_s(void);
++static void ev(int k, int a, int b, int c, int d, int e) {
++    if (!g_ev) return;
++    long i = atomic_fetch_add(&g_nev, 1);
++    if (i >= g_evcap) return;
++    g_ev[i] = (IoEv){now_s(), k, a, b, c, d, e};
++}
++static void ev_init(void) {
++    const char *p = getenv("MIMO_IOLOG");
++    if (!p || !*p) return;
++    g_evpath = p; g_evcap = 8L << 20;
++    g_ev = calloc((size_t)g_evcap, sizeof(IoEv));
++}
++static void ev_flush(void) {
++    if (!g_ev) return;
++    long n = atomic_load(&g_nev);
++    if (n > g_evcap) n = g_evcap;
++    FILE *f = fopen(g_evpath, "wb");
++    if (!f) return;
++    fwrite(g_ev, sizeof(IoEv), (size_t)n, f);
++    fclose(f);
++}
+ typedef struct { Slot *s; int n, cap, max, nbuf; int *by_expert; uint8_t *arena; } LCache;
+ /* MIMO_CACHE_GLOBAL (default 1; 0 in a VK=1 build, whose expert tier steers the
+@@ -1263,4 +1296,5 @@ static void *io_main(void *arg) {
+     Model *m = a.m;
+     int d = a.drive, nh = 2 * ST_MAX_SHARDS;
++    int me = atomic_fetch_add(&g_reader_id, 1);
+     int *own = xmalloc((size_t)nh * sizeof(int), "reader handles");
+     for (int i = 0; i < nh; i++) own[i] = -2;
+@@ -1273,6 +1307,9 @@ static void *io_main(void *arg) {
+         IoJob j = g_io.q[d][p][g_io.head[d][p]++ % MIMO_IOQ];
+         if (!j.s) continue;                 /* a prefetch a demand moved to the front */
++        int rid = j.s->rid;
++        ev(EV_START, rid, me, p, d, j.part);
+         pthread_mutex_unlock(&g_io.mx);
+         expert_read(m, j.li, j.eid, j.s, own, j.part);
++        ev(EV_END, rid, me, p, d, j.part);
+         pthread_mutex_lock(&g_io.mx);
+         if (atomic_fetch_sub_explicit(&j.s->pending, 1, memory_order_acq_rel) == 1) {
+@@ -1369,4 +1406,6 @@ static void io_submit(Model *m, Slot *s, int li, int eid, int prefetch) {
+     int d = io_drive(m, li, eid), p = prefetch ? 1 : 0;
+     atomic_store_explicit(&s->pending, parts, memory_order_relaxed);
++    s->rid = atomic_fetch_add(&g_rid, 1);
++    ev(EV_SUBMIT, s->rid, li, eid, p, d);
+     pthread_mutex_lock(&g_io.mx);
+     if (g_io.tail[d][p] - g_io.head[d][p] + (unsigned)parts > MIMO_IOQ) { fprintf(stderr, "[mimo] reader queue overflow\n"); exit(1); }
+@@ -1392,4 +1431,5 @@ static void io_promote(Slot *s) {
+         moved = 1;
+     }
++    ev(EV_PROMOTE, s->rid, moved, g_cur_li, 0, 0);
+     s->qn = 0;
+     if (moved) pthread_cond_broadcast(&g_io.job);
+@@ -1409,7 +1449,9 @@ static void io_wait_any(Model *m, unsigned long long seen) {
+     if (!g_io.nth) return;
+     double t0 = now_s();
++    ev(EV_WAIT_BEGIN, g_cur_li, 0, 0, 0, 0);
+     pthread_mutex_lock(&g_io.mx);
+     while (g_io.finished == seen) pthread_cond_wait(&g_io.done, &g_io.mx);
+     pthread_mutex_unlock(&g_io.mx);
++    ev(EV_WAIT_END, g_cur_li, 0, 0, 0, 0);
+     m->t_disk += now_s() - t0;
+ }
+@@ -1572,5 +1614,5 @@ static Slot *slot_take(Model *m, int li, int e, int prefetch) {
+     if (s->eid >= 0) {
+         lc->by_expert[s->eid] = -1;
+-        if (s->pref) m->pf_wasted++;
++        if (s->pref) { m->pf_wasted++; ev(EV_EVICT, s->rid, li, s->eid, prefetch, 0); }
+     }
+     if (!s->base) slot_alloc(m, li, s, best);
+@@ -1591,5 +1633,8 @@ static uint64_t slots_demand(Model *m, int li, const int *uni, int nu, Slot **sl
+     LCache *lc = &m->cache[li];
+     uint64_t stamp = ++m->clock;
++    g_cur_li = li;
++    ev(EV_DEMAND, li, nu, 0, 0, 0);
+     expert_freq_step(m, li, uni, nu);
++    int h_ready = 0, h_load = 0, h_pref = 0, n_miss = 0;
+     for (int j = 0; j < nu; j++) {
+         int si = lc->by_expert[uni[j]];
+@@ -1598,9 +1643,29 @@ static uint64_t slots_demand(Model *m, int li, const int *uni, int nu, Slot **sl
+         Slot *s = sl[j] = &lc->s[si];
+         s->pin++; s->used = stamp; m->hits++;
+-        if (s->pref) { s->pref = 0; m->pf_used++; }
+-        if (atomic_load_explicit(&s->state, memory_order_acquire) == SLOT_LOADING) io_promote(s);
++        int loading = atomic_load_explicit(&s->state, memory_order_acquire) == SLOT_LOADING;
++        if (s->pref) { s->pref = 0; m->pf_used++; h_pref++; ev(EV_USED, s->rid, li, uni[j], loading, j); }
++        else ev(EV_HIT, s->rid, li, uni[j], loading, j);
++        if (loading) { h_load++; io_promote(s); } else h_ready++;
+     }
++    int w_ready = 0, w_queued = 0, w_flight = 0;
+     for (int k = 0; k < lc->n; k++)
+-        if (lc->s[k].pref) { lc->s[k].pref = 0; lc->s[k].used = 0; m->pf_wasted++; }
++        if (lc->s[k].pref) {
++            Slot *s = &lc->s[k];
++            int st = 0;
++            if (atomic_load_explicit(&s->state, memory_order_acquire) == SLOT_LOADING) {
++                st = 2;
++                pthread_mutex_lock(&g_io.mx);
++                for (int q = 0; q < s->qn; q++) {
++                    unsigned pos = s->qpos + (unsigned)q;
++                    int d = s->qdrive;
++                    if (pos - g_io.head[d][1] >= g_io.tail[d][1] - g_io.head[d][1]) continue;
++                    if (g_io.q[d][1][pos % MIMO_IOQ].s == s) st = 1;
++                }
++                pthread_mutex_unlock(&g_io.mx);
++            }
++            if (st == 0) w_ready++; else if (st == 1) w_queued++; else w_flight++;
++            ev(EV_WASTE, s->rid, li, s->eid, st, 0);
++            lc->s[k].pref = 0; lc->s[k].used = 0; m->pf_wasted++;
++        }
+     for (int j = 0; j < nu; j++) {
+         if (sl[j]) continue;
+@@ -1609,5 +1674,7 @@ static uint64_t slots_demand(Model *m, int li, const int *uni, int nu, Slot **sl
+         s->pin++; s->used = stamp;
+         sl[j] = s;
++        n_miss++;
+     }
++    ev(EV_DEMAND_END, li, h_ready * 1000 + h_load, h_pref, n_miss, w_ready * 1000000 + w_queued * 1000 + w_flight);
+     return stamp;
+ }
+@@ -1800,4 +1867,5 @@ static void model_load(Model *m, const char *dir, int cap) {
+         fprintf(stderr, "[mimo] MIMO_CACHE_GLOBAL moves buffers between layers: ordinary pages\n");
+     cache_init(m, cap);
++    ev_init();
+     m->pf_on = env_int("MIMO_PREFETCH", 1);
+     /* MIMO_PREFETCH=1 predicts top-k after the attention, 2 also after the MLP;
+@@ -2334,4 +2402,6 @@ static int moe_cpu(Model *m, int li, const float *xn, int n, const int *sel,
+     uint64_t stamp = slots_demand(m, li, uni, nu, sl);
+     if (m->pf_h) mimo_prefetch_pending(m);
++    g_cur_li = li;
++    ev(EV_MOE_BEGIN, li, n, nu, total, 0);
+     double t0 = now_s(), waited = m->t_disk;
+     float *xg = xmalloc((size_t)(total - base ? total - base : 1) * H * sizeof(float), "expert inputs");
+@@ -2347,5 +2417,7 @@ static int moe_cpu(Model *m, int li, const float *xn, int n, const int *sel,
+             io_wait_any(m, seen_io);
+         } else {
++            ev(EV_WAVE_BEGIN, li, nw, 0, 0, 0);
+             moe_wave(m, wave, nw, sl, first, xg, g, y, base);
++            ev(EV_WAVE_END, li, nw, 0, 0, 0);
+             m->waves++; m->wave_experts += (uint64_t)nw;
+             for (int w = 0; w < nw; w++) {
+@@ -2365,4 +2437,5 @@ static int moe_cpu(Model *m, int li, const float *xn, int n, const int *sel,
+     }
+     m->t_expert += now_s() - t0 - (m->t_disk - waited);
++    ev(EV_MOE_END, li, n, nu, 0, 0);
+     free(done); free(wave); free(sl);
+     free(first); free(xg); free(g); free(row); free(uni);
+@@ -2403,7 +2476,17 @@ static void mimo_prefetch(Model *m, int li, const float *h, int n, int k) {
+             if (best < 0) break;
+             v[best] = -INFINITY;
++            { union { float f; int32_t i; } u = { bv }; ev(EV_PRED_RANK, li, best, t * 100 + j, u.i, n); }
+             if (!mark[best]) { mark[best] = 1; order[no++] = best; }
+             votes[best]++;
+         }
++        /* IOLOG: the next 8 ranks too (not predicted), for the margin */
++        for (int j = K; j < K + 8 && j < E; j++) {
++            int best = -1; float bv = -INFINITY;
++            for (int e = 0; e < E; e++) if (v[e] > bv) { bv = v[e]; best = e; }
++            if (best < 0) break;
++            v[best] = -INFINITY;
++            union { float f; int32_t i; } u = { bv };
++            ev(EV_PRED_RANK, li, best, t * 100 + j, u.i, n);
++        }
+     }
+     /* the experts most rows chose first (a block of rows; one row keeps its rank order) */
+@@ -2424,10 +2507,19 @@ static void mimo_prefetch(Model *m, int li, const float *h, int n, int k) {
+      * union can be most of the layer, and its residents are the next step's hits */
+     int room = m->cache[li].cap / 2;
+-    for (int k = 0; k < no && room > 0; k++) {
+-        if (m->cache[li].by_expert[order[k]] >= 0) continue;
++    int q = 0;
++    ev(EV_PRED, li, n, no, (int)waiting, -1);
++    for (; q < no && room > 0; q++) {
++        if (m->cache[li].by_expert[order[q]] >= 0) {
++            Slot *cs = &m->cache[li].s[m->cache[li].by_expert[order[q]]];
++            ev(EV_PRED, li, order[q], 0, cs->rid, atomic_load(&cs->state));
++            continue;
++        }
+         if (waiting >= (unsigned)m->pf_limit) break;
+-        if (!slot_take(m, li, order[k], 1)) break;
++        Slot *s = slot_take(m, li, order[q], 1);
++        if (!s) { ev(EV_PRED, li, order[q], 3, -1, 0); q++; break; }
++        ev(EV_PRED, li, order[q], 1, s->rid, 0);
+         waiting++; room--;
+     }
++    for (; q < no; q++) ev(EV_PRED, li, order[q], 2, -1, 0);
+     free(order); free(xn); free(lg);
+     m->t_pred += now_s() - t0;
+@@ -2613,5 +2705,7 @@ static void layers_cpu(Model *m, float *hc, int nc, int pc, int l0, float *xn, f
+         Layer *l = &m->L[li];
+         for (int t = 0; t < nc; t++) rmsnorm(xn + (size_t)t * H, hc + (size_t)t * H, l->ln1, H, c->eps);
++        ev(EV_ATTN_BEGIN, li, nc, pc, 0, 0);
+         attention(m, li, xn, nc, pc, tmp);
++        ev(EV_ATTN_END, li, nc, pc, 0, 0);
+         for (size_t i = 0; i < (size_t)nc * H; i++) hc[i] += tmp[i];
+         if (trace) fwrite(hc, sizeof(float), (size_t)nc * H, trace);
+@@ -2679,5 +2773,7 @@ static void forward(Model *m, const int *ids, int n, float *logits, int all_rows
+     float *hc = h + (size_t)done * H, *lc = logits && all_rows ? logits + (size_t)done * c->vocab : logits;
+     int nc = n - done, pc = m->pos + done;
++    ev(EV_FWD, nc, pc, 0, 0, 0);
+     layers_cpu(m, hc, nc, pc, 0, xn, tmp, trace);
++    ev(EV_FWD_END, nc, pc, 0, 0, 0);
+     if (g_mtp.on && nc > 0) mtp_keep(m, hc, nc, pc);
+     if (trace) { fclose(trace); trace = NULL; }
+@@ -2720,4 +2816,5 @@ static int mtp_run(Model *m, int k, const int *tok, int p0, int n, float *p) {
+     int H = c->hidden;
+     MtpBlock *b = &g_mtp.b[k];
++    ev(24, k, n, p0, 0, 0);
+     double t0 = now_s(), ta = m->t_attn, tq = m->t_qkv, to = m->t_oproj;
+     float *cat = xmalloc((size_t)n * 2 * H * sizeof(float), "mtp input");
+@@ -2755,4 +2852,5 @@ static int mtp_run(Model *m, int k, const int *tok, int p0, int n, float *p) {
+     m->t_attn = ta; m->t_qkv = tq; m->t_oproj = to;
+     g_mtp.t += now_s() - t0;
++    ev(25, k, n, p0, d, 0);
+     return d;
+ }
+@@ -3640,4 +3738,6 @@ static void mimo_stream_report(const Model *m, const MimoReq *rq) {
+     uint64_t pi = m->pf_issued - rq->pfi0, pu = m->pf_used - rq->pfu0, pw = m->pf_wasted - rq->pfw0,
+              pp = m->pf_pred - rq->pp0, ph = m->pf_pred_hit - rq->pph0;
++    ev(EV_REQ, 2, 0, 0, 0, 0);
++    ev_flush();
+     fprintf(stderr, "[mimo] streaming: %llu demand reads, %llu prefetched (%llu used, %llu unused), "
+                     "predicted %.1f%% of %llu choices, %.2f GB read, %.2fs stalled, %.2fs predicting; "
+@@ -3686,4 +3786,5 @@ static int mimo_serve_start(Model *m, Tok *tokenizer, ColiServeCommand *cmd, int
+     Cfg *c = &m->c;
+     double started = now_s();
++    ev(EV_REQ, 0, 0, 0, 0, 0);
+     double disk0 = m->t_disk, expert0 = m->t_expert, attn0 = m->t_attn;
+     uint64_t hits0 = m->hits, miss0 = m->miss, fw0 = m->forwards;
+@@ -3777,4 +3878,5 @@ static int mimo_serve_start(Model *m, Tok *tokenizer, ColiServeCommand *cmd, int
+     rq->reuse = reuse;
+     rq->prefilled = now_s(); rq->pdisk = m->t_disk; rq->pexpert = m->t_expert; rq->pattn = m->t_attn;
++    ev(EV_REQ, 1, n_prompt, 0, 0, 0);
+     rq->pmiss = m->miss; rq->ppfi = m->pf_issued;
+     return 1;

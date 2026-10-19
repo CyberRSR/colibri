@@ -23,19 +23,24 @@ The checkpoint is read as it is released, **no conversion**:
 
 ## Running it
 
+For native CUDA dense offload on an RTX 4090, see [MiMo CUDA](mimo-cuda.md)
+for the build, memory budget, launch profile and reproducible benchmark.
+
 ```sh
 hf download XiaomiMiMo/MiMo-V2.6-Flash-MOPD --local-dir ~/Models/MiMo-V2.6-Flash
 make -C c mimo
 coli chat --model ~/Models/MiMo-V2.6-Flash
 ```
 
-Pro is the same engine and the same commands. Three files of the release are never
-loaded (the DFlash drafter, the audio tokenizer and the MTP layer, 9.9 GB together),
-so the download can skip them, 563.6 GB instead of 573.5:
+Pro is the same engine and the same commands. Two parts of the release are never
+loaded (the DFlash drafter and the audio tokenizer, 7.4 GB together), so the download
+can skip them, 566.1 GB instead of 573.5. `model_mtp.safetensors` (2.5 GB) holds the
+MTP layers the engine drafts with ([speculative decoding](#speculative-decoding-mtp));
+without it, decode runs one token a step:
 
 ```sh
 hf download XiaomiMiMo/MiMo-V2.6-Pro-MOPD --local-dir ~/Models/MiMo-V2.6-Pro \
-  --exclude "dflash/*" --exclude "audio_tokenizer/*" --exclude "model_mtp.safetensors"
+  --exclude "dflash/*" --exclude "audio_tokenizer/*"
 coli chat --model ~/Models/MiMo-V2.6-Pro --ram 54
 ```
 
@@ -77,8 +82,8 @@ the FP8 scale grid tiled per chunk (a Flash full-attention layer has 108 scale r
 not the 106 a contiguous grid would have). The layout is the one vLLM loads
 (`vllm/model_executor/models/mimo_v2.py`); the engine undoes it at load time.
 
-Not implemented yet: the three MTP layers and the separate DFlash drafter (no
-speculative decoding), audio and video input.
+Not implemented yet: the separate DFlash drafter, audio and video input (the MTP
+layers draft tokens: see [speculative decoding](#speculative-decoding-mtp)).
 
 ## Chat template
 
@@ -178,6 +183,14 @@ The reference holds the dense weights in f32, which for all 70 layers of Pro is 
 80 GiB, so the comparison stops at 32 of the 70 layers, which fit in the 61 GiB of
 the test machine.
 
+In a Windows build (MinGW-w64 on msvcrt) the softmaxes, silu and the router's sigmoid
+take `expf` from `exp_f.h`: libmingwex's own x87 `exp`, inline, its two truncations by
+`FISTTP` rather than under a control word switched to chopping and back. Every float
+gives the library's bits (`tests/test_exp_f.py` tries all 2^32). The library's two
+`FLDCW` make a call 5.7 times slower at two of the 64 places its object can land in a
+page, and a build whose change elsewhere put it there computed 3.5% slower
+([the measurement](experiments/mimo-layout-4090-2026-10-17/README.md)).
+
 ## Measured
 
 Ryzen 7 PRO 8700GE (8 cores, 16 threads), 64 GB DDR5, NVMe RAID, Linux, with nothing
@@ -228,7 +241,12 @@ The dense weights stay resident; from the checkpoint headers, what the engine ho
 
 Each cached expert is 18.9 MiB, so one slot per layer over the 69 MoE layers is
 1.27 GiB. The KV cache covers only the 10 full-attention layers (the other 60 keep a
-ring of 128 positions): 0.78 GiB at an 8k context.
+ring of 128 positions): 102 KB a position, 0.78 GiB at an 8k context, 26.8 GB at 256k
+and 107 GB at the checkpoint's 1,048,576. The engine takes that memory as a
+conversation reaches the positions, not at start-up, and the expert pool makes room
+for it ([`MIMO_KV_STEP`](#environment)): with the RTX 4090 profile's 104 experts a
+layer cached, about 300k tokens of context fit beside the cache in 192 GB, and a
+conversation longer than that decodes from a smaller cache.
 
 The same machine, prompt and 128 tokens as the Flash table above:
 
@@ -251,6 +269,139 @@ streaming, and the Qwen-Image picture read back word for word; `coli chat` with 
 picture's path at the start of the line, and `coli web` with the upload button:
 
 ![MiMo-V2.6 Pro in coli web, reading a picture made by Qwen-Image](media/mimo-pro-web.png)
+
+## Expert streaming
+
+Pro reads several GB of experts per token: with 104 of 384 experts cached per layer
+about 30% of the routed experts are not in RAM. The reads run on their own threads,
+so the time they take overlaps the computation instead of adding to it:
+
+- **a pool of readers per storage device.** The shards' devices are told apart (a
+  RAID volume is one device; the release split across `C:` and `D:` is two), each
+  gets `MIMO_IO_PER_DRIVE` readers (2) and its own queues. A reader takes a demand
+  (an expert the step being computed needs) before a prefetch, so a demand never
+  waits behind more than two reads of its own device. On Windows each reader opens
+  its own unbuffered handle per shard: reads through one synchronous handle are
+  serialized by its file object's lock.
+- **compute what is there while the rest arrives.** A MoE step pins its experts the
+  cache holds and computes them at once, while the missing ones are read; then each
+  wave computes whatever has arrived (`moe_cpu`). The kernel and the rows are those
+  of a step computed all at once, and the weighted sum still runs row by row in each
+  row's routing order, so the logits are the same bytes.
+- **read the next layer's experts ahead.** After a layer's attention, the next MoE
+  layer's router is applied to the residual (normed by that layer's own
+  post-attention norm) and the experts it picks are queued as prefetches while this
+  layer's MLP runs. The residual changes little from one layer to the next: on Pro
+  77% of the experts a step chooses were predicted. A wrong prediction costs a read
+  and a slot that is the first to be reused, never a number: the routing that counts
+  is the layer's own, on its own input. Predicting again after the MLP (`MIMO_PREFETCH=2`)
+  or beyond top-k (`MIMO_PREFETCH_EXTRA`) predicts more but reads more, and was slower
+  on the measured machine (the reads share the RAM's bandwidth with the experts'
+  computation). Predicting only after the MLP (`MIMO_PREFETCH_ATTN=0
+  MIMO_PREFETCH_MLP=8`) is more accurate (82%) and slower still: the reads start too
+  late. What counts is the time a read gets, not the last points of accuracy.
+- **drop what the step did not ask for.** A prediction's reads are queued likeliest
+  first (a row's choice weighs top-k + 2 minus its rank, so one row keeps its rank
+  order and a row's first choice comes before another row's last). When the layer's own
+  routing comes, the predicted experts it did not choose whose read has not started
+  leave the queue (`MIMO_PREFETCH_CANCEL`); left there they were read before the next
+  layer's prefetches. On the RTX 4090 profile the disk is behind in the first half of
+  the layers: about 1,000 of a benchmark request's 2,900 unused prefetches were still
+  queued when their layer's routing came, and with the cancel about 650 a request (13 GB
+  of 296) are never read.
+- **keep the experts of the layers that wait.** The pooled cache evicts the least
+  recently used buffer of any layer, but a miss does not cost the same everywhere: on
+  Pro's RTX 4090 profile layers 1-32 read 8-13 experts a decode step (their routing
+  repeats less) behind a 1 ms GPU attention, and carry most of the stall with the `C:`
+  drive 96-97% busy, while layers 33-69 read about 4 and every second one computes its
+  o_proj on the CPU: the drives idle there. Each MoE layer keeps a running average of
+  how long its decode steps wait on the disk, and its buffers look `MIMO_CACHE_BONUS`
+  (4) steps younger times its share of that stall over the average layer's (at most
+  three times): the waiting layers keep their experts longer, and the reads move to the
+  layers where the drives have time.
+
+`MIMO_ROUTE_TRACE` records every step's routing and the router's ranking at both
+prediction points; `tools/mimo_route_sim.py` replays it through cache policies and
+prediction sizes offline. The measured effect on the RTX 4090 machine is in
+[the streaming experiment](experiments/mimo-stream-4090-2026-10-16/README.md),
+[its second round](experiments/mimo-stream2-4090-2026-10-16/README.md),
+[the packing and pooling one](experiments/mimo-pack-4090-2026-10-17/README.md) and
+[the I/O round](experiments/mimo-io-4090-2026-10-17/README.md), which measured where the
+steps wait and added the cancelling, the order and the bonus: the benchmark 2.440 to
+2.565 tok/s and the eight prompts greedy 2.115 to 2.245 in one series, the stalls a third
+shorter, every reply and both logits files the same bytes.
+
+## Speculative decoding (MTP)
+
+Pro's checkpoint carries three multi-token-prediction layers (`model_mtp.safetensors`);
+a decode step drafts with the first `MIMO_MTP` of them, two by default. Once the token
+at position P is chosen, MTP layer k drafts the token at P + k + 1: its row at P - 1
+reads the trunk's final hidden state there (after the trunk's final norm, as the
+serving stacks hand it over) and the embedding of the token at P + k -- the chosen
+token for the first layer, the drafts before it for the others -- through `eh_proj` of
+`[enorm(embedding) | hnorm(hidden)]`, one sliding-window attention block with its own
+window of K/V and a dense MLP, its final norm and the shared lm_head. Every layer reads
+the trunk's hidden state, not the layer before it: that is how SGLang's multi-layer
+MTP runs MiMo-V2 (vLLM builds only the first layer and feeds it its own output for
+further drafts). On the benchmark prompt the trunk's hidden state gave the second and
+third layers' drafts 74% and 93% acceptance; the output of the layer before, after its
+final norm, 42% and 9%.
+
+The step verifies the drafts the layers are sure of: the first ones whose
+probabilities (each layer's own softmax) multiply to at least `MIMO_MTP_MIN_P`, 0.6
+by default. The chosen token and those drafts go through the trunk as rows of one
+block. Every kernel computes a row's bytes whatever rows are beside it (what the
+prompt blocks already rely on), so each row's logits are those a plain step would
+compute after the tokens before it, and so is the token they choose. The drafts stand
+up to the first one that is not that token; the token chosen instead ends the step,
+and the rows after it are dropped -- the position goes back, the next step overwrites
+their K/V, and a window's ring keeps `MIMO_MTP` - 1 positions more than the window so
+that the dropped rows overwrite none the next step reads. The rows an MTP layer ran
+with a draft that did not stand run again with the token chosen, so its window holds
+what one token at a time would have given it. Sampling (temperature > 0) keeps a draft
+with the probability the sampler gives it (its share of top-p's nucleus) and otherwise
+draws from the nucleus without it, so the tokens have the plain sampler's
+distribution (`tests/test_mimo_sample_draft.py`), not the same draws. Greedy replies
+are the bytes of `MIMO_MTP=0`'s.
+
+A verified draft costs its row whether it stands or not: the dense matrices are read
+once for every row of a step, but each row brings its own experts -- a layer needs 8
+for one token, 13.9 for two consecutive ones, 19.3 for three -- about 220 ms a row on
+the RTX 4090 profile. Verifying every draft, a second one stands too rarely to pay for
+that everywhere (over eight different prompts, greedy, two drafts a step were no
+faster than one). The layers' own probability tells the drafts apart: over those
+prompts a first draft its layer gave 0.8 or more stood every time, one under 0.5
+three times in ten. Each MTP layer (738 MB, its bf16 packed, on the CPU) takes about
+15 ms a step whether its draft is verified or not, and the CPU's matrices of a step of
+a few rows (the o_proj the GPU does not hold, the MTP layers') decode each group of
+weights once for all of its rows. The draft's probability (a softmax over the
+vocabulary, 152576 `expf`) and the dense MLP's silu run over the workers; the softmax
+sums fixed chunks in a fixed order, so its bits do not depend on the thread count.
+A draw at temperature > 0 (a verified row's, and the token after a step whose drafts
+all stood) spreads its `expf` the same way, adds the total in order still, and sorts
+only the entries that could be in top_p's nucleus -- those of at least (total - cut) /
+vocabulary -- and the whole vocabulary only when the draw lands among entries of equal
+probability, whose order the sort decides: the draws of sorting it every time
+(`tests/test_mimo_sample_draft.py`), about 0.7 ms instead of 17.
+
+On the RTX 4090 profile, one series ([the experiment](experiments/mimo-mtp2-4090-2026-10-17/README.md)):
+the benchmark 2.414 tok/s against 2.258 with one draft a step (decode 2.93 against
+2.70); eight different prompts 2.071 against 2.002 greedy, every reply the same bytes,
+and 1.977 against 1.888 sampled at temperature 0.7, top_p 0.9. Verifying both drafts
+every step: 2.384, 2.005 and 1.947. The first drafts wait for the first token, which
+comes no later. Spreading the softmax and the silu over the workers
+([the next round](experiments/mimo-mtp-tail-4090-2026-10-17/README.md)) took the
+benchmark from 2.450 to 2.485 tok/s and the eight prompts greedy from 2.122 to 2.146 in
+one series. Sorting only the nucleus' candidates
+([the round after](experiments/mimo-sample-4090-2026-10-17/README.md)) took the eight
+prompts sampled from 2.036 to 2.122 tok/s, the same replies.
+
+Not with `KV_SLOTS` > 1 (several conversations a step), a read-out (`logprobs`), a
+`VK=1` build (off by default there: its dense chain keeps the trunk's hidden states on
+the device), or MTP layers missing or not in Pro's layout (a fused qkv, a dense MLP of
+the trunk's width). `MIMO_MTP_TRACE` writes every step's drafts, the ones verified and
+kept, and the layers' probabilities, from which a cut can be chosen offline (the
+experiment's `traces/`).
 
 ## On a GPU (Vulkan)
 
@@ -288,13 +439,38 @@ photo equal to the same prompt computed cold) are the CPU's, and hold with
 | `MIMO_DENSE_BITS` | 0 | 0: dense weights as released (FP8, BF16), exact. 8: int8 per row, less RAM, not exact. 32: f32, the oracle's configuration. |
 | `MIMO_IDOT` | 0 | 1: int8 activations for the expert matmuls (not exact; no faster in the measurement above). |
 | `MIMO_DIRECT` | 1 | 0: buffered expert reads instead of `O_DIRECT`. |
-| `MIMO_READ_THREADS` | 8 | Parallel expert reads per layer. |
-| `MIMO_CHUNK` | 64 | Prompt tokens per prefill block. |
-| `MIMO_CTX` / `CTX` | 8192 | Context the KV cache is sized for (capped by the checkpoint). |
+| `MIMO_IO_PER_DRIVE` | 2 | Expert readers per storage device the shards are on (each device has its own queue; a RAID volume is one device). See [Expert streaming](#expert-streaming). |
+| `MIMO_IO_THREADS` | unset | N: N readers on one queue for every device instead; 0: each expert read on the computing thread, one after the other. |
+| `MIMO_PREFETCH` | 1 | 0: off. 1: the next MoE layer's router, applied to the residual after this layer's attention, picks experts read ahead while this layer computes. 2: also again after this layer's MLP. |
+| `MIMO_PREFETCH_ATTN` | top-k (8) | Experts predicted per row after the attention (0: none there); set, it overrides `MIMO_PREFETCH`'s choice. |
+| `MIMO_PREFETCH_MLP` | 0 (8 with `MIMO_PREFETCH=2`) | Experts predicted per row after the MLP. |
+| `MIMO_PREFETCH_EXTRA` | 0 | Experts predicted beyond each point's size for each row. |
+| `MIMO_PREFETCH_ROWS` | 4 | The largest step a prediction is made for (a decode step, the conversations of a multiplexed one). |
+| `MIMO_PREFETCH_LIMIT` | 64 | Prefetches waiting in the queues at once. |
+| `MIMO_PREFETCH_CANCEL` | 1 | 1: a prefetch its layer's step did not ask for whose read has not started leaves the queue. 0: it is read anyway (its buffer is then the first to be reused). |
+| `MIMO_IO_DELAY_US` | 0 | Tests: every expert read waits this long first, so the queues fill as on a slow disk. |
+| `MIMO_IO_PIECE_MB` | unset | Cut each expert read into pieces of this size (a demand then waits behind a piece, and an expert arrives through several readers). Unset: one read per expert; 4 MB pieces with two readers a drive doubled the stalls on the measured NVMe drives. |
+| `MIMO_BF16_PACK` | 1 | The o_proj and the head the CPU computes (all of them without CUDA, the ones the GPU does not hold with it) are packed without loss at start-up: each weight's sign/mantissa byte and a 4-bit code for its exponent within its row's window of 15 (the rare others listed per row), 12 bits instead of 16, as `MIMO_CUDA_BF16_PACK` packs them for the GPU. The kernel rebuilds every bf16 and sums in the bf16 kernel's order, so the logits are the same bytes (the 70-layer CPU logits of the streaming experiments, SHA-256 `cebbf3a8...`, with all 71 matrices packed: 11.98 GB instead of 15.97), from a quarter fewer bytes of RAM a token. 0: plain bf16. Not with `MIMO_DENSE_BITS` 8 or 32, nor with a Vulkan device. |
+| `MIMO_MTP` | 2 (0 in a `VK=1` build) | Decode steps draft a token with each of the checkpoint's first N MTP layers (up to 3) and keep the drafts the trunk chooses: up to N + 1 tokens a step, the same greedy tokens and the same sampling distribution (see [speculative decoding](#speculative-decoding-mtp)). 0: one token a step. |
+| `MIMO_MTP_MIN_P` | 0.6 | A step verifies its drafts while the probabilities the MTP layers give them multiply to at least this (a draft's row costs its experts whether it stands or not); 0 verifies every draft. |
+| `MIMO_MTP_TRACE` | unset | Append a line per decode step to this file: the position, the drafts made, verified and kept, and each draft's probability. |
+| `MIMO_CACHE_GLOBAL` | 1 (0 in a `VK=1` build) | The MoE layers' expert caches are one pool of cap x layers buffers. In a decode step a layer that misses takes the least recently used buffer of any layer and may grow to twice cap, so the layers whose routing spreads wider hold more (on Pro about 10% fewer reads on demand); a prompt block reuses the layer's own least recently used buffer once the layer holds cap of them. On the RTX 4090 profile: the benchmark 1.928 to 1.982 tok/s (decode 2.218 to 2.312), eight different prompts 1.771 to 1.797, and a new prompt's first token about 0.3 s later (6.55 to 6.89 s on average: its experts find fewer buffers in the layers that gave theirs away). 0: a fixed cap per layer, least recently used within it. |
+| `MIMO_CACHE_BONUS` | 4 | With the pool (`MIMO_CACHE_GLOBAL`): a layer's buffers look used this many steps later to the least-recently-used choice, times the layer's share of the decode steps' disk stall over the average MoE layer's (a running average, at most three times). 0: plain LRU. See [Expert streaming](#expert-streaming). |
+| `MIMO_CACHE_DECAY` | 0 | 0: the expert cache reuses its least recently used slot. 0 < d < 1: the slot whose expert has the lowest use count, decayed by d at each of the layer's steps. 0.97 read 17% less on a benchmark that repeats one prompt (it keeps what the last identical request used) and was no faster on eight different prompts, so LRU stays the default. |
+| `MIMO_LARGE_PAGES` | 0 | Windows: 1 keeps each layer's expert cache in 2 MiB locked pages (needs the "Lock pages in memory" right); ordinary pages when they cannot be had. |
+| `MIMO_ROUTE_TRACE` | unset | Write every MoE step's routing, and the router's ranking at the prefetcher's two points, to this file for `tools/mimo_route_sim.py`. |
+| `MIMO_READ_THREADS` | -- | No longer read: the readers are `MIMO_IO_PER_DRIVE` per device (`MIMO_IO_THREADS` for one shared queue). |
+| `MIMO_CHUNK` | 512 | Prompt tokens per prefill block. Each block computes an expert once for all its rows, so larger blocks read and stream fewer experts: a 2260-token prompt took 498 s in blocks of 64 and 213 s in blocks of 512 (RTX 4090 profile; the logits do not depend on the blocks). |
+| `MIMO_CTX` / `CTX` | 8192 | Context the KV cache is sized for (capped by the checkpoint: 1,048,576 on Pro). |
+| `MIMO_KV_STEP` | 4096 | Windows: the full-attention layers' caches have address space for the whole context from the start, and their memory is committed this many positions at a time as a conversation reaches them (elsewhere the OS commits a page when it is first written), so a 1M context costs nothing until a conversation is that long. |
+| `MIMO_KV_SPARE_GB` | 4 | Before positions are committed, the expert pool (`MIMO_CACHE_GLOBAL`) gives back its least recently used buffers when they would leave less memory than this available, and stops growing into what is left (down to two routing steps' worth a MoE layer); the engine prints a line when it does. Only when experts are read changes, never a number. |
+| `MIMO_MEM_TEST_GB` | unset | Tests: the memory available is this, less what the caches and the pool hold, instead of the OS's measure (`tests/mimo_tiny_harness.py` makes the pool give buffers back). |
 | `MIMO_CAP` | 64 | Expert cache slots per layer when no argument gives one. |
 | `MIMO_MAX_IMAGE_TOKENS` | unset | Gateway: ceiling on what one picture costs in prompt tokens. |
 | `MIMO_LOGITS` | unset | Oracle: dump every prompt position's logits (f32) to this file. |
 | `MIMO_TRACE` | unset | Oracle: dump the residual after every sublayer of the first block. |
 | `MIMO_DIRS` | unset | Extra directories holding shards (multi-disk). |
+| `COLI_OMP_SPIN` | 1 (Windows builds) | A Windows build links `omp_spin.c` (`tests/test_omp_spin.py`): the engine's OpenMP regions run on a team whose threads spin between regions, and a region met inside one runs at once on its thread, instead of on MinGW libgomp's team, which sleeps on semaphores (about 50 us an empty region at 16 threads, a barrier about 60 us, a region met inside another about 9 us of its thread's time). The loops keep GCC's own shares and chunks, so the arithmetic is the same. On the RTX 4090 profile the decode steps compute 7% less and the drives take back most of it: 2.614 against 2.594 tok/s for the benchmark, 2.261 against 2.222 over eight different prompts ([the measurement](experiments/mimo-omp-spin-4090-2026-10-17/README.md)). 0: libgomp's team. |
+| `COLI_OMP_SPIN_US` | 2000 | How long the spinning team's threads wait for the next region before they sleep. |
 | `COLI_VULKAN` | 0 | 1, in a `make mimo VK=1` build: the routed experts go to the shared Vulkan expert tier, and the dense matrices (qkv, o_proj, the dense MLP, lm_head, and the vision tower's) to the device where `COLI_VK_DENSE` puts them, uploaded at start-up in the form `MIMO_DENSE_BITS` gave them: FP8 with its 128-column block scales and BF16 by default, int8 with 8, f32 with 32. See [On a GPU](#on-a-gpu-vulkan). |
 | `MIMO_VK_EXPERTS` | unset | With `COLI_VULKAN=1`: 0 keeps every routed expert on the CPU (no tier); N sizes the expert tier's budget at N experts (`COLI_VK_TIER_GB`, which wins when set). Unset: the tier's own budget. Kept from the engine's own tier before the shared one, which filled up to N and never evicted. |

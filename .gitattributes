@@ -7,3 +7,17 @@ START-HERE.bat text eol=crlf
 c/clef_tiny/*.json text eol=lf
 c/laya_tiny/**/*.json text eol=lf
 c/gliner_decide_tiny/**/*.json text eol=lf
+c/build_mimo_cuda.bat text eol=crlf
+# Experiment checksums describe exact recorded bytes, including native log EOLs
+# and output whitespace. Keep source-code whitespace checks separate from data.
+docs/experiments/mimo-cuda-4090-2026-10-16/** -text -whitespace
+docs/experiments/mimo-stream-4090-2026-10-16/** -text -whitespace
+docs/experiments/mimo-stream2-4090-2026-10-16/** -text -whitespace
+docs/experiments/mimo-pack-4090-2026-10-17/** -text -whitespace
+docs/experiments/mimo-mtp-4090-2026-10-17/** -text -whitespace
+docs/experiments/mimo-mtp2-4090-2026-10-17/** -text -whitespace
+docs/experiments/mimo-mtp-tail-4090-2026-10-17/** -text -whitespace
+docs/experiments/mimo-sample-4090-2026-10-17/** -text -whitespace
+docs/experiments/mimo-io-4090-2026-10-17/** -text -whitespace
+docs/experiments/mimo-omp-spin-4090-2026-10-17/** -text -whitespace
+docs/experiments/mimo-layout-4090-2026-10-17/** -text -whitespace

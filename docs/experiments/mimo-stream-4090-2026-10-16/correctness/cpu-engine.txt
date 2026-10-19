@@ -1,0 +1,5 @@
+[mimo] expert readers: 4 on 2 device(s)
+[mimo] 70 layers (60 sliding window 128, 10 full), 384 experts top-8, cache 64/layer, dense native, ctx 16384, vision -- loaded in 9.81s
+[mimo] prefill 17 tokens 10.23s, decode 32 tokens 26.05s (1.23 tok/s), experts 15302 hits 6783 misses 271090.2 MB read, rss 117.97 GB
+[mimo] time: expert reads 5.27s (51.47 GB/s), expert matmuls 12.50s, attention 16.47s, the rest (dense MLP, router, head) 2.04s
+[mimo] streaming: 6783 demand reads, 6735 prefetched (4726 used, 2009 unused), predicted 78.0% of 17112 choices, 271.09 GB read, 5.27s stalled, 0.33s predicting; attention matmuls: qkv 8.27s, o_proj 7.64s

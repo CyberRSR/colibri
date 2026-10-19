@@ -1,0 +1,35 @@
+=== 22:58:42 u-v2 (c/build/io-prefetch/v2/mimo.exe) sample=0/0/0/1 
+    engine pid 11124 at 22:59:31
+    exit 0 23:00:52: median 2.5120 tok/s; c\build\layout\runs\s1\u-v2
+    run 1: 2.5101 tok/s overall, 3.0715 decode, TTFT 4.986s
+    run 2: 2.5124 tok/s overall, 3.0756 decode, TTFT 4.990s
+    run 3: 2.5120 tok/s overall, 3.0753 decode, TTFT 4.991s
+    [mimo] streaming: 5414 demand reads, 9347 prefetched (6466 used, 2881 unused, 669 cancelled unread), predicted 80.9% of 35328 choices, 282.60 GB read, 4.07s stalled, 0.57s predicting; attention matmuls: qkv 1.04s, o_proj 2.10s; 4.12 experts a wave
+    [mimo] prompt 4.92s (stalled 1.72s, experts 2.68s, attention 0.40s, 3098 demand reads); generation 20.49s (stalled 2.35s, experts 12.78s, attention 3.32s, 2316 demand reads, 9347 prefetched)
+=== 23:00:53 u-v3 (c/build/io-prefetch/v3/mimo.exe) sample=0/0/0/1 
+    engine pid 26976 at 23:01:41
+    exit 0 23:03:04: median 2.4774 tok/s; c\build\layout\runs\s1\u-v3
+    run 1: 2.4774 tok/s overall, 3.0255 decode, TTFT 5.011s
+    run 2: 2.4795 tok/s overall, 3.0305 decode, TTFT 5.024s
+    run 3: 2.4770 tok/s overall, 3.0241 decode, TTFT 5.005s
+    [mimo] streaming: 5414 demand reads, 9348 prefetched (6467 used, 2881 unused, 725 cancelled unread), predicted 80.9% of 35328 choices, 281.50 GB read, 3.70s stalled, 0.72s predicting; attention matmuls: qkv 1.04s, o_proj 2.10s; 4.32 experts a wave
+    [mimo] prompt 4.93s (stalled 1.64s, experts 2.74s, attention 0.40s, 3098 demand reads); generation 20.83s (stalled 2.06s, experts 12.83s, attention 3.52s, 2316 demand reads, 9348 prefetched)
+=== 23:03:04 m-v3 (c/build/io-prefetch/v3/mimo.exe) sample=72/500/1/1 
+    engine pid 25348 at 23:03:53
+    68203 samples of 1 thread(s), 68203 ticks in 72.00s
+    exit 0 23:05:16: median 2.4794 tok/s; c\build\layout\runs\s1\m-v3
+    run 1: 2.4804 tok/s overall, 3.0296 decode, TTFT 5.007s
+    run 2: 2.4794 tok/s overall, 3.0274 decode, TTFT 5.003s
+    run 3: 2.4774 tok/s overall, 3.0276 decode, TTFT 5.025s
+    [mimo] streaming: 5414 demand reads, 9348 prefetched (6467 used, 2881 unused, 704 cancelled unread), predicted 80.9% of 35328 choices, 281.92 GB read, 3.65s stalled, 0.74s predicting; attention matmuls: qkv 1.04s, o_proj 2.10s; 4.35 experts a wave
+    [mimo] prompt 4.95s (stalled 1.62s, experts 2.76s, attention 0.41s, 3098 demand reads); generation 20.81s (stalled 2.02s, experts 12.84s, attention 3.50s, 2316 demand reads, 9348 prefetched)
+=== 23:05:16 m-v2 (c/build/io-prefetch/v2/mimo.exe) sample=72/500/1/1 
+    engine pid 27260 at 23:06:04
+    67918 samples of 1 thread(s), 67918 ticks in 72.00s
+    exit 0 23:07:25: median 2.5353 tok/s; c\build\layout\runs\s1\m-v2
+    run 1: 2.5399 tok/s overall, 3.1137 decode, TTFT 4.964s
+    run 2: 2.5321 tok/s overall, 3.1026 decode, TTFT 4.970s
+    run 3: 2.5353 tok/s overall, 3.1069 decode, TTFT 4.966s
+    [mimo] streaming: 5413 demand reads, 9347 prefetched (6466 used, 2881 unused, 686 cancelled unread), predicted 80.9% of 35328 choices, 282.24 GB read, 4.11s stalled, 0.57s predicting; attention matmuls: qkv 0.95s, o_proj 2.10s; 4.10 experts a wave
+    [mimo] prompt 4.89s (stalled 1.72s, experts 2.66s, attention 0.40s, 3098 demand reads); generation 20.28s (stalled 2.40s, experts 12.66s, attention 3.20s, 2315 demand reads, 9347 prefetched)
+DONE 23:07:25

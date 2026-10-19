@@ -1,0 +1,3 @@
+time: 16 threads: region 47.68 us, two barriers 118.29 us more, nested region 0.611 us a task
+time: 16 threads: region 47.29 us, two barriers 118.27 us more, nested region 0.600 us a task
+time: 16 threads: region 47.20 us, two barriers 116.86 us more, nested region 0.603 us a task

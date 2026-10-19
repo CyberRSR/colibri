@@ -1,0 +1,50 @@
+{
+  "passed": true,
+  "launcher": "c/tools/start_mimo_cuda_4090.ps1",
+  "port": 18089,
+  "request": {
+    "model": "mimo-v2.6-pro-mopd",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Ответь одним словом: сколько будет два плюс два?"
+      }
+    ],
+    "temperature": 0,
+    "max_tokens": 32,
+    "enable_thinking": false,
+    "stream": false
+  },
+  "response": {
+    "id": "chatcmpl-728ac1ab860c496f8b52487795ccf68d",
+    "object": "chat.completion",
+    "created": 1792147913,
+    "model": "mimo-v2.6-pro-mopd",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "Четыре",
+          "refusal": null
+        },
+        "logprobs": null,
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 25,
+      "completion_tokens": 4,
+      "total_tokens": 29
+    }
+  },
+  "seconds_including_first_load": 19.662002900033258,
+  "gpu_while_model_loaded": "memory.used [MiB], utilization.gpu [%]\n23037 MiB, 6 %\n",
+  "engine_sha256": "41c8b2aa61cb167506449c5b9eb0f0ce4989a7f21776e6c1cc79ba2a3403b70a",
+  "cuda_dll_sha256": "803d0bae1de0d1f03cea33dae5b1c701dc8edeb9aa587efcb5d9201fcee3eb71",
+  "stale_debug_environment_supplied": {
+    "MIMO_CUDA_FAULT": "1",
+    "MIMO_LAYERS": "2",
+    "MIMO_CTX": "16"
+  }
+}

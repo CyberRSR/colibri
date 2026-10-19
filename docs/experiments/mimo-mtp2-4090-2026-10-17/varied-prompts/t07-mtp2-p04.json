@@ -1,0 +1,162 @@
+[
+ {
+  "i": 0,
+  "tokens": 64,
+  "seconds": 39.48429749999195,
+  "ttft": 9.91480050003156,
+  "decode_tok_s": 2.1305739492316826,
+  "hit": 78.3,
+  "prof": [
+   "39.379",
+   "22",
+   "64",
+   "8.162",
+   "0.000",
+   "21.700",
+   "4.510",
+   "0.000",
+   "29"
+  ],
+  "text": "TCP (Transmission Control Protocol) is a connection-oriented protocol that guarantees the reliable, ordered, and error-checked delivery of a stream of bytes. Before data is sent, a connection is established through a \"three-way handshake,\" and the protocol includes mechanisms to ensure all data arrives correctly and in the right order. In contrast,"
+ },
+ {
+  "i": 1,
+  "tokens": 64,
+  "seconds": 29.79103959997883,
+  "ttft": 8.003101299982518,
+  "decode_tok_s": 2.8915080964778874,
+  "hit": 79.2,
+  "prof": [
+   "29.651",
+   "32",
+   "64",
+   "4.587",
+   "0.000",
+   "17.545",
+   "3.735",
+   "0.000",
+   "25"
+  ],
+  "text": "Конечно! Вот краткая инструкция, как заварить идеальный зелёный чай.\n\n### Как заварить зелёный чай: 5 простых шагов\n\n1.  **Подготовьте воду.** Используйте свежую,"
+ },
+ {
+  "i": 2,
+  "tokens": 64,
+  "seconds": 32.59772159997374,
+  "ttft": 6.647507299960125,
+  "decode_tok_s": 2.4277256161220584,
+  "hit": 81.2,
+  "prof": [
+   "32.446",
+   "22",
+   "64",
+   "5.723",
+   "0.000",
+   "18.652",
+   "4.023",
+   "0.000",
+   "29"
+  ],
+  "text": "The capital of Australia is **Canberra**.\n\nIt was chosen as a compromise to resolve a fierce rivalry between the two largest cities at the time: **Sydney** and **Melbourne**.\n\nHere is the history of why it was chosen:\n\n**1. The Rivalry**\nWhen the Australian colonies federated"
+ },
+ {
+  "i": 3,
+  "tokens": 21,
+  "seconds": 15.255323999968823,
+  "ttft": 5.39006619999418,
+  "decode_tok_s": 2.0273165086523544,
+  "hit": 74.0,
+  "prof": [
+   "15.109",
+   "17",
+   "21",
+   "2.997",
+   "0.000",
+   "8.453",
+   "1.913",
+   "0.000",
+   "14"
+  ],
+  "text": "Amber leaves fall fast,\nThe sky weeps a silver mist,\nPuddles hold the gray."
+ },
+ {
+  "i": 4,
+  "tokens": 64,
+  "seconds": 34.4538083000225,
+  "ttft": 6.3120070999721065,
+  "decode_tok_s": 2.2386626766408675,
+  "hit": 84.1,
+  "prof": [
+   "34.309",
+   "22",
+   "64",
+   "5.179",
+   "0.000",
+   "20.273",
+   "4.502",
+   "0.000",
+   "33"
+  ],
+  "text": "In Verona, two young lovers from feuding families, Romeo and Juliet, meet at a ball and fall instantly in love, secretly marrying with the help of Friar Laurence. Their union is complicated when Romeo kills Juliet's cousin in a duel, leading to his banishment and a desperate plan for the couple to"
+ },
+ {
+  "i": 5,
+  "tokens": 64,
+  "seconds": 30.66439769999124,
+  "ttft": 7.062793500022963,
+  "decode_tok_s": 2.6693100802056784,
+  "hit": 79.1,
+  "prof": [
+   "30.509",
+   "23",
+   "64",
+   "5.119",
+   "0.000",
+   "18.014",
+   "3.635",
+   "0.000",
+   "25"
+  ],
+  "text": "Here is a short Python example:\n\n```python\nnumbers = [1, 2, 3, 4, 5, 6]\nsquares = [x**2 for x in numbers if x % 2 == 0]\n\nprint(squares)\n# Output: [4, 16,"
+ },
+ {
+  "i": 6,
+  "tokens": 64,
+  "seconds": 29.776132000028156,
+  "ttft": 7.08423340000445,
+  "decode_tok_s": 2.77632123739237,
+  "hit": 81.0,
+  "prof": [
+   "29.639",
+   "27",
+   "64",
+   "4.259",
+   "0.000",
+   "17.580",
+   "3.884",
+   "0.000",
+   "27"
+  ],
+  "text": "Небо голубое из-за **рэлеевского рассеяния**.\n\nСолнечный свет состоит из всех цветов спектра. Когда он проходит сквозь атмосферу, молекулы воздуха рассеивают коротковолновый"
+ },
+ {
+  "i": 7,
+  "tokens": 64,
+  "seconds": 29.59485679998761,
+  "ttft": 5.322058499965351,
+  "decode_tok_s": 2.5954980229841165,
+  "hit": 85.2,
+  "prof": [
+   "29.448",
+   "16",
+   "64",
+   "3.853",
+   "0.000",
+   "17.832",
+   "3.851",
+   "0.000",
+   "28"
+  ],
+  "text": "Here are four benefits of regular exercise:\n\n1.  **Improved Cardiovascular Health:** Exercise strengthens the heart and improves circulation, which lowers blood pressure and reduces the risk of heart disease and stroke.\n2.  **Weight Management:** Physical activity helps burn calories and build muscle, making it easier to achieve and maintain a healthy"
+ }
+]

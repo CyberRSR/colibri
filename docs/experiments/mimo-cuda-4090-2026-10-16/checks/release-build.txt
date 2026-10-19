@@ -1,0 +1,4 @@
+mingw32-make: Entering directory 'C:/colibri/dev/c'
+gcc -D_FILE_OFFSET_BITS=64 -O3 -march=native -fopenmp -Wall -Wextra -Wno-unused-parameter -Wno-misleading-indentation -Wno-unused-function  -MMD -MP -DCOLI_CUDA -c backend_cuda_mimo_loader.c -o backend_cuda_mimo_loader.o
+gcc -D_FILE_OFFSET_BITS=64 -O3 -march=native -fopenmp -Wall -Wextra -Wno-unused-parameter -Wno-misleading-indentation -Wno-unused-function  -MMD -MP -DCOLI_CUDA -DCOLI_MIMO_CUDA mimo.c backend_cuda_mimo_loader.o  -o mimo.exe -lm -fopenmp -static -lpsapi 
+mingw32-make: Leaving directory 'C:/colibri/dev/c'

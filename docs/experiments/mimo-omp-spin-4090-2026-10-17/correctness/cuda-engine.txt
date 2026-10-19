@@ -1,0 +1,19 @@
+[CUDA] mimo device 0: NVIDIA GeForce RTX 4090; native dense weights, float32 activations
+[SPLIT] +C:/AI/MiMoPro-Shards -> 88 shard(s)
+[SPLIT] model across 2 dir(s): 130 shard(s) total (primary D:\AI\Models\MiMo-V2.6-Pro-MOPD -> 42 shard(s)), no duplication
+[mimo] MTP: decode steps verify up to 2 drafts, from the checkpoint's first 2 MTP layers, while the probabilities the layers give them multiply to 0.6 or more (MIMO_MTP=0: off)
+[mimo] expert cache: one pool of 4416 slots for every layer (MIMO_CACHE_GLOBAL)
+[mimo] expert readers: 4 on 2 device(s)
+[CUDA] mimo placed 125 dense matrices (52 bf16 packed): 19.983 / 20.000 GiB budget; CPU host copies released
+[OMP] spinning team: 16 threads spin 2000 us between regions (COLI_OMP_SPIN_US; COLI_OMP_SPIN=0: libgomp's team)
+[mimo] 23 bf16 matrices packed without loss for the CPU: 3.40 GB for 4.53 GB
+[mimo] 70 layers (60 sliding window 128, 10 full), 384 experts top-8, cache 64/layer, dense native, ctx 16384, vision -- loaded in 15.48s
+[mimo] prefill 17 tokens 8.22s, decode 32 tokens 11.94s (2.68 tok/s), experts 12928 hits 6637 misses 253462.7 MB read, rss 94.72 GB
+[mimo] time: expert reads 8.55s (29.63 GB/s), expert matmuls 8.57s, attention 1.95s, the rest (dense MLP, router, head) 1.09s
+[mimo] streaming: 6637 demand reads, 6810 prefetched (4935 used, 1875 unused, 808 of them cancelled unread), predicted 81.6% of 17664 choices, 253.46 GB read, 8.55s stalled, 0.24s predicting; attention matmuls: qkv 0.56s, o_proj 1.26s; 2.04 experts a wave
+[mimo] MTP: 13 steps of up to 2 drafts, 17 kept (12 of 12, 5 of 6), 2.31 tokens a step, 0.48s drafting
+[CUDA] mimo dense: 125 matrices, 19.983 GiB resident, 1901 matmuls, 6151 rows, 0 scratch/compute fallbacks
+[CUDA] mimo matmul wall time (copies + compute): f32 0.000s, bf16 0.000s, fp8 0.571s, int8 0.000s, int8 blocks 0.000s, bf16 packed 0.272s
+[CUDA] mimo bf16 packed without loss: 52 matrices, 8.485 GiB for 11.309 GiB of bf16, 1110340 exceptions
+[mimo] decode 32 tokens in 13 verified steps
+[CUDA] mimo host copies: 125 released (22.807 GiB), 0 restored from checkpoint (0.000 GiB)

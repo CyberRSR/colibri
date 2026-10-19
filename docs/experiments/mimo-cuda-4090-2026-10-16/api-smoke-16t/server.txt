@@ -1,0 +1,11 @@
+MiMo native CUDA: dense budget 20 GiB, cache 104 experts/layer, CPU 16, readers 16
+API: http://127.0.0.1:18089/v1
+[CUDA] mimo device 0: NVIDIA GeForce RTX 4090; native dense weights, float32 activations
+[gateway] input modalities: text, image
+OpenAI-compatible API listening on http://127.0.0.1:18089/v1
+[api] 127.0.0.1 - "GET /v1/models HTTP/1.1" 200 -
+[api] 127.0.0.1 - "GET /v1/models HTTP/1.1" 200 -
+[api] 127.0.0.1 - "GET /v1/models HTTP/1.1" 200 -
+[api] 127.0.0.1 - "GET /v1/models HTTP/1.1" 200 -
+[api] 127.0.0.1 - "GET /v1/models HTTP/1.1" 200 -
+[api] 127.0.0.1 - "POST /v1/chat/completions HTTP/1.1" 200 -

@@ -1,0 +1,37 @@
+{
+  "passed": true,
+  "positions": 17,
+  "argmax_matches": 17,
+  "max_abs_logit_difference": 5.340576171875e-05,
+  "max_kl_cpu_to_cuda": 1.718928674531859e-11,
+  "greedy_reply_equal": true,
+  "requested_tokens": 32,
+  "prompt_sha256": "c9d8ef2ce7780c8288730a94fa44438917740cd9f6581534780506dada6e006f",
+  "config": {
+    "MIMO_DIRS": "C:/AI/MiMoPro-Shards",
+    "MIMO_DENSE_BITS": "0",
+    "MIMO_IDOT": "0",
+    "MIMO_DIRECT": "1",
+    "MIMO_READ_THREADS": "16",
+    "MIMO_CHUNK": "64",
+    "OMP_NUM_THREADS": "16",
+    "COLI_NO_OMP_TUNE": "1",
+    "COLI_TEMP": "0",
+    "MIMO_CTX": "16384",
+    "COLI_VULKAN": "0",
+    "MIMO_CUDA_DENSE_GB": "20",
+    "MIMO_CUDA_RESERVE_GB": "2",
+    "SERVE": "0",
+    "MIMO_CUDA_RELEASE_HOST": "1"
+  },
+  "engine_sha256": "e4ed790eeb40b4a7dfe82335c5cc9c6accbbb0b1ffbfc1ca3b4fa36e1175b000",
+  "files": {
+    "cpu.f32": "cebbf3a80f8c5ae076f255e9ea2a84a5cfd38bf63348905b136102fa7e95feb4",
+    "cpu.log": "c9591bd3126da119ed2efa9707fc12187a4053ad41a17c34a8fd6c1e7ee64eb9",
+    "cpu.txt": "63ed99846816797ba35192500956feedcfba7df134b42cad4a1b41595364c669",
+    "cuda.f32": "c4ffe219354c871cad27a8153a1f763f308d2859a2db87b084348d2bb18b59a8",
+    "cuda.log": "5e825ddd8d5a478041b216fc337a8cace0f9236051fbd0d428b5a352d69a4e50",
+    "cuda.txt": "63ed99846816797ba35192500956feedcfba7df134b42cad4a1b41595364c669"
+  },
+  "cuda_dll_sha256": "8db83a22d60940153c8a62bc0a2d9f26d75e4bbd9af1388e7c578f9cb5ad69f9"
+}
