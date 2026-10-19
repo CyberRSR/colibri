@@ -35,6 +35,85 @@ $ ./coli chat
   ◆ Ciao! Come posso aiutarti oggi?
 ```
 
+## This fork: MiMo-V2.6-Pro on one RTX 4090
+
+This fork runs **XiaomiMiMo/MiMo-V2.6-Pro** (1.02T parameters, 384 experts top-8,
+MXFP4 experts, FP8/BF16 dense) on one desktop: a Ryzen 9 7950X3D with 192 GB of
+DDR5, an RTX 4090 and two NVMe volumes. Nothing is quantized beyond the checkpoint:
+**every greedy reply is the byte-for-byte reply of the colibri 2.0 engine** and the
+70-layer CPU logits are unchanged (SHA-256 `cebbf3a8...`); every step below was
+measured that way, and its raw data is in `docs/experiments/mimo-*-4090-*`.
+
+**Download:** [the latest MiMo release](https://github.com/CyberRSR/colibri/releases)
+(`colibri-mimo-pro-4090-*-windows-x86_64.zip`). Unzip it, then run
+`START-MIMO.cmd` (or `tools\start_mimo_cuda_4090.ps1 -ModelDir <model> -ShardDir <more shards>`).
+It serves an OpenAI- and Anthropic-compatible API on `http://127.0.0.1:18080/v1`
+(model id `mimo-v2.6-pro-mopd`) with the checkpoint's **1,048,576-token context**
+and replies of up to **65,536 tokens**. [How it runs](docs/mimo-cuda.md).
+
+| | colibri 2.0 | now |
+|---|---:|---:|
+| benchmark request, tok/s (64 tokens, greedy, first token included) | 1.159 | **2.61** |
+| decode, tok/s | 1.359 | **3.23** |
+| eight different prompts, tok/s | 1.061 | **2.26** |
+| first token of the benchmark prompt | 8.9 s | 5.0 s |
+| a 2260-token prompt | 904 s | 203 s |
+
+What changed, in order (benchmark tok/s after each step, each measured A/B in its
+own series on this machine, which drifts by about 3% from day to day):
+
+| Step | Commit | tok/s |
+|---|---|---:|
+| colibri 2.0 as installed (Vulkan dense chain) | -- | 1.005 |
+| native FP8/BF16 dense matrices on the GPU (CUDA) | `b03af166` | 1.083 |
+| experts streamed from both drives by per-drive readers, the next layer prefetched | `845474fc` | 1.709 |
+| CPU prompt kernels, 512-row prompt blocks, CPU o_proj spread through the model | `10313e4f` | 1.814 |
+| BF16 matrices packed without loss, 12 bits a weight, on the GPU and the CPU | `71f5a0c4` | 1.936 |
+| one expert pool for all MoE layers | `0369c3b1` | 1.990 |
+| speculative decoding with the checkpoint's MTP layer, verified as a second row | `ed62c9af` | 2.206 |
+| dense CPU weights decoded once for every row of a short step | `ed77c521` | 2.310 |
+| two MTP drafts a step, verified while the layers are sure | `16c234f5` | 2.414 |
+| the drafts' softmax and silu over all workers | `15446df8` | 2.485 |
+| sampled draws sort only top-p's nucleus (temperature > 0: +4.7%) | `77c682eb` | 2.469 |
+| stale prefetches dropped unread, waiting layers keep their experts longer | `54418f93` | 2.565 |
+| OpenMP regions on a spinning team (Windows) | `ca05d0e4` | 2.614 |
+| expf without MinGW's control-word switch (no 3.5% layout lottery) | `36a4fdfe` | 2.612 |
+| attention caches committed as a conversation grows: 1M context, 64k replies | `136b9f20` | 2.575 |
+
+Where the time goes now: each token needs 8 of 384 experts in each of 69 layers,
+about 11 GB of weights read from RAM or the disks, so decoding is bound by memory
+and disk bandwidth rather than by the CPU or the GPU. A prompt is different: each 512-token block computes nearly all
+of the 26,496 experts on the CPU (about 11 prompt tokens a second), so a 20,000-token
+agent prompt still takes about half an hour the first time (later turns reuse the
+prefix and process only what is new). Moving prompt blocks onto the GPU is the next
+step.
+
+<details>
+<summary>По-русски</summary>
+
+Этот форк запускает **MiMo-V2.6-Pro** (1,02 трлн параметров) на одном ПК:
+Ryzen 9 7950X3D, 192 ГБ DDR5, RTX 4090 и два NVMe. Без дополнительного квантования:
+**каждый жадный ответ байт-в-байт совпадает с ответом движка colibri 2.0**, логиты
+70 слоёв на CPU не изменились. Сырые замеры каждого шага лежат в
+`docs/experiments/mimo-*-4090-*`.
+
+**Скачать:** [релиз MiMo](https://github.com/CyberRSR/colibri/releases)
+(`colibri-mimo-pro-4090-*-windows-x86_64.zip`), распаковать и запустить
+`START-MIMO.cmd` (или `tools\start_mimo_cuda_4090.ps1 -ModelDir <модель> -ShardDir <доп. шарды>`).
+API, совместимый с OpenAI и Anthropic: `http://127.0.0.1:18080/v1`, модель
+`mimo-v2.6-pro-mopd`, контекст **1 048 576 токенов**, ответы до **65 536 токенов**.
+
+Скорость: бенчмарк 1,159 → **2,61 ток/с**, декодирование 1,359 → **3,23**, восемь
+разных промптов 1,061 → **2,26**, первый токен 8,9 → 5,0 с, промпт в 2260 токенов
+904 → 203 с. История изменений — в таблице выше (каждый шаг замерен A/B).
+
+Сейчас декодирование упирается в пропускную способность памяти и дисков (около
+11 ГБ весов экспертов на токен), а обработка промпта — в CPU (~11 токенов/с), поэтому
+первый ответ на промпт агента в 20 000 токенов занимает около получаса (следующие
+ходы переиспользуют префикс). Следующий шаг — обработка промпта на GPU.
+
+</details>
+
 <a id="get-started"></a>
 <a id="the-one-step-way"></a>
 
