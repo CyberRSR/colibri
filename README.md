@@ -37,6 +37,13 @@ $ ./coli chat
 
 ## This fork: MiMo-V2.6-Pro on one RTX 4090
 
+> **This is the branch `perf/mimo-4090-lossy`: faster and NOT exact.** Its launcher puts
+> every o_proj on the GPU as int8 by default (`-Exact` turns it off): the benchmark request
+> 2.538 -> 2.70 tok/s (+5.8%, decode +6.8%), while a teacher-forced 451-token prompt keeps
+> the exact argmax at 88% of positions (mean KL 0.13) and varied answers part from the exact
+> ones after a few dozen words ([the measurement](docs/experiments/mimo-oproj-int8-4090-2026-10-20/README.md)).
+> The lossless engine, release and numbers below are on `main`.
+
 This fork runs **XiaomiMiMo/MiMo-V2.6-Pro** (1.02T parameters, 384 experts top-8,
 MXFP4 experts, FP8/BF16 dense) on one desktop: a Ryzen 9 7950X3D with 192 GB of
 DDR5, an RTX 4090 and two NVMe volumes. Nothing is quantized beyond the checkpoint:

@@ -1,4 +1,5 @@
 # Native MiMo CUDA profile for RTX 4090 / 192 GiB RAM / split model shards.
+# perf/mimo-4090-lossy: faster and NOT exact by default (int8 o_proj); -Exact for the lossless one.
 param(
     [string]$ModelDir = 'D:\AI\Models\MiMo-V2.6-Pro-MOPD',
     [string]$ShardDir = 'C:\AI\MiMoPro-Shards',
@@ -18,10 +19,12 @@ param(
     # counts toward it.
     [ValidateRange(256,1048576)][int]$MaxOutput = 65536,
     [ValidateRange(1,65535)][int]$Port = 18080,
-    # Faster and NOT exact: every o_proj on the GPU as int8 (docs/mimo-cuda.md)
-    [switch]$OprojInt8
+    # This branch (perf/mimo-4090-lossy) puts every o_proj on the GPU as int8 by default:
+    # +6% and NOT exact (docs/mimo-cuda.md). -Exact: the main branch's lossless profile.
+    [switch]$Exact
 )
 $ErrorActionPreference = 'Stop'
+$OprojInt8 = -not $Exact
 $EngineDir = Split-Path -Parent $PSScriptRoot
 foreach ($file in @('mimo.exe', 'coli_cuda_mimo.dll', 'coli')) {
     if (!(Test-Path -LiteralPath (Join-Path $EngineDir $file) -PathType Leaf)) {
