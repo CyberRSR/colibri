@@ -1,0 +1,22 @@
+[mimo] MTP: decode steps verify up to 2 drafts, from the checkpoint's first 2 MTP layers, while the probabilities the layers give them multiply to 0.6 or more (MIMO_MTP=0: off)
+[mimo] expert cache: one pool of 6072 slots for every layer (MIMO_CACHE_GLOBAL)
+[mimo] expert readers: 4 on 2 device(s)
+[CUDA] mimo device 0: NVIDIA GeForce RTX 4090; native dense weights, float32 activations
+[CUDA] mimo placed 125 dense matrices (52 bf16 packed): 19.983 / 20.000 GiB budget; CPU host copies released
+[OMP] spinning team: 24 threads spin 2000 us between regions (COLI_OMP_SPIN_US; COLI_OMP_SPIN=0: libgomp's team)
+[mimo] 23 bf16 matrices packed without loss for the CPU: 3.40 GB for 4.53 GB
+[mimo] 70 layers (60 sliding window 128, 10 full), 384 experts top-8, cache 88/layer, dense native, ctx 16384, vision -- loaded in 15.44s
+[mimo] prefill 658 tokens 73.87s, decode 32 tokens 13.36s (2.40 tok/s), experts 25705 hits 47423 misses 1071085.0 MB read, rss 128.55 GB
+[mimo] time: expert reads 3.77s (283.82 GB/s), expert matmuls 77.71s, attention 3.53s, the rest (dense MLP, router, head) 2.22s
+[mimo] streaming: 47423 demand reads, 6656 prefetched (4686 used, 1970 unused, 669 of them cancelled unread), predicted 79.2% of 17664 choices, 1071.08 GB read, 3.77s stalled, 0.29s predicting; attention matmuls: qkv 0.50s, o_proj 1.17s; 14.11 experts a wave
+[mimo] experts on the GPU: 71.39s (their bytes into staging 15.90s, waiting for a staging buffer 31.82s, for the last outputs 0.54s), 39229 read straight into staging; the rows' weighted sums 0.22s
+[mimo] MTP: 17 steps of up to 2 drafts, 13 kept (9 of 9, 4 of 5), 1.76 tokens a step, 0.95s drafting
+[mimo] decode 32 tokens in 17 verified steps
+[CUDA] mimo host copies: 125 released (22.807 GiB), 0 restored from checkpoint (0.000 GiB)
+[CUDA] mimo dense: 125 matrices, 19.983 GiB resident, 2507 matmuls, 52578 rows, 0 scratch/compute fallbacks
+[CUDA] mimo matmul wall time (copies + compute): f32 0.000s, bf16 0.140s, fp8 0.549s, int8 0.000s, int8 blocks 0.000s, bf16 packed 0.417s
+[CUDA] mimo bf16 packed without loss: 52 matrices, 8.485 GiB for 11.309 GiB of bf16, 1110340 exceptions
+[CUDA] mimo prompt attention: 2 blocks, 255 rows, 0.005s (copies + compute), 0 left to the CPU
+[CUDA] mimo prompt attention kept on the device: 210 blocks, 46060 rows, 1.101s on the device (rows up 0.060s, qkv and RoPE 0.566s, attention 0.067s, o_proj 0.359s, outputs down 0.050s), 0 left to the host
+[CUDA] mimo prompt blocks' host matrices: 268 uploads
+[CUDA] mimo prompt experts: 207 MoE steps, 45402 rows, 57445 experts, 23.070s queueing and waiting, 0 left to the CPU

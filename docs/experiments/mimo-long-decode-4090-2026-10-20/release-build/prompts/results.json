@@ -1,0 +1,36 @@
+[
+ {
+  "prompt": "C:/colibri/dev/docs/experiments/mimo-gpu-prompt-4090-2026-10-20/prompts/p4k.txt",
+  "ttft_s": 47.998782900045626,
+  "total_s": 94.37477320001926,
+  "end": [
+   "DONE",
+   "1",
+   "STAT",
+   "128",
+   "1.357",
+   "63.6",
+   "151.34",
+   "4310",
+   "1"
+  ],
+  "reply": "On an RTX 4090, the CUDA path speeds up MiMo's dense matmuls substantially: a 27136×6144 FP8 QKV decode call drops from 0.63 ms to 0.22 ms, and a 17-row prompt chunk from 9.2 ms to 1.7 ms, with wide kernels streaming each matrix once per 8 activation rows. End-to-end throughput for the Pro-MOPD checkpoint rises from about 1.79 tok/s to roughly 1.94 tok/s with lossless BF16"
+ },
+ {
+  "prompt": "C:/colibri/dev/docs/experiments/mimo-gpu-prompt-4090-2026-10-20/prompts/p25k.txt",
+  "ttft_s": 94.38071249995846,
+  "total_s": 149.7316853000084,
+  "end": [
+   "DONE",
+   "2",
+   "STAT",
+   "128",
+   "0.855",
+   "70.4",
+   "158.92",
+   "24957",
+   "1"
+  ],
+  "reply": "On an RTX 4090 (Windows, MiMo-V2.6-Pro), the engine reaches roughly 1.8–2.6 tok/s depending on configuration: the exact dense path with BF16 packing and expert streaming measures about 1.94 tok/s on the benchmark request, while speculative decoding with two MTP layers, prefetch cancellation, cache bonuses and a spinning OpenMP team pushes it to about 2.6 tok/s (2.2–2.3 tok/s across eight varied prompts). The inexact int8 o_proj variant is faster still (up to ~2.4 tok"
+ }
+]

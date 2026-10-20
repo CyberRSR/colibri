@@ -120,13 +120,29 @@ blocks, the keys prefetched, the division moved into the values, streaming store
   the 6 CUDA fallback tests, the 2 sampled-draft tests and `test_omp_spin.py` (mimo.c
   calls only what the spinning team serves) pass.
 
+## The release's build (`release-build/`)
+
+Release `mimo-pro-4090-r4` was built from the merge into main (`b613d228`), which also
+carries main's own changes to other engines, `compat.h`, the Makefile and `exp_f.h` (its
+`exp_f_call` beside `exp_f8`): its `mimo.exe` (5afda2dd) and `coli_cuda_mimo.dll`
+(126b28fa) are other bytes than the measured ones. Run the same way, they gave the
+measured build's CPU and CUDA logits and replies on both correctness prompts byte for byte
+(`same-bytes.json`); 128 tokens after the two prompts in 46.38 and 55.35 s, the same
+replies (their first tokens 48.0 and 94.4 s); the decode benchmark 2.621 tok/s, then
+2.624 for the measured build and 2.627 for the release's (decode 3.24 - 3.25, every reply
+`0305abcd...`), where the measured build gave 2.632 - 2.638 an hour before. With the merge,
+`make test-c` runs the new test (all of it passes on Windows and on Linux), and qwen38,
+colibri, glm53 and kimi_k3 compile to the same code with main's `exp_f.h` and the merged
+one.
+
 ## Files
 
 `summary.json` (every run: first token, generation, its stall, experts and attention, the
 reply's SHA-256), `series1/`, `series2/` (each run's `results.json` and `engine.txt`, the
 card's telemetry), `benchmark/`, `correctness/` (the three checks' reports, engine lines
 and replies, the tiny fixture's runs), `kernels/` (the attention bench, the unit test and
-`exp_f_check` outputs), `development.json`, `long_prompt.py`, `sha256.json`.
+`exp_f_check` outputs), `release-build/`, `development.json`, `long_prompt.py`,
+`sha256.json`.
 
 ## Reproduce
 
