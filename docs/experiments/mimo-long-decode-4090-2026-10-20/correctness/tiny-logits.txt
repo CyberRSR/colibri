@@ -1,0 +1,14 @@
+r3's engine (base, 8c0b21c0) and this round's (new, feb10604) on the tiny fixture: a 200-token prompt (the 'long' case's ids repeated) and 24 generated tokens, MIMO_LOGITS of every prompt position; chunkN = MIMO_CHUNK=N, -keys = MIMO_ATTN_KEYS=1 (attend_keys on every full layer of a block of up to MIMO_ATTN_KEY_ROWS rows), -keys64 = also MIMO_ATTN_KEY_ROWS=64. The first 16 hex digits of each SHA-256. r3's engine has no MIMO_ATTN_KEYS: its -keys runs repeat the plain ones.
+base-chunk64 logits caf127119d5bc0aa reply 9e953c45540ca4c0
+base-chunk1 logits caf127119d5bc0aa reply 9e953c45540ca4c0
+base-chunk3 logits caf127119d5bc0aa reply 9e953c45540ca4c0
+base-chunk1-keys logits caf127119d5bc0aa reply 9e953c45540ca4c0
+base-chunk3-keys logits caf127119d5bc0aa reply 9e953c45540ca4c0
+base-chunk64-keys64 logits caf127119d5bc0aa reply 9e953c45540ca4c0
+new-chunk64 logits caf127119d5bc0aa reply 9e953c45540ca4c0
+new-chunk1 logits caf127119d5bc0aa reply 9e953c45540ca4c0
+new-chunk3 logits caf127119d5bc0aa reply 9e953c45540ca4c0
+new-chunk1-keys logits caf127119d5bc0aa reply 9e953c45540ca4c0
+new-chunk3-keys logits caf127119d5bc0aa reply 9e953c45540ca4c0
+new-chunk64-keys64 logits caf127119d5bc0aa reply 9e953c45540ca4c0
+distinct logits: 1 distinct replies: 1

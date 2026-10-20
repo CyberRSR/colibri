@@ -1,0 +1,6 @@
+$ exp_f_check   (gcc 14.2 msvcrt, -O3 -march=x86-64-v3 -fopenmp, as tests/test_exp_f.py builds it)
+x87 (msvcrt): 4294967296 floats, 0 differ
+exp_f8: 4294967296 floats, 0 differ, 731 (NaNs aside) handed to exp_f
+silu: expf 33.3 ns, exp_f 16.7 ns a value (same sums)
+softmax exps: exp_f 17.00 ns, exp_f8 1.00 ns a value (same bits)
+ok

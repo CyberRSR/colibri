@@ -171,7 +171,8 @@ a prompt block now runs on the GPU:
 
 Not the CPU's bytes: the same f32 quantities summed in other orders, as the CUDA
 matmuls already were; a prompt block's rows get the same bytes whatever block or
-sub-block they are in. A decode step (one to three rows) keeps the CPU path. Measured on
+sub-block they are in. A decode step (one to three rows) keeps the CPU path
+([Decode at long contexts](#decode-at-long-contexts)). Measured on
 the RTX 4090 machine, a 4310-token prompt: 413.9 s with the CPU's prompts, 68.6 s in r2
 ([the first round](experiments/mimo-gpu-prompt-4090-2026-10-20/README.md)), 47.1 s now;
 a 24,957-token prompt: about an hour, 244.8 s in r2, 92.2 s now
@@ -199,6 +200,26 @@ sub-blocks of 110 and with the keys sent up in chunks.
 | `MIMO_CUDA_PACKED_ROWS` | 64 | The fewest rows for an o_proj the GPU does not hold to go up for the call |
 | `MIMO_CUDA_SCRATCH_MB` | 192 | The scratch of a matrix call's piece |
 | `MIMO_CUDA_MOE_RCAP` | 1024 | Rows of an expert computed at once (tests set it low) |
+
+## Decode at long contexts
+
+A decode step's rows -- the next token and the MTP drafts it verifies, one to three --
+keep the CPU path, and each full-attention layer reads its whole cache: on Pro 102 KB a
+position over the 10 full layers, 2.6 GB a step at 25,000 positions, f32 in host RAM (a
+device copy would not fit beside the 20-GiB dense budget). r3 took that attention as (row,
+key/value head) tasks, 8 to 24 for 16 workers, each reading its values once for each of
+its 16 query heads, the exps one x87 call at a time: about 400 ms of a token after a
+24,957-token prompt, more as a conversation grows. Now a block of up to
+`MIMO_ATTN_KEY_ROWS` (8) rows over `MIMO_ATTN_KEYS` (128) keys or more goes by keys
+(`attend_keys`): the scores in chunks of keys over every worker, the softmax eight heads at
+a time (`exp_f8`, the x87 `exp_f`'s bits for every float, 17 times faster), the values by
+32 columns of a key head for all its heads and rows, each value row read once a step.
+Every number is the one the loop made, summed in the loop's order, so the logits and the
+replies are the same bytes (`tests/test_mimo_attention.c` compares the two). Measured on
+the RTX 4090 machine, 128 greedy tokens after a 24,957-token prompt: 90.7 - 92.9 s with
+r3's engine, 54.6 - 55.0 s now (1.37 - 1.40 -> 2.31 - 2.33 tok/s; the attention 388 - 404
+-> 103 ms a token); after a 4310-token prompt 48.5 - 49.0 -> 45.5 - 45.8 s
+([the measurement](experiments/mimo-long-decode-4090-2026-10-20/README.md)).
 
 ## BF16 packed without loss (`MIMO_CUDA_BF16_PACK`, on by default)
 

@@ -1,0 +1,52 @@
+{
+ "note": "attend_keys's development on the RTX 4090 machine (Ryzen 9 7950X3D, 16 OpenMP workers), 20 October 2026: tests/test_mimo_attention.c's bench mode, Pro's full-layer shape (128 heads, 8 key/value heads, dims 192 and 128), ms a call, every variant's outputs the bytes of attend_heads'. 'heads' is attend_heads (the loop r3 runs), 'keys' attend_keys. The phases' times are thread 0's between the barriers (a scratch build with timers). Single runs vary by 5-10%.",
+ "exp_f8": {
+  "check": "tests/exp_f_check.c, -O3 -march=x86-64-v3: exp_f8 against exp_f on all 4294967296 floats, 0 differ, 731 handed to exp_f (its two roundings disagree; NaNs aside)",
+  "softmax_exps_ns_a_value": {"exp_f": 17.0, "exp_f8": 1.0}
+ },
+ "first_version": {
+  "layout": "scores [row][key head][key][16 lanes]",
+  "libgomp_team_24960_keys": {"1_row": {"heads": 49.49, "keys": 6.46}, "2_rows": {"heads": 55.60, "keys": 7.45}, "3_rows": {"heads": 101.94, "keys": 9.19}},
+  "libgomp_team_small": {"note": "the test linked with libgomp's team (a barrier about 60 us): attend_keys's four barriers cost it below 256 keys",
+                         "64_keys_1_row": {"heads": 0.19, "keys": 0.29}, "128_keys_3_rows": {"heads": 0.44, "keys": 0.37}, "256_keys_1_row": {"heads": 0.37, "keys": 0.37}},
+  "spinning_team": {"note": "linked with omp_spin.c as mimo.exe is",
+                    "64_keys": {"1_row": {"heads": 0.11, "keys": 0.05}, "3_rows": {"heads": 0.14, "keys": 0.16}},
+                    "128_keys": {"1_row": {"heads": 0.14, "keys": 0.07}, "3_rows": {"heads": 0.24, "keys": 0.17}},
+                    "512_keys": {"1_row": {"heads": 0.73, "keys": 0.11}, "3_rows": {"heads": 1.24, "keys": 0.24}},
+                    "4320_keys": {"1_row": {"heads": 4.87, "keys": 0.58}, "3_rows": {"heads": 9.32, "keys": 1.26}},
+                    "24960_keys": {"1_row": {"heads": 43.48, "keys": 6.21}, "3_rows": {"heads": 92.49, "keys": 9.82}}},
+  "phases_24960_keys": {"1_row": {"scores": 2.46, "softmax": 1.21, "values": 2.29}, "3_rows": {"scores": 4.20, "softmax": 1.67, "values": 5.29}},
+  "threads_24960_keys_3_rows": {"4": {"scores": 8.34, "softmax": 2.85, "values": 11.69, "keys": 22.94, "heads": 225.42},
+                                "8": {"scores": 5.55, "softmax": 1.55, "values": 6.89, "keys": 14.09, "heads": 145.86},
+                                "16": {"scores": 3.95, "softmax": 1.41, "values": 3.87, "keys": 9.44, "heads": 102.23},
+                                "32": {"scores": 3.73, "softmax": 1.51, "values": 3.55, "keys": 9.16, "heads": 63.31}},
+  "reading": "One row's scores read the keys at about 63 GB/s (154 MB in 2.46 ms), the memory's pace; more workers stop helping past 16. For three rows the scores array (12.8 MB a row) is written, read and rewritten twice in the softmax and read once for each of a key head's four value parts: with the keys and values, about 640 MB a call, near what the memory gives in 9-10 ms."
+ },
+ "dead_ends_on_the_first_version": {
+  "value_parts_of_64_columns_24960_keys": {"1_row": 5.90, "3_rows": 9.82, "note": "16 tasks: the weights read twice instead of four times, but a block's values and weights (16 KB + 12 KB) no longer fit the L1"},
+  "value_parts_of_128_columns_24960_keys": {"1_row": 6.18, "3_rows": 11.26},
+  "keys_prefetched_two_tiles_ahead_T0": {"1_row": 6.25, "3_rows": 9.82},
+  "keys_prefetched_two_tiles_ahead_T1": {"1_row": 6.16, "3_rows": 9.18},
+  "same_build_baseline_in_that_series": {"1_row": 6.10, "3_rows": 8.97}
+ },
+ "scores_by_groups_of_eight_heads": {
+  "layout": "scores [row][key head][group of 8 heads][key][8]: a softmax task's 25,000 keys are one 800 KB stretch, in its core's L2 for its second pass",
+  "24960_keys": {"1_row": {"keys": 5.50, "phases": {"scores": 2.52, "softmax": 0.43, "values": 2.54}},
+                 "3_rows": {"keys": 8.88, "phases": {"scores": 3.76, "softmax": 1.03, "values": 4.07}}},
+  "against_the_first_version_same_series": {"1_row": [6.55, 5.50], "3_rows": [10.66, 8.88]},
+  "repeats": {"1_row": [5.25, 5.30, 5.36], "2_rows": [7.25, 7.30, 7.95], "3_rows": [10.06, 10.19, 9.23]},
+  "kept": true
+ },
+ "dead_ends_on_the_groups": {
+  "weights_divided_in_the_values_phase": {"note": "the softmax one pass (exps and denominator), each value part dividing its block's exps into an L1 buffer: one pass over the scores less, the divisions four times over",
+                                          "repeats": {"1_row": [5.50, 5.62, 6.34], "2_rows": [7.66, 7.79, 7.81], "3_rows": [10.60, 9.73, 9.88]}},
+  "the_same_with_streaming_stores_of_the_scores": {"3_rows": [10.22, 10.00]},
+  "value_parts_and_blocks": {"note": "slices of 8 columns a part, keys a block",
+                             "32_cols_64_keys_kept": {"1_row": [5.28, 5.38], "3_rows": [8.89, 9.76]},
+                             "64_cols_32_keys": {"1_row": [5.59, 5.71], "3_rows": [10.23, 11.31]},
+                             "64_cols_64_keys": {"1_row": [5.82, 5.58], "3_rows": [9.07, 9.86]},
+                             "16_cols_128_keys": {"1_row": [5.18, 5.55], "3_rows": [9.26, 10.16]},
+                             "32_cols_32_keys": {"1_row": [5.92, 5.56], "3_rows": [10.34, 11.06]}}
+ },
+ "threshold": "MIMO_ATTN_KEYS=128: with the spinning team attend_keys is the faster from 128 keys for one to three rows (at 64 keys and three rows the two are even); shorter contexts keep attend_heads, and so do the sliding-window layers (128 keys) whatever the context"
+}

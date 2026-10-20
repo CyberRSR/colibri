@@ -1,0 +1,359 @@
+{
+ "note": "long_prompt.py (unchanged) over one engine's SERVE pipe: p4k.txt (4310 tokens) then p25k.txt (24,957), 128 greedy tokens each, thinking off, prefix reuse off, MIMO_CHUNK unset (a prompt in one GPU block). generation_s is the engine's own line, the reply's tokens after the first (which comes with the prompt); decode_tok_s = (tokens - 1) / generation_s. The two engines alternate in each series.",
+ "series1": {
+  "time": "22:12-22:31",
+  "runs": {
+   "1-base": {
+    "engine": "r3's engine (the code of mimo-pro-4090-r3, 4b8bd1c8; mimo.exe 8c0b21c0, DLL c1019362)",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "tokens": 128,
+      "length_limited": true,
+      "first_token_s": 47.91,
+      "generation_s": 49.03,
+      "decode_tok_s": 2.59,
+      "gen_stalled_s": 8.07,
+      "gen_experts_s": 25.63,
+      "gen_attention_s": 11.14,
+      "attention_ms_a_token": 87.7,
+      "reply_sha256": "23ac742871bc543cd082071118c8a793e21a626856b1429be5c28ad2d3808a46",
+      "engine_line": "[mimo] prompt 47.85s (stalled 0.37s, experts 41.01s, attention 4.42s, routers 0.81s, 26022 demand reads); generation 49.03s (stalled 8.07s, experts 25.63s, attention 11.14s, 6292 demand reads, 23575 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "tokens": 128,
+      "length_limited": true,
+      "first_token_s": 93.89,
+      "generation_s": 92.85,
+      "decode_tok_s": 1.368,
+      "gen_stalled_s": 9.92,
+      "gen_experts_s": 26.97,
+      "gen_attention_s": 51.33,
+      "attention_ms_a_token": 404.2,
+      "reply_sha256": "76748fbcb3193f22b01adae13e68b83ab9778ec1756be7a31da4b63629cb1ada",
+      "engine_line": "[mimo] prompt 93.81s (stalled 0.02s, experts 54.01s, attention 28.32s, routers 4.50s, 20598 demand reads); generation 92.85s (stalled 9.92s, experts 26.97s, attention 51.33s, 6798 demand reads, 26207 prefetched)"
+     }
+    ]
+   },
+   "2-new": {
+    "engine": "this round's engine (8008234f; mimo.exe feb10604, DLL c1019362)",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "tokens": 128,
+      "length_limited": true,
+      "first_token_s": 48.06,
+      "generation_s": 45.82,
+      "decode_tok_s": 2.772,
+      "gen_stalled_s": 8.87,
+      "gen_experts_s": 25.51,
+      "gen_attention_s": 7.3,
+      "attention_ms_a_token": 57.5,
+      "reply_sha256": "23ac742871bc543cd082071118c8a793e21a626856b1429be5c28ad2d3808a46",
+      "engine_line": "[mimo] prompt 48.00s (stalled 0.37s, experts 40.81s, attention 4.69s, routers 0.86s, 26022 demand reads); generation 45.82s (stalled 8.87s, experts 25.51s, attention 7.30s, 6279 demand reads, 23550 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "tokens": 128,
+      "length_limited": true,
+      "first_token_s": 92.29,
+      "generation_s": 55.01,
+      "decode_tok_s": 2.309,
+      "gen_stalled_s": 10.34,
+      "gen_experts_s": 26.83,
+      "gen_attention_s": 13.17,
+      "attention_ms_a_token": 103.7,
+      "reply_sha256": "76748fbcb3193f22b01adae13e68b83ab9778ec1756be7a31da4b63629cb1ada",
+      "engine_line": "[mimo] prompt 92.21s (stalled 0.02s, experts 53.21s, attention 27.48s, routers 4.57s, 20592 demand reads); generation 55.01s (stalled 10.34s, experts 26.83s, attention 13.17s, 6778 demand reads, 26194 prefetched)"
+     }
+    ]
+   },
+   "3-base": {
+    "engine": "r3's engine (the code of mimo-pro-4090-r3, 4b8bd1c8; mimo.exe 8c0b21c0, DLL c1019362)",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "tokens": 128,
+      "length_limited": true,
+      "first_token_s": 47.29,
+      "generation_s": 48.58,
+      "decode_tok_s": 2.614,
+      "gen_stalled_s": 8.52,
+      "gen_experts_s": 25.28,
+      "gen_attention_s": 10.73,
+      "attention_ms_a_token": 84.5,
+      "reply_sha256": "23ac742871bc543cd082071118c8a793e21a626856b1429be5c28ad2d3808a46",
+      "engine_line": "[mimo] prompt 47.23s (stalled 0.35s, experts 40.53s, attention 4.30s, routers 0.84s, 26022 demand reads); generation 48.58s (stalled 8.52s, experts 25.28s, attention 10.73s, 6302 demand reads, 23561 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "tokens": 128,
+      "length_limited": true,
+      "first_token_s": 92.12,
+      "generation_s": 90.7,
+      "decode_tok_s": 1.4,
+      "gen_stalled_s": 10.48,
+      "gen_experts_s": 26.47,
+      "gen_attention_s": 49.26,
+      "attention_ms_a_token": 387.9,
+      "reply_sha256": "76748fbcb3193f22b01adae13e68b83ab9778ec1756be7a31da4b63629cb1ada",
+      "engine_line": "[mimo] prompt 92.05s (stalled 0.02s, experts 53.02s, attention 27.61s, routers 4.53s, 20520 demand reads); generation 90.70s (stalled 10.48s, experts 26.47s, attention 49.26s, 6804 demand reads, 26190 prefetched)"
+     }
+    ]
+   },
+   "4-new": {
+    "engine": "this round's engine (8008234f; mimo.exe feb10604, DLL c1019362)",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "tokens": 128,
+      "length_limited": true,
+      "first_token_s": 47.24,
+      "generation_s": 45.56,
+      "decode_tok_s": 2.788,
+      "gen_stalled_s": 8.97,
+      "gen_experts_s": 25.33,
+      "gen_attention_s": 7.25,
+      "attention_ms_a_token": 57.1,
+      "reply_sha256": "23ac742871bc543cd082071118c8a793e21a626856b1429be5c28ad2d3808a46",
+      "engine_line": "[mimo] prompt 47.18s (stalled 0.35s, experts 40.48s, attention 4.30s, routers 0.81s, 26022 demand reads); generation 45.56s (stalled 8.97s, experts 25.33s, attention 7.25s, 6257 demand reads, 23592 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "tokens": 128,
+      "length_limited": true,
+      "first_token_s": 92.29,
+      "generation_s": 54.65,
+      "decode_tok_s": 2.324,
+      "gen_stalled_s": 10.4,
+      "gen_experts_s": 26.66,
+      "gen_attention_s": 13.07,
+      "attention_ms_a_token": 102.9,
+      "reply_sha256": "76748fbcb3193f22b01adae13e68b83ab9778ec1756be7a31da4b63629cb1ada",
+      "engine_line": "[mimo] prompt 92.22s (stalled 0.02s, experts 53.21s, attention 27.57s, routers 4.58s, 20566 demand reads); generation 54.65s (stalled 10.40s, experts 26.66s, attention 13.07s, 6773 demand reads, 26256 prefetched)"
+     }
+    ]
+   }
+  }
+ },
+ "series2": {
+  "time": "22:32-22:50",
+  "runs": {
+   "1-base": {
+    "engine": "r3's engine (the code of mimo-pro-4090-r3, 4b8bd1c8; mimo.exe 8c0b21c0, DLL c1019362)",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "tokens": 128,
+      "length_limited": true,
+      "first_token_s": 47.22,
+      "generation_s": 48.52,
+      "decode_tok_s": 2.617,
+      "gen_stalled_s": 8.5,
+      "gen_experts_s": 25.26,
+      "gen_attention_s": 10.71,
+      "attention_ms_a_token": 84.3,
+      "reply_sha256": "23ac742871bc543cd082071118c8a793e21a626856b1429be5c28ad2d3808a46",
+      "engine_line": "[mimo] prompt 47.15s (stalled 0.36s, experts 40.48s, attention 4.30s, routers 0.81s, 26022 demand reads); generation 48.52s (stalled 8.50s, experts 25.26s, attention 10.71s, 6291 demand reads, 23524 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "tokens": 128,
+      "length_limited": true,
+      "first_token_s": 92.32,
+      "generation_s": 91.0,
+      "decode_tok_s": 1.396,
+      "gen_stalled_s": 10.4,
+      "gen_experts_s": 26.49,
+      "gen_attention_s": 49.62,
+      "attention_ms_a_token": 390.7,
+      "reply_sha256": "76748fbcb3193f22b01adae13e68b83ab9778ec1756be7a31da4b63629cb1ada",
+      "engine_line": "[mimo] prompt 92.24s (stalled 0.02s, experts 53.20s, attention 27.55s, routers 4.54s, 20572 demand reads); generation 91.00s (stalled 10.40s, experts 26.49s, attention 49.62s, 6791 demand reads, 26236 prefetched)"
+     }
+    ]
+   },
+   "2-new": {
+    "engine": "this round's engine (8008234f; mimo.exe feb10604, DLL c1019362)",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "tokens": 128,
+      "length_limited": true,
+      "first_token_s": 47.13,
+      "generation_s": 45.52,
+      "decode_tok_s": 2.79,
+      "gen_stalled_s": 8.93,
+      "gen_experts_s": 25.32,
+      "gen_attention_s": 7.27,
+      "attention_ms_a_token": 57.2,
+      "reply_sha256": "23ac742871bc543cd082071118c8a793e21a626856b1429be5c28ad2d3808a46",
+      "engine_line": "[mimo] prompt 47.06s (stalled 0.34s, experts 40.40s, attention 4.31s, routers 0.81s, 26022 demand reads); generation 45.52s (stalled 8.93s, experts 25.32s, attention 7.27s, 6267 demand reads, 23569 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "tokens": 128,
+      "length_limited": true,
+      "first_token_s": 92.24,
+      "generation_s": 54.62,
+      "decode_tok_s": 2.325,
+      "gen_stalled_s": 10.36,
+      "gen_experts_s": 26.63,
+      "gen_attention_s": 13.11,
+      "attention_ms_a_token": 103.2,
+      "reply_sha256": "76748fbcb3193f22b01adae13e68b83ab9778ec1756be7a31da4b63629cb1ada",
+      "engine_line": "[mimo] prompt 92.16s (stalled 0.02s, experts 53.14s, attention 27.57s, routers 4.54s, 20585 demand reads); generation 54.62s (stalled 10.36s, experts 26.63s, attention 13.11s, 6771 demand reads, 26179 prefetched)"
+     }
+    ]
+   },
+   "3-base": {
+    "engine": "r3's engine (the code of mimo-pro-4090-r3, 4b8bd1c8; mimo.exe 8c0b21c0, DLL c1019362)",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "tokens": 128,
+      "length_limited": true,
+      "first_token_s": 47.17,
+      "generation_s": 48.49,
+      "decode_tok_s": 2.619,
+      "gen_stalled_s": 8.44,
+      "gen_experts_s": 25.26,
+      "gen_attention_s": 10.76,
+      "attention_ms_a_token": 84.7,
+      "reply_sha256": "23ac742871bc543cd082071118c8a793e21a626856b1429be5c28ad2d3808a46",
+      "engine_line": "[mimo] prompt 47.11s (stalled 0.35s, experts 40.46s, attention 4.30s, routers 0.81s, 26022 demand reads); generation 48.49s (stalled 8.44s, experts 25.26s, attention 10.76s, 6295 demand reads, 23534 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "tokens": 128,
+      "length_limited": true,
+      "first_token_s": 92.12,
+      "generation_s": 90.72,
+      "decode_tok_s": 1.4,
+      "gen_stalled_s": 10.55,
+      "gen_experts_s": 26.49,
+      "gen_attention_s": 49.21,
+      "attention_ms_a_token": 387.5,
+      "reply_sha256": "76748fbcb3193f22b01adae13e68b83ab9778ec1756be7a31da4b63629cb1ada",
+      "engine_line": "[mimo] prompt 92.05s (stalled 0.02s, experts 53.14s, attention 27.56s, routers 4.51s, 20576 demand reads); generation 90.72s (stalled 10.55s, experts 26.49s, attention 49.21s, 6810 demand reads, 26196 prefetched)"
+     }
+    ]
+   },
+   "4-new": {
+    "engine": "this round's engine (8008234f; mimo.exe feb10604, DLL c1019362)",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "tokens": 128,
+      "length_limited": true,
+      "first_token_s": 47.16,
+      "generation_s": 45.51,
+      "decode_tok_s": 2.791,
+      "gen_stalled_s": 8.95,
+      "gen_experts_s": 25.31,
+      "gen_attention_s": 7.24,
+      "attention_ms_a_token": 57.0,
+      "reply_sha256": "23ac742871bc543cd082071118c8a793e21a626856b1429be5c28ad2d3808a46",
+      "engine_line": "[mimo] prompt 47.10s (stalled 0.36s, experts 40.42s, attention 4.30s, routers 0.81s, 26022 demand reads); generation 45.51s (stalled 8.95s, experts 25.31s, attention 7.24s, 6262 demand reads, 23525 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "tokens": 128,
+      "length_limited": true,
+      "first_token_s": 92.31,
+      "generation_s": 54.62,
+      "decode_tok_s": 2.325,
+      "gen_stalled_s": 10.37,
+      "gen_experts_s": 26.68,
+      "gen_attention_s": 13.05,
+      "attention_ms_a_token": 102.8,
+      "reply_sha256": "76748fbcb3193f22b01adae13e68b83ab9778ec1756be7a31da4b63629cb1ada",
+      "engine_line": "[mimo] prompt 92.24s (stalled 0.02s, experts 53.26s, attention 27.60s, routers 4.55s, 20543 demand reads); generation 54.62s (stalled 10.37s, experts 26.68s, attention 13.05s, 6764 demand reads, 26165 prefetched)"
+     }
+    ]
+   }
+  }
+ },
+ "benchmark": {
+  "note": "benchmark_mimo_cuda.py --cap 104 --threads 16 --read-threads 16 --context 16384 --tokens 64 --runs 3 (a warmup and three measured requests of 64 tokens after a 17-token prompt), 22:51-22:59. Its 'commit' field is the checkout's HEAD when it ran, not the engine's source: the engine_sha256 says which engine ran.",
+  "runs": {
+   "1-base": {
+    "engine": "r3's engine (the code of mimo-pro-4090-r3, 4b8bd1c8; mimo.exe 8c0b21c0, DLL c1019362)",
+    "engine_sha256": "8c0b21c05af7bd0b0b1bf997b2619a5c9efe17bad889e44cf08e39809ff450cf",
+    "median_tok_s": 2.6398,
+    "median_decode_tok_s": 3.2632,
+    "measured_tok_s": [
+     2.65,
+     2.6398,
+     2.6352
+    ],
+    "replies": [
+     "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+    ]
+   },
+   "2-new": {
+    "engine": "this round's engine (8008234f; mimo.exe feb10604, DLL c1019362)",
+    "engine_sha256": "feb106041e60a39ffed88a74a765f4037bdd4078d25f8fe2a66023d06613640a",
+    "median_tok_s": 2.6382,
+    "median_decode_tok_s": 3.2685,
+    "measured_tok_s": [
+     2.6382,
+     2.6311,
+     2.6415
+    ],
+    "replies": [
+     "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+    ]
+   },
+   "3-base": {
+    "engine": "r3's engine (the code of mimo-pro-4090-r3, 4b8bd1c8; mimo.exe 8c0b21c0, DLL c1019362)",
+    "engine_sha256": "8c0b21c05af7bd0b0b1bf997b2619a5c9efe17bad889e44cf08e39809ff450cf",
+    "median_tok_s": 2.6354,
+    "median_decode_tok_s": 3.2603,
+    "measured_tok_s": [
+     2.6479,
+     2.6354,
+     2.6258
+    ],
+    "replies": [
+     "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+    ]
+   },
+   "4-new": {
+    "engine": "this round's engine (8008234f; mimo.exe feb10604, DLL c1019362)",
+    "engine_sha256": "feb106041e60a39ffed88a74a765f4037bdd4078d25f8fe2a66023d06613640a",
+    "median_tok_s": 2.632,
+    "median_decode_tok_s": 3.2502,
+    "measured_tok_s": [
+     2.6385,
+     2.632,
+     2.6214
+    ],
+    "replies": [
+     "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be"
+    ]
+   }
+  }
+ },
+ "correctness": {
+  "check17": "check_mimo_cuda.py --cap 64 --threads 16 --release-host (the 17-token benchmark prompt): cpu.f32 cebbf3a8..., cuda.f32 01479691..., replies 63ed9984..., 17/17 argmax",
+  "check658": "--prompt-file ../mimo-gpu-prompt-4090-2026-10-20/correctness/prompt.txt --tokens 32 --chunk 256: cpu.f32 874ee6e8..., cuda.f32 03ce216b..., replies f0aaa17f... (r3's: ../mimo-gpu-prompt2-4090-2026-10-20/correctness/result.json), 658/658 argmax, max KL 8.57e-7",
+  "check658-keys": "the same with MIMO_ATTN_KEYS=1 MIMO_ATTN_KEY_ROWS=256 (attend_keys for every CPU prompt block of 256 rows too): the same cpu.f32, cuda.f32 and replies"
+ }
+}

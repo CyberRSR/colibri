@@ -1,0 +1,7 @@
+$ tests/test_mimo_attention.exe   (mingw32-make tests/test_mimo_attention.exe CUDA_DLL=1 ARCH=native VK=0: gcc 14.2, -O3 -march=native)
+112 cases, 0 differ
+ok
+
+$ test_mimo_attention built with -O3 -march=x86-64-v3 (AVX2 and FMA, no AVX-512)
+112 cases, 0 differ
+ok
