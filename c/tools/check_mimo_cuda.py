@@ -29,6 +29,9 @@ def main():
     p.add_argument("--chunk", type=int, default=64,
                    help="prompt rows a block (MIMO_CHUNK); 64 or more puts a block's experts, attention "
                         "and matrices on the GPU's prompt kernels")
+    p.add_argument("--env", action="append", default=[], metavar="K=V",
+                   help="another variable for both runs (MIMO_ATTN_ROWS=64: blocks of 256 rows in pieces "
+                        "of 64, the GPU's pipelined layers)")
     a = p.parse_args()
     if a.tokens < 1:
         p.error("--tokens must be positive")
@@ -42,6 +45,9 @@ def main():
               "MIMO_CTX": "16384", "COLI_VULKAN": "0", "MIMO_CUDA_DENSE_GB": "20",
               "MIMO_CUDA_RESERVE_GB": "2", "SERVE": "0"}
     config["MIMO_CUDA_RELEASE_HOST"] = "1" if a.release_host else "0"
+    for kv in a.env:
+        k, _, v = kv.partition("=")
+        config[k] = v
     for backend in ("cpu", "cuda"):
         env = {k: v for k, v in os.environ.items() if not k.startswith(("MIMO_", "COLI_", "CUDA_"))}
         env.update(config)
