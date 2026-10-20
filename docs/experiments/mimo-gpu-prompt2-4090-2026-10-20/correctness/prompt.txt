@@ -1,0 +1,46 @@
+<|im_start|>user
+# MiMo native dense CUDA offload
+
+`MIMO_CUDA=1` moves MiMo's frequently used dense matrices to CUDA VRAM. It
+supports Flash and Pro, including the released Pro-MOPD split-shard checkpoint.
+FP8 e4m3 and BF16 stay in their original formats; activations stay float32.
+There is no conversion of the checkpoint and no additional quantization.
+
+The QKV matrices are placed first, then the language-model head, the dense MLP
+and as many attention output projections as the budget permits. In particular,
+a 24-GiB card does not have to fit complete layers. FP8 scales use the engine's
+deinterleaved **per-row** layout, not the generic CUDA backend's block grid.
+Pinned activation staging is reused between calls. The same kernel reduction
+is used for decode and prefill so chunk sizes do not change the arithmetic.
+
+The trunk's shapes (FP8 rows a multiple of 512 bytes, BF16 rows a multiple of 256
+elements: every MiMo matrix) run on wide kernels: one warp per output row, each
+lane loading 16 weight bytes at a time, e4m3 widened by the hardware conversion
+(exact), and a tile of up to 8 activation rows sharing every weight it decodes,
+so a prompt chunk streams a matrix once per 8 rows instead of once per row. A
+decode step uses a one-row tile (more warps in flight). Each row's sums follow
+the element index only, so a chunk of S rows gives the bytes of S one-row calls
+(`tests/test_mimo_cuda.cu` checks it on both kernels). On the RTX 4090 a 27136 x
+6144 FP8 qkv takes 0.22 ms per decode call instead of 0.63, and a 17-row prompt
+chunk 1.7 ms instead of 9.2.
+
+Routing, streamed MXFP4 experts, attention/KV state and vision remain on CPU.
+CPU weight copies are retained by default. `MIMO_CUDA_RELEASE_HOST=1` releases
+successfully uploaded host matrices so RAM can hold more experts. If CUDA
+cannot compute a matrix, the engine reads it back through its original loader,
+including QKV deinterleaving and the selected dense format. Recovered host
+weights stay in RAM. Leave enough host-memory headroom for this recovery when
+choosing an expert-cache size. CUDA and Vulkan placement are
+mutually exclusive when CUDA successfully places a matrix. A missing DLL or
+device leaves the existing CPU/Vulkan path available. Allocation failures leave
+unplaced matrices on CPU; a compute failure disables further CUDA computation.
+GPU and CPU reductions have different rounding: validate tokens/logits on the
+intended workload, rather than assuming bit identity across backends.
+
+## Build on Windows
+
+Requirements: MinGW-w64 GCC with OpenMP and GNU make, CUDA Toolkit, Visual
+Studio x64 C++ build tools. From the r
+
+Summarize the text above in one sentence.<|im_end|><|im_start|>assistant
+<think></think>

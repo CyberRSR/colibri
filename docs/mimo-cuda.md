@@ -125,39 +125,60 @@ better part of an hour, most of it CPU arithmetic while the disks and the GPU wa
 Its full-attention layers grew with the square of the prompt on top. With `MIMO_CUDA`
 a prompt block now runs on the GPU:
 
-- **experts** (`MIMO_CUDA_MOE`, steps of 64 rows or more): each expert's bytes come
-  through the expert cache as on the CPU (the held ones at once, the others read by
-  the per-drive readers), are copied into a pinned buffer over the workers, go up while
-  the device computes the one before, and the device computes gate, up, silu and down
-  over the rows that chose it (f32 products of the exact e2m1 values, each 32-column
-  group's sum times its scale, as `matmul_mxfp4` groups them). Its rows' outputs come
-  down into the (row, choice) pairs the CPU path fills, and each row sums its experts in
-  its routing order as before, so a row's bytes depend neither on the rows beside it
-  nor on when its experts arrived.
+- **experts** (`MIMO_CUDA_MOE`, steps of 64 rows or more): an expert the cache holds is
+  copied into one of 32 pinned staging buffers over the workers; one it does not hold is
+  read from disk straight into one (`MIMO_CUDA_MOE_DIRECT`, `MIMO_CUDA_MOE_STAGES`), the
+  cache taking only those it can without letting go of one the step uses. Each goes up
+  into one of 12 device slots while the device computes the ones before, and the device
+  computes gate, up, silu and down over the rows that chose it (f32 products of the exact
+  e2m1 values, each 32-column group's sum times its scale, as `matmul_mxfp4` groups
+  them). The down kernel stores its rows' outputs straight into the (row, choice) pairs
+  the CPU path fills, in pinned host memory -- the card has one copy engine, and output
+  copies queued behind their kernels held up every later expert's upload -- and each row
+  sums its experts in its routing order as before, so a row's bytes depend neither on the
+  rows beside it nor on when its experts arrived.
 - **blocks of up to 32,768 rows** (`MIMO_CUDA_CHUNK`, bounded by the card's free
-  memory at the first prompt): a block reads each expert once for all its rows, so a
+  memory at the first prompt: 4 x (hidden + experts) bytes a row beside 640 MB, and
+  `MIMO_CUDA_SPARE_MB` more): a block reads each expert once for all its rows, so a
   25,000-token prompt reads the 531 GB of experts once, not 49 times as 512-row blocks
-  did. Its attention goes in pieces of 1024 rows (`MIMO_ATTN_ROWS`), and every matrix
-  call in pieces whose scratch stays under 192 MB (`MIMO_CUDA_SCRATCH_MB`): a WDDM card
+  did. Its attention goes in sub-blocks of 1024 rows (`MIMO_ATTN_ROWS`), every matrix
+  call in pieces whose scratch stays under 192 MB (`MIMO_CUDA_SCRATCH_MB`), and the
+  attention, the experts and the matrices take turns in one device arena: a WDDM card
   that runs out of memory pages it and crawls.
-- **attention** (`MIMO_CUDA_ATTN`, blocks of 32 rows or more): the scores, softmax with
-  the sink and values of every head on the device, an online softmax in f32, the keys
-  and values of the positions a row sees uploaded with the block (in chunks of
-  `MIMO_CUDA_ATTN_MB`, 256, for long contexts).
-- **matrices** of a prompt block (64 rows or more, `MIMO_CUDA_TILED_ROWS`): tiled kernels
-  for FP8 (the qkv, the dense MLP) and packed bf16 (the o_proj), 64 x 64 tiles out of
-  shared memory instead of the decode kernels' one warp a row; the o_proj the GPU does not
-  hold go up for the block in their packed form (`MIMO_CUDA_PACKED_ROWS`).
-- **the routers** of those MoE steps (`MIMO_CUDA_ROUTER`), sent up for the block; the
-  norms, RoPE and each row's weighted sum run over the CPU's workers.
+- **attention** (`MIMO_CUDA_ATTN`, blocks of 32 rows or more): a sub-block's normed rows
+  go up once and stay on the device from the qkv product through RoPE (the host's
+  tables), the attention and o_proj (`MIMO_CUDA_ATTN_DEV`); only its keys and values,
+  for the caches, and o_proj's output come down. The attention is a flash kernel in f32:
+  tiles of 128 queries (the heads that share a key head) by 128 keys at absolute
+  positions, an online softmax with the sink. Earlier blocks' keys and values go up in
+  chunks of `MIMO_CUDA_ATTN_MB` (256); a full layer keeps a block's on the device for its
+  next sub-block.
+- **matrices** of a prompt block (64 rows or more, `MIMO_CUDA_TILED_ROWS`): one tiled
+  kernel for FP8 (the qkv, the dense MLP), bf16 (the routers), packed bf16 (the o_proj)
+  and the experts' MXFP4, 128 x 128 tiles, 8 x 8 a thread, out of shared memory instead
+  of the decode kernels' one warp a row. The scaled formats sum each scale group apart
+  (FP8's 128 columns, MXFP4's 32) and add the sum times its scale, as the CPU does: one
+  FMA chain with the scales folded into the weights was ten times less accurate, and
+  the argmax left the CPU's at 7 of 658 positions. The o_proj the GPU does not hold go
+  up for the block in their packed form (`MIMO_CUDA_PACKED_ROWS`).
+- **the routers** of those MoE steps (`MIMO_CUDA_ROUTER`), from the rows already up for
+  the experts.
+- **the CPU's per-row work beside the device's** (`MIMO_PIPE`): while the device computes
+  a sub-block's attention, the CPU readies the next one's rows (the step before's
+  weighted sums, the first norm) and finishes the one before (its residual, the second
+  norm), in each row's own order. The block's residual and normed rows sit in pinned
+  memory (`MIMO_CUDA_PIN`).
 
 Not the CPU's bytes: the same f32 quantities summed in other orders, as the CUDA
-matmuls already were; a prompt block's rows get the same bytes whatever block they are
-in. A decode step (one to three rows) keeps the CPU path. Measured on the RTX 4090
-machine ([the experiment](experiments/mimo-gpu-prompt-4090-2026-10-20/README.md)), a
-4310-token prompt: 413.9 s before, 68.6 s now; a 24,957-token prompt: 244.8 s (about an
-hour before, by the parts above). Against the CPU path on a 658-token prompt: the same
-argmax at every position, max KL 8.7e-7, the same greedy reply.
+matmuls already were; a prompt block's rows get the same bytes whatever block or
+sub-block they are in. A decode step (one to three rows) keeps the CPU path. Measured on
+the RTX 4090 machine, a 4310-token prompt: 413.9 s with the CPU's prompts, 68.6 s in r2
+([the first round](experiments/mimo-gpu-prompt-4090-2026-10-20/README.md)), 47.1 s now;
+a 24,957-token prompt: about an hour, 244.8 s in r2, 92.2 s now
+([the second](experiments/mimo-gpu-prompt2-4090-2026-10-20/README.md)). Against the CPU
+path on a 658-token prompt: the same argmax at every position, max KL 8.6e-7, the same
+greedy reply, and the same logits byte for byte in blocks of 256 or 330 rows, in
+sub-blocks of 110 and with the keys sent up in chunks.
 
 | Variable | Default | Meaning |
 |---|---:|---|
@@ -165,10 +186,15 @@ argmax at every position, max KL 8.7e-7, the same greedy reply.
 | `MIMO_CUDA_MOE_ROWS` | 64 | The fewest rows a MoE step needs to go to the GPU |
 | `MIMO_CUDA_CHUNK` | 32768 | Prompt rows a block holds with the GPU's experts (lower when the card has less free memory: `MIMO_CUDA_SPARE_MB`, 0, keeps more for other programs); `MIMO_CHUNK` set wins |
 | `MIMO_CUDA_ROUTER` | 1 | The routers of the GPU's MoE steps on the GPU too |
+| `MIMO_CUDA_MOE_DIRECT` | 1 | Experts the cache does not hold read from disk straight into staging; 0: through the cache's slots |
+| `MIMO_CUDA_MOE_STAGES` | 32 | The pinned staging buffers of the GPU's experts |
 | `MIMO_CUDA_ATTN` | 1 | A prompt block's attention on the GPU; 0: the CPU's |
+| `MIMO_CUDA_ATTN_DEV` | 1 | A sub-block's rows kept on the device from the qkv to o_proj; 0: they go down for RoPE and up again |
 | `MIMO_CUDA_ATTN_ROWS` | 32 | The fewest rows an attention needs to go to the GPU |
-| `MIMO_CUDA_ATTN_MB` | 256 | Keys and values sent up at once (more go in chunks) |
-| `MIMO_ATTN_ROWS` | 1024 | A larger block's attention goes in pieces of this many rows |
+| `MIMO_CUDA_ATTN_MB` | 256 | Earlier positions' keys and values sent up at once (more go in chunks) |
+| `MIMO_ATTN_ROWS` | 1024 | A larger block's attention goes in sub-blocks of this many rows |
+| `MIMO_PIPE` | 1 | The CPU's per-row work beside the device's sub-blocks; 0: one after the other |
+| `MIMO_CUDA_PIN` | 1 | A prompt block's rows in pinned memory |
 | `MIMO_CUDA_TILED_ROWS` | 64 | The fewest rows a matrix call needs for the tiled kernels |
 | `MIMO_CUDA_PACKED_ROWS` | 64 | The fewest rows for an o_proj the GPU does not hold to go up for the call |
 | `MIMO_CUDA_SCRATCH_MB` | 192 | The scratch of a matrix call's piece |

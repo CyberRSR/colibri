@@ -1,0 +1,317 @@
+{
+ "series1": {
+  "note": "17:39-17:57. This round's engine before its last change (mimo.exe 8c0b21c0, DLL bc3d2303): its decode steps' matrix calls still asked the driver whether their buffers were pinned -- a decode-only change, the prompt path's calls the same.",
+  "runs": {
+   "1-base": {
+    "engine": "r2's engine (the code of mimo-pro-4090-r2, b5b45f2c; mimo.exe 9c640beb, DLL 174c56ff)",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "first_token_s": 69.13,
+      "prompt_s": 69.07,
+      "experts_s": 38.26,
+      "attention_s": 19.61,
+      "reply": "On an RTX 4090, the CUDA path speeds up Mi",
+      "engine_line": "[mimo] prompt 69.07s (stalled 7.97s, experts 38.26s, attention 19.61s, routers 1.11s, 26021 demand reads); generation 8.39s (stalled 2.49s, experts 3.38s, attention 1.52s, 1181 demand reads, 4459 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "first_token_s": 243.91,
+      "prompt_s": 243.84,
+      "experts_s": 88.14,
+      "attention_s": 136.09,
+      "reply": "On an RTX 4090, MiMo-V2.6",
+      "engine_line": "[mimo] prompt 243.84s (stalled 0.75s, experts 88.14s, attention 136.09s, routers 6.00s, 20978 demand reads); generation 12.91s (stalled 2.82s, experts 3.23s, attention 5.90s, 1284 demand reads, 4754 prefetched)"
+     }
+    ]
+   },
+   "2-final": {
+    "engine": "this round's engine",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "first_token_s": 47.26,
+      "prompt_s": 47.2,
+      "experts_s": 40.46,
+      "attention_s": 4.35,
+      "reply": "On an RTX 4090, the CUDA path speeds up Mi",
+      "engine_line": "[mimo] prompt 47.20s (stalled 0.36s, experts 40.46s, attention 4.35s, routers 0.81s, 26022 demand reads); generation 7.18s (stalled 1.45s, experts 3.28s, attention 1.51s, 873 demand reads, 3363 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "first_token_s": 92.51,
+      "prompt_s": 92.44,
+      "experts_s": 53.22,
+      "attention_s": 27.84,
+      "reply": "On an RTX 4090 (Windows, MiMo-V2",
+      "engine_line": "[mimo] prompt 92.44s (stalled 0.01s, experts 53.22s, attention 27.84s, routers 4.56s, 20970 demand reads); generation 10.95s (stalled 0.87s, experts 2.99s, attention 6.16s, 629 demand reads, 2529 prefetched)"
+     }
+    ]
+   },
+   "3-base": {
+    "engine": "r2's engine (the code of mimo-pro-4090-r2, b5b45f2c; mimo.exe 9c640beb, DLL 174c56ff)",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "first_token_s": 69.14,
+      "prompt_s": 69.08,
+      "experts_s": 38.16,
+      "attention_s": 19.69,
+      "reply": "On an RTX 4090, the CUDA path speeds up Mi",
+      "engine_line": "[mimo] prompt 69.08s (stalled 7.99s, experts 38.16s, attention 19.69s, routers 1.10s, 26021 demand reads); generation 8.40s (stalled 2.55s, experts 3.38s, attention 1.51s, 1190 demand reads, 4457 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "first_token_s": 244.71,
+      "prompt_s": 244.64,
+      "experts_s": 88.15,
+      "attention_s": 136.85,
+      "reply": "On an RTX 4090, MiMo-V2.6",
+      "engine_line": "[mimo] prompt 244.64s (stalled 0.77s, experts 88.15s, attention 136.85s, routers 5.97s, 20934 demand reads); generation 12.70s (stalled 2.86s, experts 3.17s, attention 5.75s, 1282 demand reads, 4748 prefetched)"
+     }
+    ]
+   },
+   "4-final": {
+    "engine": "this round's engine",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "first_token_s": 47.11,
+      "prompt_s": 47.05,
+      "experts_s": 40.39,
+      "attention_s": 4.3,
+      "reply": "On an RTX 4090, the CUDA path speeds up Mi",
+      "engine_line": "[mimo] prompt 47.05s (stalled 0.36s, experts 40.39s, attention 4.30s, routers 0.81s, 26022 demand reads); generation 7.17s (stalled 1.45s, experts 3.28s, attention 1.49s, 862 demand reads, 3351 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "first_token_s": 92.18,
+      "prompt_s": 92.1,
+      "experts_s": 53.21,
+      "attention_s": 27.54,
+      "reply": "On an RTX 4090 (Windows, MiMo-V2",
+      "engine_line": "[mimo] prompt 92.10s (stalled 0.02s, experts 53.21s, attention 27.54s, routers 4.50s, 21023 demand reads); generation 11.07s (stalled 0.92s, experts 3.01s, attention 6.17s, 649 demand reads, 2562 prefetched)"
+     }
+    ]
+   }
+  }
+ },
+ "series2": {
+  "note": "18:12-18:32. The shipping engine (mimo.exe 8c0b21c0, DLL c1019362). The machine was slower for part of it: run 3's 24,957-token prompt took 315 s, r2's GPU matmuls 86.7 s there against 67.8-69.9 in its other runs, and run 2's device kernels about 15% slower than series 1's; gpu-run4.csv samples the card during run 4.",
+  "runs": {
+   "1-base": {
+    "engine": "r2's engine (the code of mimo-pro-4090-r2, b5b45f2c; mimo.exe 9c640beb, DLL 174c56ff)",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "first_token_s": 70.86,
+      "prompt_s": 70.8,
+      "experts_s": 39.4,
+      "attention_s": 20.31,
+      "reply": "On an RTX 4090, the CUDA path speeds up Mi",
+      "engine_line": "[mimo] prompt 70.80s (stalled 7.78s, experts 39.40s, attention 20.31s, routers 1.14s, 26021 demand reads); generation 8.54s (stalled 2.47s, experts 3.43s, attention 1.58s, 1194 demand reads, 4474 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "first_token_s": 253.04,
+      "prompt_s": 252.96,
+      "experts_s": 91.95,
+      "attention_s": 140.94,
+      "reply": "On an RTX 4090, MiMo-V2.6",
+      "engine_line": "[mimo] prompt 252.96s (stalled 0.77s, experts 91.95s, attention 140.94s, routers 6.11s, 20942 demand reads); generation 13.07s (stalled 2.93s, experts 3.22s, attention 6.00s, 1296 demand reads, 4749 prefetched)"
+     }
+    ]
+   },
+   "2-final": {
+    "engine": "this round's engine",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "first_token_s": 47.75,
+      "prompt_s": 47.69,
+      "experts_s": 40.6,
+      "attention_s": 4.71,
+      "reply": "On an RTX 4090, the CUDA path speeds up Mi",
+      "engine_line": "[mimo] prompt 47.69s (stalled 0.34s, experts 40.60s, attention 4.71s, routers 0.83s, 26022 demand reads); generation 7.73s (stalled 1.51s, experts 3.50s, attention 1.63s, 870 demand reads, 3413 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "first_token_s": 103.82,
+      "prompt_s": 103.75,
+      "experts_s": 58.42,
+      "attention_s": 33.25,
+      "reply": "On an RTX 4090 (Windows, MiMo-V2",
+      "engine_line": "[mimo] prompt 103.75s (stalled 0.01s, experts 58.42s, attention 33.25s, routers 4.81s, 20967 demand reads); generation 11.50s (stalled 0.78s, experts 3.09s, attention 6.58s, 614 demand reads, 2499 prefetched)"
+     }
+    ]
+   },
+   "3-base": {
+    "engine": "r2's engine (the code of mimo-pro-4090-r2, b5b45f2c; mimo.exe 9c640beb, DLL 174c56ff)",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "first_token_s": 70.42,
+      "prompt_s": 70.36,
+      "experts_s": 39.26,
+      "attention_s": 20.12,
+      "reply": "On an RTX 4090, the CUDA path speeds up Mi",
+      "engine_line": "[mimo] prompt 70.36s (stalled 7.74s, experts 39.26s, attention 20.12s, routers 1.11s, 26021 demand reads); generation 8.45s (stalled 2.37s, experts 3.46s, attention 1.61s, 1186 demand reads, 4473 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "first_token_s": 315.13,
+      "prompt_s": 315.06,
+      "experts_s": 116.84,
+      "attention_s": 178.06,
+      "reply": "On an RTX 4090, MiMo-V2.6",
+      "engine_line": "[mimo] prompt 315.06s (stalled 0.74s, experts 116.84s, attention 178.06s, routers 6.16s, 20951 demand reads); generation 13.41s (stalled 2.98s, experts 3.23s, attention 6.18s, 1273 demand reads, 4719 prefetched)"
+     }
+    ]
+   },
+   "4-final": {
+    "engine": "this round's engine",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "first_token_s": 47.78,
+      "prompt_s": 47.72,
+      "experts_s": 40.55,
+      "attention_s": 4.73,
+      "reply": "On an RTX 4090, the CUDA path speeds up Mi",
+      "engine_line": "[mimo] prompt 47.72s (stalled 0.38s, experts 40.55s, attention 4.73s, routers 0.83s, 26022 demand reads); generation 7.57s (stalled 1.55s, experts 3.37s, attention 1.60s, 860 demand reads, 3392 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "first_token_s": 96.68,
+      "prompt_s": 96.61,
+      "experts_s": 55.16,
+      "attention_s": 29.72,
+      "reply": "On an RTX 4090 (Windows, MiMo-V2",
+      "engine_line": "[mimo] prompt 96.61s (stalled 0.02s, experts 55.16s, attention 29.72s, routers 4.63s, 21049 demand reads); generation 11.31s (stalled 0.86s, experts 3.04s, attention 6.42s, 600 demand reads, 2495 prefetched)"
+     }
+    ]
+   }
+  }
+ },
+ "series3": {
+  "note": "The shipping engine again (mimo.exe 8c0b21c0, DLL c1019362), the card sampled every 5 s (gpu.csv).",
+  "runs": {
+   "1-base": {
+    "engine": "r2's engine (the code of mimo-pro-4090-r2, b5b45f2c; mimo.exe 9c640beb, DLL 174c56ff)",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "first_token_s": 70.88,
+      "prompt_s": 70.82,
+      "experts_s": 39.42,
+      "attention_s": 20.28,
+      "reply": "On an RTX 4090, the CUDA path speeds up Mi",
+      "engine_line": "[mimo] prompt 70.82s (stalled 7.82s, experts 39.42s, attention 20.28s, routers 1.13s, 26021 demand reads); generation 8.47s (stalled 2.39s, experts 3.45s, attention 1.59s, 1178 demand reads, 4450 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "first_token_s": 250.31,
+      "prompt_s": 250.23,
+      "experts_s": 90.29,
+      "attention_s": 140.01,
+      "reply": "On an RTX 4090, MiMo-V2.6",
+      "engine_line": "[mimo] prompt 250.23s (stalled 0.79s, experts 90.29s, attention 140.01s, routers 6.07s, 20898 demand reads); generation 12.74s (stalled 2.78s, experts 3.20s, attention 5.85s, 1285 demand reads, 4722 prefetched)"
+     }
+    ]
+   },
+   "2-final": {
+    "engine": "this round's engine",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "first_token_s": 47.33,
+      "prompt_s": 47.27,
+      "experts_s": 40.61,
+      "attention_s": 4.31,
+      "reply": "On an RTX 4090, the CUDA path speeds up Mi",
+      "engine_line": "[mimo] prompt 47.27s (stalled 0.35s, experts 40.61s, attention 4.31s, routers 0.81s, 26022 demand reads); generation 7.22s (stalled 1.49s, experts 3.27s, attention 1.50s, 877 demand reads, 3360 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "first_token_s": 92.14,
+      "prompt_s": 92.07,
+      "experts_s": 53.17,
+      "attention_s": 27.59,
+      "reply": "On an RTX 4090 (Windows, MiMo-V2",
+      "engine_line": "[mimo] prompt 92.07s (stalled 0.01s, experts 53.17s, attention 27.59s, routers 4.50s, 20916 demand reads); generation 10.94s (stalled 0.91s, experts 3.00s, attention 6.08s, 648 demand reads, 2561 prefetched)"
+     }
+    ]
+   },
+   "3-base": {
+    "engine": "r2's engine (the code of mimo-pro-4090-r2, b5b45f2c; mimo.exe 9c640beb, DLL 174c56ff)",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "first_token_s": 69.32,
+      "prompt_s": 69.25,
+      "experts_s": 38.16,
+      "attention_s": 19.83,
+      "reply": "On an RTX 4090, the CUDA path speeds up Mi",
+      "engine_line": "[mimo] prompt 69.25s (stalled 8.02s, experts 38.16s, attention 19.83s, routers 1.11s, 26021 demand reads); generation 8.36s (stalled 2.50s, experts 3.39s, attention 1.51s, 1187 demand reads, 4476 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "first_token_s": 247.71,
+      "prompt_s": 247.63,
+      "experts_s": 88.15,
+      "attention_s": 139.78,
+      "reply": "On an RTX 4090, MiMo-V2.6",
+      "engine_line": "[mimo] prompt 247.63s (stalled 0.80s, experts 88.15s, attention 139.78s, routers 6.08s, 20963 demand reads); generation 12.89s (stalled 2.78s, experts 3.21s, attention 5.96s, 1279 demand reads, 4721 prefetched)"
+     }
+    ]
+   },
+   "4-final": {
+    "engine": "this round's engine",
+    "requests": [
+     {
+      "prompt": "p4k.txt",
+      "prompt_tokens": 4310,
+      "first_token_s": 47.07,
+      "prompt_s": 47.01,
+      "experts_s": 40.37,
+      "attention_s": 4.29,
+      "reply": "On an RTX 4090, the CUDA path speeds up Mi",
+      "engine_line": "[mimo] prompt 47.01s (stalled 0.35s, experts 40.37s, attention 4.29s, routers 0.80s, 26022 demand reads); generation 7.18s (stalled 1.43s, experts 3.28s, attention 1.51s, 866 demand reads, 3354 prefetched)"
+     },
+     {
+      "prompt": "p25k.txt",
+      "prompt_tokens": 24957,
+      "first_token_s": 92.33,
+      "prompt_s": 92.25,
+      "experts_s": 53.35,
+      "attention_s": 27.52,
+      "reply": "On an RTX 4090 (Windows, MiMo-V2",
+      "engine_line": "[mimo] prompt 92.25s (stalled 0.02s, experts 53.35s, attention 27.52s, routers 4.55s, 20813 demand reads); generation 11.18s (stalled 0.94s, experts 3.01s, attention 6.20s, 628 demand reads, 2618 prefetched)"
+     }
+    ]
+   }
+  }
+ }
+}

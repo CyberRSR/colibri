@@ -626,8 +626,10 @@ Read **only** by `c/mimo.c` (and `MIMO_MAX_IMAGE_TOKENS` by the gateway). See [m
 | `MIMO_CHUNK` | 512 (up to 32768 with `MIMO_CUDA`) | MiMo: prompt tokens per prefill block (larger blocks read fewer experts per prompt token); unset with `MIMO_CUDA`, blocks of up to `MIMO_CUDA_CHUNK` on the GPU. |
 | `MIMO_CUDA_MOE` | 1 | MiMo with `MIMO_CUDA`: a prompt block's routed experts on the GPU (`MIMO_CUDA_MOE_ROWS`, 64 rows or more); 0: the CPU's. See [mimo-cuda.md](mimo-cuda.md#prompts-on-the-gpu). |
 | `MIMO_CUDA_CHUNK` | 32768 | MiMo: prompt rows a block holds with the GPU's experts, lower when the card has less memory free (`MIMO_CUDA_SPARE_MB`, 0: more kept for other programs). `MIMO_CUDA_ROUTER` (1): those steps' routers on the GPU too. |
-| `MIMO_CUDA_ATTN` | 1 | MiMo with `MIMO_CUDA`: a prompt block's attention on the GPU (`MIMO_CUDA_ATTN_ROWS`, 32 rows or more; keys sent up `MIMO_CUDA_ATTN_MB`, 256, at a time). |
-| `MIMO_ATTN_ROWS` | 1024 | MiMo: a larger block's attention goes in pieces of this many rows. |
+| `MIMO_CUDA_MOE_DIRECT` | 1 | MiMo: the GPU's experts the cache does not hold are read from disk straight into pinned staging (`MIMO_CUDA_MOE_STAGES`, 32 buffers); 0: through the cache's slots. |
+| `MIMO_CUDA_ATTN` | 1 | MiMo with `MIMO_CUDA`: a prompt block's attention on the GPU (`MIMO_CUDA_ATTN_ROWS`, 32 rows or more; earlier positions' keys sent up `MIMO_CUDA_ATTN_MB`, 256, at a time). `MIMO_CUDA_ATTN_DEV` (1): a sub-block's rows stay on the device from the qkv to o_proj. |
+| `MIMO_ATTN_ROWS` | 1024 | MiMo: a larger block's attention goes in sub-blocks of this many rows. |
+| `MIMO_PIPE` | 1 | MiMo: a GPU prompt block's per-row CPU work (norms, residuals, weighted sums) beside the device's sub-blocks; 0: one after the other. `MIMO_CUDA_PIN` (1): the block's rows in pinned memory. |
 | `MIMO_CUDA_TILED_ROWS` | 64 | MiMo: the fewest rows a CUDA matrix call needs for the tiled prompt kernels; `MIMO_CUDA_PACKED_ROWS` (64): for an o_proj the GPU does not hold to go up; `MIMO_CUDA_SCRATCH_MB` (192): a call's scratch per piece. |
 | `MIMO_CTX` | `CTX`, else 8192 | MiMo: context the KV cache is sized for, capped by the checkpoint. |
 | `MIMO_KV_STEP` | 4096 | MiMo, Windows: the full-attention caches' memory is committed this many positions at a time as a conversation reaches them, so a long context costs nothing until it is used. |
