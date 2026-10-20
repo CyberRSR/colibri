@@ -42,7 +42,9 @@ MXFP4 experts, FP8/BF16 dense) on one desktop: a Ryzen 9 7950X3D with 192 GB of
 DDR5, an RTX 4090 and two NVMe volumes. Nothing is quantized beyond the checkpoint:
 **every greedy reply is the byte-for-byte reply of the colibri 2.0 engine** and the
 70-layer CPU logits are unchanged (SHA-256 `cebbf3a8...`); every step below was
-measured that way, and its raw data is in `docs/experiments/mimo-*-4090-*`.
+measured that way, and its raw data is in `docs/experiments/mimo-*-4090-*`. Long
+prompts now run on the GPU, in f32 like the CPU: the same argmax at every position of a
+658-token prompt (max KL 8.7e-7), the sums in another order.
 
 **Download:** [the latest MiMo release](https://github.com/CyberRSR/colibri/releases)
 (`colibri-mimo-pro-4090-*-windows-x86_64.zip`). Unzip it, then run
@@ -53,11 +55,13 @@ and replies of up to **65,536 tokens**. [How it runs](docs/mimo-cuda.md).
 
 | | colibri 2.0 | now |
 |---|---:|---:|
-| benchmark request, tok/s (64 tokens, greedy, first token included) | 1.159 | **2.61** |
-| decode, tok/s | 1.359 | **3.23** |
+| benchmark request, tok/s (64 tokens, greedy, first token included) | 1.159 | **2.67** |
+| decode, tok/s | 1.359 | **3.32** |
 | eight different prompts, tok/s | 1.061 | **2.26** |
 | first token of the benchmark prompt | 8.9 s | 5.0 s |
-| a 2260-token prompt | 904 s | 203 s |
+| a 2260-token prompt | 904 s | 203 s (r1, its prompts on the CPU) |
+| first token of a 4310-token prompt | -- | 414 s (r1) -> **69 s** |
+| first token of a 24,957-token prompt (an agent's) | -- | about an hour (r1, by its parts) -> **245 s** |
 
 What changed, in order (benchmark tok/s after each step, each measured A/B in its
 own series on this machine, which drifts by about 3% from day to day):
@@ -79,14 +83,16 @@ own series on this machine, which drifts by about 3% from day to day):
 | OpenMP regions on a spinning team (Windows) | `ca05d0e4` | 2.614 |
 | expf without MinGW's control-word switch (no 3.5% layout lottery) | `36a4fdfe` | 2.612 |
 | attention caches committed as a conversation grows: 1M context, 64k replies | `136b9f20` | 2.575 |
+| a prompt's experts, attention, matrices and routers on the GPU, in one block as large as the card allows: a 4310-token prompt 413.9 -> 68.6 s, 24,957 tokens in 244.8 s | `2147c6b1` | 2.668 |
 
 Where the time goes now: each token needs 8 of 384 experts in each of 69 layers,
 about 11 GB of weights read from RAM or the disks, so decoding is bound by memory
-and disk bandwidth rather than by the CPU or the GPU. A prompt is different: each 512-token block computes nearly all
-of the 26,496 experts on the CPU (about 11 prompt tokens a second), so a 20,000-token
-agent prompt still takes about half an hour the first time (later turns reuse the
-prefix and process only what is new). Moving prompt blocks onto the GPU is the next
-step.
+and disk bandwidth rather than by the CPU or the GPU. A prompt calls nearly every
+expert of every layer, so it runs on the GPU: its experts are read once per block and
+computed there as they arrive (about 12 TFLOPS in f32), its attention and matrices too
+([Prompts on the GPU](docs/mimo-cuda.md#prompts-on-the-gpu)). A 25,000-token agent
+prompt takes about 4 minutes the first time; later turns reuse the prefix and process
+only what is new. Before, on the CPU, the same prompt took about an hour.
 
 <details>
 <summary>По-русски</summary>
@@ -103,14 +109,16 @@ Ryzen 9 7950X3D, 192 ГБ DDR5, RTX 4090 и два NVMe. Без дополнит
 API, совместимый с OpenAI и Anthropic: `http://127.0.0.1:18080/v1`, модель
 `mimo-v2.6-pro-mopd`, контекст **1 048 576 токенов**, ответы до **65 536 токенов**.
 
-Скорость: бенчмарк 1,159 → **2,61 ток/с**, декодирование 1,359 → **3,23**, восемь
-разных промптов 1,061 → **2,26**, первый токен 8,9 → 5,0 с, промпт в 2260 токенов
-904 → 203 с. История изменений — в таблице выше (каждый шаг замерен A/B).
+Скорость: бенчмарк 1,159 → **2,67 ток/с**, декодирование 1,359 → **3,32**, восемь
+разных промптов 1,061 → **2,26**, первый токен 8,9 → 5,0 с. Промпт агента в 25 000
+токенов: около часа → **4 минуты** (4310 токенов: 414 → 69 с) — эксперты, внимание,
+матрицы и роутеры блока промпта считаются на GPU в f32 (на 658-токенном промпте argmax
+совпадает с CPU на всех позициях). История изменений — в таблице выше (каждый шаг
+замерен A/B).
 
-Сейчас декодирование упирается в пропускную способность памяти и дисков (около
-11 ГБ весов экспертов на токен), а обработка промпта — в CPU (~11 токенов/с), поэтому
-первый ответ на промпт агента в 20 000 токенов занимает около получаса (следующие
-ходы переиспользуют префикс). Следующий шаг — обработка промпта на GPU.
+Декодирование упирается в пропускную способность памяти и дисков (около 11 ГБ весов
+экспертов на токен); следующие ходы агента переиспользуют префикс и обрабатывают
+только новые токены.
 
 </details>
 

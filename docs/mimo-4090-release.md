@@ -22,8 +22,10 @@ The history and the measurements: [README](https://github.com/CyberRSR/colibri#t
 Для агентов (MiMo Code, DeepSeek-харнессы и т. п.): включайте потоковый вывод
 (stream) — шлюз шлёт keep-alive, пока обрабатывается промпт; ведите один разговор за
 раз — следующий ход переиспользует уже обработанный префикс, а посторонний запрос с
-другим системным промптом его сбрасывает. Первый промпт в 20 000 токенов
-обрабатывается около получаса (~11 токенов/с на CPU), дальше — только новые токены.
+другим системным промптом его сбрасывает. Длинный промпт обрабатывается на GPU:
+первый промпт в 25 000 токенов — около 4 минут (раньше, на CPU, около часа), дальше —
+только новые токены. Пока идёт промпт, GPU загружен почти полностью, а видеопамять
+нужна движку: тяжёлые графические программы рядом могут его замедлить.
 
 ## Requirements
 
@@ -59,9 +61,10 @@ START-MIMO.cmd -ModelDir E:\MiMo-V2.6-Pro -ShardDir ""
 
 | | colibri 2.0 | this release |
 |---|---:|---:|
-| benchmark request (64 tokens, greedy), tok/s | 1.159 | 2.6 |
-| decode, tok/s | 1.359 | 3.2 |
+| benchmark request (64 tokens, greedy), tok/s | 1.159 | 2.67 |
+| decode, tok/s | 1.359 | 3.32 |
 | eight different prompts, tok/s | 1.061 | 2.26 |
-| a 2260-token prompt | 904 s | 203 s |
+| first token of a 4310-token prompt | -- | 69 s (414 s with prompts on the CPU) |
+| first token of a 24,957-token prompt | -- | 245 s (about an hour on the CPU) |
 
 `tools\benchmark_mimo_cuda.py` measures your own machine (docs/mimo-cuda.md).
