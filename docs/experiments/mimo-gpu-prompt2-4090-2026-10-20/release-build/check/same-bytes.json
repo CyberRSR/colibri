@@ -1,0 +1,25 @@
+{
+ "note": "check_mimo_cuda.py's run (correctness/'s prompt and config) with the archive's mimo.exe and coli_cuda_mimo.dll, built from the merge into main (BUILD-INFO.txt), against the measured build's run in correctness/: every file's SHA-256.",
+ "files": {
+  "cpu.f32": {
+   "release_build": "874ee6e8dff8c9a23459e29dae8c74a2aed5881a6792f3288e1a0431088fd764",
+   "measured_build": "874ee6e8dff8c9a23459e29dae8c74a2aed5881a6792f3288e1a0431088fd764",
+   "same_bytes": true
+  },
+  "cuda.f32": {
+   "release_build": "03ce216b6cbcd7ebaaa0a7f85d5ea0e044b919ef8fa7fa768d56f1ba9703c24e",
+   "measured_build": "03ce216b6cbcd7ebaaa0a7f85d5ea0e044b919ef8fa7fa768d56f1ba9703c24e",
+   "same_bytes": true
+  },
+  "cpu.txt": {
+   "release_build": "f0aaa17f0cb224323f3e878f92e4088aee5152395cec4301f0f0660d460c4aee",
+   "measured_build": "f0aaa17f0cb224323f3e878f92e4088aee5152395cec4301f0f0660d460c4aee",
+   "same_bytes": true
+  },
+  "cuda.txt": {
+   "release_build": "f0aaa17f0cb224323f3e878f92e4088aee5152395cec4301f0f0660d460c4aee",
+   "measured_build": "f0aaa17f0cb224323f3e878f92e4088aee5152395cec4301f0f0660d460c4aee",
+   "same_bytes": true
+  }
+ }
+}

@@ -125,6 +125,15 @@ too (their wall time over the benchmark's 14,208 calls: FP8 4.466 -> 4.573 s, pa
 2.137 -> 2.278 s). Only a prompt block's calls ask now; the check's GPU logits are the same
 bytes as before the change.
 
+## The release's build (`release-build/`)
+
+Release `mimo-pro-4090-r3` was built from the merge into main (`c087ce36`), which also
+carries main's own changes to other engines and `compat.h`: its `mimo.exe` (49f87449) and
+`coli_cuda_mimo.dll` (6dc4f791) are other bytes than the measured ones. Run the same way,
+they gave the measured build's CPU and GPU logits and replies on the correctness prompt
+byte for byte (`check/same-bytes.json`), the two prompts' first tokens in 47.30 and 92.22
+s, and 2.645 tok/s for the decode benchmark (decode 3.28, every reply `0305abcd...`).
+
 ## Files
 
 `summary.json` (every run of the three series), `series1/` to `series3/` (each run's
@@ -132,8 +141,8 @@ bytes as before the change.
 the dead ends, the decode fix and the bisect), `correctness/`, `topk/` (the 24,957-token
 prompt's top three a step for both engines, and the scratch patch that printed them),
 `kernels/` (`c/tools/bench_mimo_cuda.cu` with this round's backend and with the folded
-kernel, two runs each, and the unit tests with both), `benchmark/`, `long_prompt.py`,
-`sha256.json`.
+kernel, two runs each, and the unit tests with both), `benchmark/`, `release-build/`,
+`long_prompt.py`, `sha256.json`.
 
 ## Reproduce
 

@@ -1,0 +1,7 @@
+release mimo-pro-4090-r3
+commit c087ce36d86bd6ec3685ef86ded6a7a387371589
+mimo.exe: mingw32-make -C c mimo CUDA_DLL=1 ARCH=native VK=0 (needs AVX-512: Zen 4 or newer)
+coli_cuda_mimo.dll: c\build_mimo_cuda.bat (sm_89, the CUDA runtime linked statically)
+
+6dc4f791e753de7449d684c6853cd4d3daed7a63ed824b39e39f5ea8af3fe537  coli_cuda_mimo.dll
+49f874498f101c14733e512d431c759a07dcadffa6f2d7d64fb77e660aa8f270  mimo.exe
