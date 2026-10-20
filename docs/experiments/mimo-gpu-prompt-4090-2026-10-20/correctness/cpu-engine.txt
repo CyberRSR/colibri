@@ -1,0 +1,11 @@
+[mimo] MTP: decode steps verify up to 2 drafts, from the checkpoint's first 2 MTP layers, while the probabilities the layers give them multiply to 0.6 or more (MIMO_MTP=0: off)
+[mimo] expert cache: one pool of 6072 slots for every layer (MIMO_CACHE_GLOBAL)
+[mimo] expert readers: 4 on 2 device(s)
+[OMP] spinning team: 24 threads spin 2000 us between regions (COLI_OMP_SPIN_US; COLI_OMP_SPIN=0: libgomp's team)
+[mimo] 75 bf16 matrices packed without loss for the CPU: 12.51 GB for 16.67 GB
+[mimo] 70 layers (60 sliding window 128, 10 full), 384 experts top-8, cache 88/layer, dense native, ctx 16384, vision -- loaded in 11.78s
+[mimo] prefill 658 tokens 117.48s, decode 32 tokens 19.89s (1.61 tok/s), experts 23527 hits 49601 misses 1141554.8 MB read, rss 148.52 GB
+[mimo] time: expert reads 22.99s (49.66 GB/s), expert matmuls 56.92s, attention 50.29s, the rest (dense MLP, router, head) 7.18s
+[mimo] streaming: 49601 demand reads, 7685 prefetched (5654 used, 2031 unused, 362 of them cancelled unread), predicted 79.2% of 17664 choices, 1141.55 GB read, 22.99s stalled, 0.31s predicting; attention matmuls: qkv 30.65s, o_proj 15.87s; 2.20 experts a wave
+[mimo] MTP: 17 steps of up to 2 drafts, 13 kept (9 of 9, 4 of 5), 1.76 tokens a step, 1.75s drafting
+[mimo] decode 32 tokens in 17 verified steps

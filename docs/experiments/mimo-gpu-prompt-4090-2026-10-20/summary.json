@@ -1,0 +1,57 @@
+{
+ "prompt-4k-cpu": {
+  "note": "the engine before (MIMO_CUDA_ATTN=0 on this build: its attention and experts on the CPU, 512-row blocks)",
+  "requests": [
+   {
+    "prompt": "p4k.txt",
+    "prompt_tokens": 4310,
+    "first_token_s": 413.87,
+    "prompt_s": 413.8,
+    "experts_s": 251.29,
+    "attention_s": 123.84,
+    "reply": "On an RTX 4090, the CUDA path moves MiMo",
+    "engine_line": "[mimo] prompt 413.80s (stalled 16.86s, experts 251.29s, attention 123.84s, 152648 demand reads); generation 8.79s (stalled 2.48s, experts 3.47s, attention 1.74s, 1065 demand reads, 4157 prefetched)"
+   }
+  ]
+ },
+ "prompt-4k-gpu-attention": {
+  "note": "the attention on the GPU only (512-row blocks, experts on the CPU)",
+  "requests": [
+   {
+    "prompt": "p4k.txt",
+    "prompt_tokens": 4310,
+    "first_token_s": 360.41,
+    "prompt_s": 360.35,
+    "experts_s": 251.49,
+    "attention_s": 70.05,
+    "reply": "On an RTX 4090, the CUDA path moves MiMo",
+    "engine_line": "[mimo] prompt 360.35s (stalled 17.20s, experts 251.49s, attention 70.05s, 152668 demand reads); generation 8.34s (stalled 2.11s, experts 3.43s, attention 1.71s, 1060 demand reads, 4134 prefetched)"
+   }
+  ]
+ },
+ "prompt-final": {
+  "note": "the defaults: experts, attention, matrices and routers of a prompt block on the GPU, blocks of up to 32768 rows as the card allows",
+  "requests": [
+   {
+    "prompt": "p4k.txt",
+    "prompt_tokens": 4310,
+    "first_token_s": 68.62,
+    "prompt_s": 68.51,
+    "experts_s": 37.13,
+    "attention_s": 19.98,
+    "reply": "On an RTX 4090, the CUDA path speeds up Mi",
+    "engine_line": "[mimo] prompt 68.51s (stalled 7.99s, experts 37.13s, attention 19.98s, routers 1.18s, 26021 demand reads); generation 8.44s (stalled 2.21s, experts 3.48s, attention 1.56s, 1188 demand reads, 4485 prefetched)"
+   },
+   {
+    "prompt": "p16k.txt",
+    "prompt_tokens": 24957,
+    "first_token_s": 244.76,
+    "prompt_s": 244.62,
+    "experts_s": 87.42,
+    "attention_s": 136.88,
+    "reply": "On an RTX 4090, MiMo-V2.6",
+    "engine_line": "[mimo] prompt 244.62s (stalled 0.87s, experts 87.42s, attention 136.88s, routers 6.35s, 20964 demand reads); generation 13.58s (stalled 2.56s, experts 3.31s, attention 6.55s, 1297 demand reads, 4747 prefetched)"
+   }
+  ]
+ }
+}
