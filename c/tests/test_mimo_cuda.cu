@@ -118,7 +118,11 @@ static int check_packed(int I, int O, int S, int kind) {
 }
 /* A prompt block's tiled kernels (S >= 64 rows; MIMO_CUDA_TILED_ROWS): FP8 (fmt 2), plain bf16
  * (fmt 1) and packed bf16 (fmt 5, the generators above, exceptions included) against a double
- * reference, and a row's bytes the same in a block of S rows and in two of 64 and S - 64. */
+ * reference, a row's bytes the same in a block of S rows and in two of 64 and S - 64, and every
+ * output the bytes of its sums in the kernels' order: FP8 each 128-column scale group's products
+ * summed apart, then fma(sum, scale, output), as the CPU groups them; bf16 one chain. (A kernel
+ * with FP8's scales folded into its weights, one chain, passed the reference's bound here but
+ * moved the model's argmax: these bytes catch it.) */
 static int check_tiled(int fmt, int I, int O, int S, int kind) {
     size_t count = (size_t)I * O;
     int blocks = I / 128;
@@ -152,19 +156,30 @@ static int check_tiled(int fmt, int I, int O, int S, int kind) {
     double max_rel = 0;
     for (int s = 0; s < S; s++) for (int o = 0; o < O; o++) {
         double acc = 0, mag = 0;
+        float sum = 0, part = 0;
         for (int i = 0; i < I; i++) {
-            double p = (double)x[(size_t)s * I + i] * w[(size_t)o * I + i];
+            const float xv = x[(size_t)s * I + i];
+            double p = (double)xv * w[(size_t)o * I + i];
             acc += p; mag += std::abs(p);
+            if (fmt == 2) {
+                part = std::fmaf(xv, fp8(q8[(size_t)o * I + i]), part);
+                if (i % 128 == 127) { sum = std::fmaf(part, scales[(size_t)o * blocks + i / 128], sum); part = 0; }
+            } else sum = std::fmaf(xv, w[(size_t)o * I + i], sum);
         }
-        double g = got[(size_t)s * O + o], err = std::abs(g - acc);
+        float g = got[(size_t)s * O + o];
+        double err = std::abs(g - acc);
         if (!std::isfinite(g) || err > 1e-6 * mag + 1e-30) {
             printf("FAIL tiled fmt=%d kind=%d I=%d O=%d S=%d at row %d out %d: got=%g want=%g\n", fmt, kind, I, O, S, s, o, g, acc);
+            return 1;
+        }
+        if (memcmp(&g, &sum, sizeof g)) {
+            printf("FAIL tiled fmt=%d kind=%d I=%d O=%d S=%d at row %d out %d: %a, its sums in order %a\n", fmt, kind, I, O, S, s, o, g, sum);
             return 1;
         }
         if (mag > 0 && err / mag > max_rel) max_rel = err / mag;
     }
     if (memcmp(got.data(), split.data(), got.size() * sizeof(float))) { printf("FAIL tiled fmt=%d: rows differ by block\n", fmt); return 1; }
-    printf("ok tiled fmt=%d kind=%d I=%d O=%d S=%d: max error %.2g of the products' magnitude; blocks bit-exact\n", fmt, kind, I, O, S, max_rel);
+    printf("ok tiled fmt=%d kind=%d I=%d O=%d S=%d: max error %.2g of the products' magnitude; the sums' bytes; blocks bit-exact\n", fmt, kind, I, O, S, max_rel);
     return 0;
 }
 int main() {
