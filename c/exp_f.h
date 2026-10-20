@@ -75,4 +75,59 @@ static __attribute__((noinline, unused)) float exp_f_call(float x) { return exp_
 static inline float exp_f_call(float x) { return expf(x); }
 #endif
 
+#if EXP_F_X87 && defined(__AVX2__) && defined(__FMA__)
+/* exp_f8: exp_f of eight floats at once, the same bits, 1.0 ns a value against 17. The x87
+ * result is within about 2^-62 of e^x, so exp_f is e^x rounded to float -- through double,
+ * which can only matter within 2^-53 of a point halfway between two floats. Here e^x in
+ * double (2^n times a degree-12 polynomial on |r| <= ln2/2: within 2^-50) is rounded to float
+ * from 2^-44 below it and from 2^-44 above: where the two agree, every number between them
+ * rounds the same way, the library's among them. The rest -- a halfway point within 2^-44 of
+ * e^x, about one value in 700,000, or a NaN -- goes to exp_f itself. Arguments outside
+ * [-150, 100] give what -150 and 100 give, 0 and infinity, as the library's do.
+ * tests/exp_f_check.c tries all 2^32 floats. */
+#include <immintrin.h>
+#define EXP_F8 1
+static inline __m256d exp_f8_pd(__m256d x) {
+    const __m256d shift = _mm256_set1_pd(0x1.8p52);
+    __m256d t = _mm256_fmadd_pd(x, _mm256_set1_pd(0x1.71547652b82fep0), shift);   /* n = round(x log2 e) in its low bits */
+    __m256d n = _mm256_sub_pd(t, shift);
+    __m256d r = _mm256_fnmadd_pd(n, _mm256_set1_pd(0x1.62e42fefa39efp-1), x);      /* x - n ln2, ln2 in two parts */
+    r = _mm256_fnmadd_pd(n, _mm256_set1_pd(0x1.abc9e3b39803fp-56), r);
+    __m256d p = _mm256_set1_pd(1.0 / 479001600.0);
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(1.0 / 39916800.0));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(1.0 / 3628800.0));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(1.0 / 362880.0));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(1.0 / 40320.0));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(1.0 / 5040.0));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(1.0 / 720.0));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(1.0 / 120.0));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(1.0 / 24.0));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(1.0 / 6.0));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(0.5));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(1.0));
+    p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(1.0));
+    __m256i e = _mm256_slli_epi64(_mm256_add_epi64(_mm256_castpd_si256(t), _mm256_set1_epi64x(1023)), 52);   /* 2^n */
+    return _mm256_mul_pd(p, _mm256_castsi256_pd(e));
+}
+static inline __m256 exp_f8(__m256 x) {
+    __m256 c = _mm256_min_ps(_mm256_max_ps(x, _mm256_set1_ps(-150.0f)), _mm256_set1_ps(100.0f));
+    __m256d y0 = exp_f8_pd(_mm256_cvtps_pd(_mm256_castps256_ps128(c)));
+    __m256d y1 = exp_f8_pd(_mm256_cvtps_pd(_mm256_extractf128_ps(c, 1)));
+    const __m256d d = _mm256_set1_pd(0x1p-44);
+    __m256 lo = _mm256_set_m128(_mm256_cvtpd_ps(_mm256_fnmadd_pd(y1, d, y1)), _mm256_cvtpd_ps(_mm256_fnmadd_pd(y0, d, y0)));
+    __m256 hi = _mm256_set_m128(_mm256_cvtpd_ps(_mm256_fmadd_pd(y1, d, y1)), _mm256_cvtpd_ps(_mm256_fmadd_pd(y0, d, y0)));
+    int same = _mm256_movemask_ps(_mm256_castsi256_ps(_mm256_cmpeq_epi32(_mm256_castps_si256(lo), _mm256_castps_si256(hi))))
+             & ~_mm256_movemask_ps(_mm256_cmp_ps(x, x, _CMP_UNORD_Q));
+    if (__builtin_expect(same != 0xff, 0)) {
+        float v[8], a[8];
+        _mm256_storeu_ps(v, lo);
+        _mm256_storeu_ps(a, x);
+        for (int i = 0; i < 8; i++)
+            if (!(same >> i & 1)) v[i] = exp_f(a[i]);
+        return _mm256_loadu_ps(v);
+    }
+    return lo;
+}
+#endif
+
 #endif

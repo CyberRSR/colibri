@@ -1,0 +1,26 @@
+[mimo] MTP: decode steps verify up to 2 drafts, from the checkpoint's first 2 MTP layers, while the probabilities the layers give them multiply to 0.6 or more (MIMO_MTP=0: off)
+[mimo] expert cache: one pool of 7176 slots for every layer (MIMO_CACHE_GLOBAL)
+[mimo] expert readers: 4 on 2 device(s)
+[CUDA] mimo device 0: NVIDIA GeForce RTX 4090; native dense weights, float32 activations
+[CUDA] mimo placed 125 dense matrices (52 bf16 packed): 19.983 / 20.000 GiB budget; CPU host copies released
+[mimo] 23 bf16 matrices packed without loss for the CPU: 3.40 GB for 4.53 GB
+[mimo] 70 layers (60 sliding window 128, 10 full), 384 experts top-8, cache 104/layer, dense native, ctx 131072, vision -- loaded in 15.58s
+[mimo] prompt blocks on the GPU: up to 32768 rows (2.00 GB free on the card)
+[mimo] streaming: 32317 demand reads, 23534 prefetched (15033 used, 8501 unused, 2261 of them cancelled unread), predicted 76.2% of 72864 choices, 1074.69 GB read, 8.79s stalled, 0.99s predicting; attention matmuls: qkv 1.61s, o_proj 3.83s; 6.00 experts a wave
+[mimo] the blocks' per-row loops (norms, residuals) 0.85s, dense MLP 0.34s
+[mimo] experts on the GPU: 39.28s (their bytes into staging 5.86s, waiting for a staging buffer 31.89s, for the last outputs 0.10s), 18846 read straight into staging; the rows' weighted sums 1.61s
+[mimo] MTP: 54 steps of up to 2 drafts, 73 kept (43 of 45, 30 of 32), 2.35 tokens a step, 2.05s drafting
+[mimo] prompt 47.11s (stalled 0.35s, experts 40.46s, attention 4.30s, routers 0.81s, 26022 demand reads); generation 48.49s (stalled 8.44s, experts 25.26s, attention 10.76s, 6295 demand reads, 23534 prefetched)
+[mimo] streaming: 27386 demand reads, 26196 prefetched (17278 used, 8918 unused, 2358 of them cancelled unread), predicted 76.2% of 73416 choices, 1027.25 GB read, 10.58s stalled, 1.12s predicting; attention matmuls: qkv 1.79s, o_proj 4.38s; 5.36 experts a wave
+[mimo] the blocks' per-row loops (norms, residuals) 4.26s, dense MLP 1.87s
+[mimo] experts on the GPU: 44.37s (their bytes into staging 7.17s, waiting for a staging buffer 4.74s, for the last outputs 0.70s), 18180 read straight into staging; the rows' weighted sums 8.88s
+[mimo] MTP: 62 steps of up to 2 drafts, 64 kept (44 of 47, 20 of 23), 2.03 tokens a step, 2.27s drafting
+[mimo] prompt 92.05s (stalled 0.02s, experts 53.14s, attention 27.56s, routers 4.51s, 20576 demand reads); generation 90.72s (stalled 10.55s, experts 26.49s, attention 49.21s, 6810 demand reads, 26196 prefetched)
+[CUDA] mimo host copies: 125 released (22.807 GiB), 0 restored from checkpoint (0.000 GiB)
+[CUDA] mimo dense: 125 matrices, 19.983 GiB resident, 15046 matmuls, 2141602 rows, 0 scratch/compute fallbacks
+[CUDA] mimo matmul wall time (copies + compute): f32 0.000s, bf16 0.739s, fp8 4.929s, int8 0.000s, int8 blocks 0.000s, bf16 packed 1.967s
+[CUDA] mimo bf16 packed without loss: 52 matrices, 8.485 GiB for 11.309 GiB of bf16, 1110340 exceptions
+[CUDA] mimo prompt attention: 4 blocks, 510 rows, 0.010s (copies + compute), 0 left to the CPU
+[CUDA] mimo prompt attention kept on the device: 2100 blocks, 2048690 rows, 44.204s on the device (rows up 2.033s, qkv and RoPE 19.936s, attention 8.471s, o_proj 11.726s, outputs down 2.037s), 0 left to the host
+[CUDA] mimo prompt blocks' host matrices: 184 uploads
+[CUDA] mimo prompt experts: 138 MoE steps, 2019423 rows, 52432 experts, 33.390s queueing and waiting, 0 left to the CPU

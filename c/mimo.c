@@ -2156,6 +2156,261 @@ static void scores_by_head(const float *qT, int lanes, int hd, const float *cons
         }
     }
 }
+
+/* The attention of n rows at p0.. over keys and values Kr, Vr [lo, lo + nkeys), by (row,
+ * key/value head): the heads of a key/value head at once (scores_by_head); the softmax and
+ * the values per head as the scalar loop in attention(). The sums gcc vectorizes in blocks
+ * of 16 are the ones this path reproduces, hence hd % 16 (MiMo's 192, the tiny fixture's 48). */
+static void attend_heads(const float *qkv, int rows, int n, int p0, int lo, int window, const float *const *Kr,
+                         const float *const *Vr, int nkeys, const float *sinks, float scale, int nh, int kvh,
+                         int hd, int vd, float *ctxv) {
+    int group = nh / kvh, lanes = (group + 7) / 8 * 8;
+    #pragma omp parallel
+    {
+        float *qT = xmalloc((size_t)hd * lanes * sizeof(float), "queries by head");
+        float *sc = xmalloc((size_t)lanes * nkeys * sizeof(float), "scores by head");
+        #pragma omp for collapse(2) schedule(static)
+        for (int t = 0; t < n; t++) {
+            for (int kh = 0; kh < kvh; kh++) {
+                int p = p0 + t;
+                int first = window ? (p - (window - 1) > lo ? p - (window - 1) : lo) : 0;
+                for (int g = 0; g < lanes; g++)
+                    for (int i = 0; i < hd; i++)
+                        qT[(size_t)i * lanes + g] = g < group ? qkv[(size_t)t * rows + (size_t)(kh * group + g) * hd + i] : 0.0f;
+                scores_by_head(qT, lanes, hd, Kr, lo, first, p, (size_t)kh * hd, scale, sc, nkeys);
+                for (int g = 0; g < group; g++) {
+                    int h = kh * group + g;
+                    float *score = sc + (size_t)g * nkeys;
+                    float best = -INFINITY;
+                    for (int j = first; j <= p; j++) if (score[j - first] > best) best = score[j - first];
+                    float sink = sinks ? sinks[h] : -INFINITY;
+                    if (sink > best) best = sink;
+                    float den = sinks ? exp_f(sink - best) : 0.0f;
+                    for (int j = first; j <= p; j++) { score[j - first] = exp_f(score[j - first] - best); den += score[j - first]; }
+                    float *o = ctxv + ((size_t)t * nh + h) * vd;
+                    for (int i = 0; i < vd; i++) o[i] = 0;
+                    for (int j = first; j <= p; j++) {
+                        const float *vr = Vr[j - lo] + (size_t)kh * vd;
+                        float w = score[j - first] / den;
+                        for (int i = 0; i < vd; i++) o[i] += w * vr[i];
+                    }
+                }
+            }
+        }
+        free(qT); free(sc);
+    }
+}
+
+/* ---- a few rows over a long full-attention cache: attend_keys -------------------------
+ * attend_heads has n x kvh tasks: a decode step's 8-24 for 16 workers, each reading its key
+ * head's keys and, once a query head, its values (16 times: 12.8 MB a key/value head at
+ * 25,000 positions) -- 376 ms of a token's time at that context on the RTX 4090 profile.
+ * attend_keys makes the same numbers, each in its order, over every worker, each key and value
+ * row read once a call for all rows and heads:
+ *   scores   chunks of keys over the workers, every row and head; each score is its own sum
+ *            (scores_by_head's), and each chunk keeps its largest a head, the first of equals
+ *            (max_ps(s, m) is `s > m ? s : m`, the loop's `if (s > best) best = s`);
+ *   softmax  (row, key/value head, eight heads) over the workers: the chunks' largest in key
+ *            order, which is the loop's first maximum, the sink; the exps (exp_f8: exp_f's
+ *            bits), the denominator added in key order, then each weight e / den;
+ *   values   (key/value head, 32 columns of v_dim) over the workers, all rows, keys in blocks
+ *            of AK_BLOCK: every output the loop's fma chain over the keys from zero, eight
+ *            heads' accumulators beside one value slice.
+ * The scores of a row's key/value head lie by groups of eight heads, [group][key][8]: a
+ * softmax task's keys are one stretch of memory, which stays in its core's L2 between its
+ * two passes (5.5 against 6.6 ms a call at 24,960 keys for one row). For three rows a call
+ * moves some 560 MB -- the keys 154, the values 102, the scores' 38 about eight times over
+ * (written, read and rewritten by the softmax, read by each of a key head's four value
+ * parts) -- near what the memory gives in its 10 ms. Full attention only (row t sees keys
+ * 0..p0 + t); tests/test_mimo_attention.c compares the two bit for bit. */
+#define AK_BLOCK 64
+/* MIMO_ATTN_KEYS (128): a block of at most MIMO_ATTN_KEY_ROWS (8) rows over a full layer's
+ * cache of at least that many keys takes attend_keys; 0: never. On 16 workers of the spinning
+ * team it is the faster from 128 keys on (Pro's shape, one row and three: 0.06 and 0.15 ms
+ * against attend_heads' 0.12 and 0.24 at 128 keys; 0.45 and 1.23 against 4.79 and 9.08 at
+ * 4320; 5.6 and 9.9 against 43.3 and 96.4 at 24,960). */
+static int g_ak_keys = -1, g_ak_rows;
+static float *g_ak_raw, *g_ak_buf;   /* scores, queries and chunk maxima: grown, never shrunk */
+static size_t g_ak_cap;
+static float *ak_scratch(size_t floats) {
+    if (floats > g_ak_cap) {
+        free(g_ak_raw);
+        g_ak_cap = floats + floats / 4;
+        g_ak_raw = xmalloc((g_ak_cap + 16) * sizeof(float), "attention by keys");
+        g_ak_buf = (float *)(((uintptr_t)g_ak_raw + 63) & ~(uintptr_t)63);
+    }
+    return g_ak_buf;
+}
+static inline __m256 ak_exp8(__m256 x) {
+#ifdef EXP_F8
+    return exp_f8(x);
+#else
+    float v[8];
+    _mm256_storeu_ps(v, x);
+    for (int i = 0; i < 8; i++) v[i] = exp_f(v[i]);
+    return _mm256_loadu_ps(v);
+#endif
+}
+/* the scores of nk (4 or 1) keys kr[0..nk) for ng (2 or 1) groups of eight lanes, as
+ * scores_by_head makes each, into out[g * gstride + k * 8 + lane]; m keeps each lane's largest */
+static inline __attribute__((always_inline)) void ak_score_tile(const float *q, int lanes, int hd, const float *const *kr,
+                                                                size_t koff, const int nk, const int ng, __m256 vs,
+                                                                float *out, size_t gstride, __m256 *m) {
+    __m256 a[4][2];
+    const float *k[4];
+    for (int x = 0; x < nk; x++) {
+        k[x] = kr[x] + koff;
+        for (int g = 0; g < ng; g++) a[x][g] = _mm256_setzero_ps();
+    }
+    for (int i = 0; i < hd; i++) {
+        __m256 qv[2];
+        for (int g = 0; g < ng; g++) qv[g] = _mm256_loadu_ps(q + (size_t)i * lanes + 8 * g);
+        for (int x = 0; x < nk; x++) {
+            __m256 b = _mm256_set1_ps(k[x][i]);
+            for (int g = 0; g < ng; g++) a[x][g] = _mm256_add_ps(a[x][g], mul_apart(qv[g], b));
+        }
+    }
+    for (int x = 0; x < nk; x++)
+        for (int g = 0; g < ng; g++) {
+            __m256 s = _mm256_mul_ps(a[x][g], vs);
+            _mm256_storeu_ps(out + (size_t)g * gstride + (size_t)x * 8, s);
+            m[g] = _mm256_max_ps(s, m[g]);
+        }
+}
+static inline __attribute__((always_inline)) void ak_scores(const float *q, int lanes, int hd, const float *const *Kr,
+                                                            size_t koff, int j0, int j1, const int ng, __m256 vs,
+                                                            float *out, size_t gstride, __m256 *m) {
+    int j = j0;
+    for (; j + 4 <= j1; j += 4) ak_score_tile(q, lanes, hd, Kr + j, koff, 4, ng, vs, out + (size_t)j * 8, gstride, m);
+    for (; j < j1; j++) ak_score_tile(q, lanes, hd, Kr + j, koff, 1, ng, vs, out + (size_t)j * 8, gstride, m);
+}
+/* eight heads' outputs o[g] + ooff (eight columns) over keys [j0, j1), their weights w[j * 8 + g]:
+ * o = fma(w, v, o) in key order, from zero when fresh, else from what o holds */
+static inline void ak_value_tile(const float *const *Vr, size_t voff, int j0, int j1, const float *w,
+                                 float *const *o, int ooff, int fresh) {
+    __m256 a0, a1, a2, a3, a4, a5, a6, a7;
+    if (fresh) a0 = a1 = a2 = a3 = a4 = a5 = a6 = a7 = _mm256_setzero_ps();
+    else {
+        a0 = _mm256_loadu_ps(o[0] + ooff); a1 = _mm256_loadu_ps(o[1] + ooff);
+        a2 = _mm256_loadu_ps(o[2] + ooff); a3 = _mm256_loadu_ps(o[3] + ooff);
+        a4 = _mm256_loadu_ps(o[4] + ooff); a5 = _mm256_loadu_ps(o[5] + ooff);
+        a6 = _mm256_loadu_ps(o[6] + ooff); a7 = _mm256_loadu_ps(o[7] + ooff);
+    }
+    for (int j = j0; j < j1; j++) {
+        __m256 v = _mm256_loadu_ps(Vr[j] + voff);
+        const float *wj = w + (size_t)j * 8;
+        a0 = _mm256_fmadd_ps(_mm256_broadcast_ss(wj + 0), v, a0);
+        a1 = _mm256_fmadd_ps(_mm256_broadcast_ss(wj + 1), v, a1);
+        a2 = _mm256_fmadd_ps(_mm256_broadcast_ss(wj + 2), v, a2);
+        a3 = _mm256_fmadd_ps(_mm256_broadcast_ss(wj + 3), v, a3);
+        a4 = _mm256_fmadd_ps(_mm256_broadcast_ss(wj + 4), v, a4);
+        a5 = _mm256_fmadd_ps(_mm256_broadcast_ss(wj + 5), v, a5);
+        a6 = _mm256_fmadd_ps(_mm256_broadcast_ss(wj + 6), v, a6);
+        a7 = _mm256_fmadd_ps(_mm256_broadcast_ss(wj + 7), v, a7);
+    }
+    _mm256_storeu_ps(o[0] + ooff, a0); _mm256_storeu_ps(o[1] + ooff, a1);
+    _mm256_storeu_ps(o[2] + ooff, a2); _mm256_storeu_ps(o[3] + ooff, a3);
+    _mm256_storeu_ps(o[4] + ooff, a4); _mm256_storeu_ps(o[5] + ooff, a5);
+    _mm256_storeu_ps(o[6] + ooff, a6); _mm256_storeu_ps(o[7] + ooff, a7);
+}
+static void attend_keys(const float *qkv, int rows, int n, int p0, const float *const *Kr, const float *const *Vr,
+                        int nk, const float *sinks, float scale, int nh, int kvh, int hd, int vd, float *ctxv) {
+    const int group = nh / kvh, lanes = (group + 7) / 8 * 8, lg = lanes / 8, parts = (vd / 8 + 3) / 4;
+    int threads = omp_get_max_threads(), C = (nk + 4 * threads - 1) / (4 * threads);
+    C = C < 64 ? 64 : (C + 3) / 4 * 4;
+    const int nch = (nk + C - 1) / C;
+    const size_t ns = (size_t)n * kvh * nk * lanes, nq = (size_t)n * kvh * hd * lanes;
+    float *S = ak_scratch(ns + nq + (size_t)n * kvh * nch * lanes), *qT = S + ns, *M = qT + nq;
+    const __m256 vs = _mm256_set1_ps(scale);
+    #pragma omp parallel
+    {
+        float dum[8][32];   /* the outputs of a group's spare lanes (fewer than 8 heads a key head) */
+        memset(dum, 0, sizeof dum);
+        #pragma omp for collapse(2) schedule(static)
+        for (int t = 0; t < n; t++)
+            for (int kh = 0; kh < kvh; kh++) {
+                float *q = qT + ((size_t)t * kvh + kh) * hd * lanes;
+                for (int i = 0; i < hd; i++)
+                    for (int g = 0; g < lanes; g++)
+                        q[(size_t)i * lanes + g] = g < group ? qkv[(size_t)t * rows + (size_t)(kh * group + g) * hd + i] : 0.0f;
+            }
+        #pragma omp for schedule(dynamic, 1) nowait
+        for (int c = 0; c < nch; c++) {
+            int c0 = c * C, c1 = c0 + C < nk ? c0 + C : nk;
+            for (int kh = 0; kh < kvh; kh++)
+                for (int t = 0; t < n; t++) {
+                    int e = p0 + t + 1 < c1 ? p0 + t + 1 : c1;   /* row t's keys here: [c0, e) */
+                    const float *q = qT + ((size_t)t * kvh + kh) * hd * lanes;
+                    float *s = S + ((size_t)t * kvh + kh) * nk * lanes, *mx = M + (((size_t)t * kvh + kh) * nch + c) * lanes;
+                    for (int g0 = 0; g0 < lanes; g0 += 16) {
+                        __m256 m[2] = { _mm256_set1_ps(-INFINITY), _mm256_set1_ps(-INFINITY) };
+                        float *sg = s + (size_t)(g0 / 8) * nk * 8;
+                        if (g0 + 16 <= lanes) {
+                            ak_scores(q + g0, lanes, hd, Kr, (size_t)kh * hd, c0, e, 2, vs, sg, (size_t)nk * 8, m);
+                            _mm256_storeu_ps(mx + g0, m[0]);
+                            _mm256_storeu_ps(mx + g0 + 8, m[1]);
+                        } else {
+                            ak_scores(q + g0, lanes, hd, Kr, (size_t)kh * hd, c0, e, 1, vs, sg, (size_t)nk * 8, m);
+                            _mm256_storeu_ps(mx + g0, m[0]);
+                        }
+                    }
+                }
+        }
+        #pragma omp barrier
+        #pragma omp for collapse(3) schedule(static)
+        for (int t = 0; t < n; t++)
+            for (int kh = 0; kh < kvh; kh++)
+                for (int gl = 0; gl < lg; gl++) {
+                    int g0 = 8 * gl, last = p0 + t;
+                    const float *mx = M + ((size_t)t * kvh + kh) * nch * lanes + g0;
+                    __m256 best = _mm256_set1_ps(-INFINITY);
+                    for (int c = 0; c < nch; c++) best = _mm256_max_ps(_mm256_loadu_ps(mx + (size_t)c * lanes), best);
+                    float b[8], d[8];
+                    _mm256_storeu_ps(b, best);
+                    for (int g = 0; g < 8; g++) {
+                        d[g] = 0.0f;
+                        if (sinks && g0 + g < group) {
+                            float sink = sinks[kh * group + g0 + g];
+                            if (sink > b[g]) b[g] = sink;
+                            d[g] = exp_f(sink - b[g]);
+                        }
+                    }
+                    best = _mm256_loadu_ps(b);
+                    __m256 den = _mm256_loadu_ps(d);
+                    float *s = S + (((size_t)t * kvh + kh) * lg + gl) * nk * 8;
+                    for (int j = 0; j <= last; j++) {
+                        __m256 e = ak_exp8(_mm256_sub_ps(_mm256_loadu_ps(s + (size_t)j * 8), best));
+                        _mm256_storeu_ps(s + (size_t)j * 8, e);
+                        den = _mm256_add_ps(den, e);
+                    }
+                    for (int j = 0; j <= last; j++)
+                        _mm256_storeu_ps(s + (size_t)j * 8, _mm256_div_ps(_mm256_loadu_ps(s + (size_t)j * 8), den));
+                }
+        #pragma omp for collapse(2) schedule(static)
+        for (int kh = 0; kh < kvh; kh++)
+            for (int part = 0; part < parts; part++) {
+                int i0 = 32 * part, sl = (vd - i0) / 8 < 4 ? (vd - i0) / 8 : 4;   /* slices of eight columns */
+                size_t voff = (size_t)kh * vd + i0;
+                for (int jb = 0; jb < nk; jb += AK_BLOCK) {
+                    int je = jb + AK_BLOCK < nk ? jb + AK_BLOCK : nk, jn = je + AK_BLOCK < nk ? je + AK_BLOCK : nk;
+                    for (int j = je; j < jn; j++)   /* the next block's value rows */
+                        for (int x = 0; x < sl; x += 2) _mm_prefetch((const char *)(Vr[j] + voff + 8 * x), _MM_HINT_T0);
+                    for (int t = 0; t < n; t++) {
+                        int jt = p0 + t + 1 < je ? p0 + t + 1 : je;
+                        if (jt <= jb) continue;
+                        const float *w = S + ((size_t)t * kvh + kh) * nk * lanes;
+                        for (int g0 = 0; g0 < group; g0 += 8) {
+                            float *o[8];
+                            for (int g = 0; g < 8; g++)
+                                o[g] = g0 + g < group ? ctxv + ((size_t)t * nh + kh * group + g0 + g) * vd + i0 : dum[g];
+                            for (int x = 0; x < sl; x++)
+                                ak_value_tile(Vr, voff + 8 * x, jb, jt, w + (size_t)(g0 / 8) * nk * 8, o, 8 * x, jb == 0);
+                        }
+                    }
+                }
+            }
+    }
+}
 #endif
 
 /* Attention of `n` rows at positions p0.. of layer li. `xn` is the normed input
@@ -2471,46 +2726,14 @@ static void attention(Model *m, int li, const float *xn, int n, int p0, float *o
     int vec = 0, gpu = attention_gpu(m, l, k, qkv, rows, n, nh, kvh, hd, vd, Kr, Vr, lo, nkeys, p0, window, scale, ctxv);
 #if defined(__AVX2__)
     vec = !gpu && hd % 16 == 0;
-    if (vec) {
-        /* The heads of a key/value head at once (scores_by_head); the softmax and the
-         * values per head as below. The sums gcc vectorizes in blocks of 16 are the ones
-         * this path reproduces, hence hd % 16 (MiMo's 192, the tiny fixture's 48). */
-        int lanes = (group + 7) / 8 * 8;
-        #pragma omp parallel
-        {
-            float *qT = xmalloc((size_t)hd * lanes * sizeof(float), "queries by head");
-            float *sc = xmalloc((size_t)lanes * nkeys * sizeof(float), "scores by head");
-            #pragma omp for collapse(2) schedule(static)
-            for (int t = 0; t < n; t++) {
-                for (int kh = 0; kh < kvh; kh++) {
-                    int p = p0 + t;
-                    int first = window ? (p - (window - 1) > lo ? p - (window - 1) : lo) : 0;
-                    for (int g = 0; g < lanes; g++)
-                        for (int i = 0; i < hd; i++)
-                            qT[(size_t)i * lanes + g] = g < group ? qkv[(size_t)t * rows + (size_t)(kh * group + g) * hd + i] : 0.0f;
-                    scores_by_head(qT, lanes, hd, Kr, lo, first, p, (size_t)kh * hd, scale, sc, nkeys);
-                    for (int g = 0; g < group; g++) {
-                        int h = kh * group + g;
-                        float *score = sc + (size_t)g * nkeys;
-                        float best = -INFINITY;
-                        for (int j = first; j <= p; j++) if (score[j - first] > best) best = score[j - first];
-                        float sink = l->sink ? l->sink[h] : -INFINITY;
-                        if (sink > best) best = sink;
-                        float den = l->sink ? exp_f(sink - best) : 0.0f;
-                        for (int j = first; j <= p; j++) { score[j - first] = exp_f(score[j - first] - best); den += score[j - first]; }
-                        float *o = ctxv + ((size_t)t * nh + h) * vd;
-                        for (int i = 0; i < vd; i++) o[i] = 0;
-                        for (int j = first; j <= p; j++) {
-                            const float *vr = Vr[j - lo] + (size_t)kh * vd;
-                            float w = score[j - first] / den;
-                            for (int i = 0; i < vd; i++) o[i] += w * vr[i];
-                        }
-                    }
-                }
-            }
-            free(qT); free(sc);
-        }
+    if (g_ak_keys < 0) {
+        g_ak_keys = env_int("MIMO_ATTN_KEYS", 128);
+        g_ak_rows = env_int("MIMO_ATTN_KEY_ROWS", 8);
     }
+    if (vec && !window && vd % 8 == 0 && g_ak_keys > 0 && nkeys >= g_ak_keys && n <= g_ak_rows)
+        attend_keys(qkv, rows, n, p0, Kr, Vr, nkeys, l->sink, scale, nh, kvh, hd, vd, ctxv);
+    else if (vec)
+        attend_heads(qkv, rows, n, p0, lo, window, Kr, Vr, nkeys, l->sink, scale, nh, kvh, hd, vd, ctxv);
 #endif
     if (!vec && !gpu) {
     #pragma omp parallel

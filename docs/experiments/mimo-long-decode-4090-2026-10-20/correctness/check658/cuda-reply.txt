@@ -1,0 +1,1 @@
+The `MIMO_CUDA=1` flag accelerates MiMo's dense matrices on CUDA GPUs using wide, memory-efficient kernels and a flexible VRAM budget,

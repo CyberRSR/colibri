@@ -6,6 +6,8 @@ depends on where the linker puts the library). exp_f.h does the library's x87 se
 with FISTTP + FILD for the truncations. This builds tests/exp_f_check.c as the engines are
 built (-O3, an x86-64-v3 target, OpenMP) and compares the two on all 2^32 floats; with
 msvcrt it must be the x87 exp_f. Elsewhere (UCRT, other C libraries) exp_f is expf itself.
+With msvcrt it also compares exp_f8, eight exps a call (the x87 exp_f with AVX2 and FMA),
+against exp_f on all 2^32 floats.
 """
 import os
 import platform
@@ -45,6 +47,7 @@ class ExpF(unittest.TestCase):
         self.assertIn(" 4294967296 floats, 0 differ", run.stdout)
         if "(msvcrt)" in lines[0]:   # MinGW on msvcrt: expf is libmingwex's x87 exp
             self.assertTrue(lines[0].startswith("x87 "), run.stdout)
+            self.assertIn("exp_f8: 4294967296 floats, 0 differ", run.stdout)
 
 
 if __name__ == "__main__":

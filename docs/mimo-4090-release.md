@@ -24,7 +24,9 @@ The history and the measurements: [README](https://github.com/CyberRSR/colibri#t
 раз — следующий ход переиспользует уже обработанный префикс, а посторонний запрос с
 другим системным промптом его сбрасывает. Длинный промпт обрабатывается на GPU:
 первый промпт в 25 000 токенов — около полутора минут (в r2 — около 4 минут, на CPU —
-около часа), дальше — только новые токены. Пока идёт промпт, GPU загружен почти
+около часа), дальше — только новые токены. Ответ после такого промпта генерируется со
+скоростью около 2,3 токена в секунду (в r3 — 1,4): внимание шага декодирования считается
+на всех ядрах, байт-в-байт как раньше. Пока идёт промпт, GPU загружен почти
 полностью, а видеопамять нужна движку: тяжёлые графические программы рядом могут его
 замедлить.
 
@@ -67,5 +69,7 @@ START-MIMO.cmd -ModelDir E:\MiMo-V2.6-Pro -ShardDir ""
 | eight different prompts, tok/s | 1.061 | 2.26 |
 | first token of a 4310-token prompt | -- | 47 s (r2: 69 s; 414 s with prompts on the CPU) |
 | first token of a 24,957-token prompt | -- | 92 s (r2: 245 s; about an hour on the CPU) |
+| a reply after that prompt (128 tokens, greedy), tok/s | -- | 2.32 (r3: 1.40) |
+| a reply after the 4310-token prompt, tok/s | -- | 2.79 (r3: 2.62) |
 
 `tools\benchmark_mimo_cuda.py` measures your own machine (docs/mimo-cuda.md).
