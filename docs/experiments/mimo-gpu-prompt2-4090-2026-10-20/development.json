@@ -1,0 +1,327 @@
+{
+ "note": "Working-tree builds on the way, each run once on the 24,957-token prompt (long_prompt.py, 16 tokens, MIMO_CHUNK= as the defaults). k1..k10 summed FP8's and MXFP4's products in one FMA chain with the scales folded into the weights; k11 (the grouped sums, k10's engine otherwise) only ran the correctness probe. The arms' replies are r2's ('On an RTX 4090, MiMo-V2.6'); k12's and the final engine's differ at the tenth token, a near-tie (topk/).",
+ "runs": [
+  {
+   "run": "base-25k",
+   "build": "the round's start: r2's engine (prompt blocks on the GPU; between the qkv, the attention and o_proj the rows go down to the host and up again)",
+   "prompt": "p25k.txt",
+   "first_token_s": 235.48,
+   "reply": "On an RTX 4090, MiMo-V2.6",
+   "engine_lines": [
+    "[mimo] prompt blocks on the GPU: up to 32768 rows (1.94 GB free on the card)",
+    "[mimo] prompt 235.41s (stalled 2.69s, experts 86.68s, attention 127.70s, routers 6.07s, 26411 demand reads); generation 12.32s (stalled 2.49s, experts 3.16s, attention 5.74s, 1188 demand reads, 4462 prefetched)",
+    "[CUDA] mimo matmul wall time (copies + compute): f32 0.000s, bf16 3.722s, fp8 55.079s, int8 0.000s, int8 blocks 0.000s, bf16 packed 23.202s",
+    "[CUDA] mimo prompt experts: 69 MoE steps, 1722033 rows, 26411 experts, 1.694s queueing and waiting, 0 left to the CPU"
+   ]
+  },
+  {
+   "run": "k1-25k",
+   "build": "one tiled kernel for every prompt matrix (FP8, bf16, packed bf16, the experts' MXFP4): 128 x 128 tiles, 8 x 8 a thread, instead of 64 x 64; each expert slot its own stream",
+   "prompt": "p25k.txt",
+   "first_token_s": 215.1,
+   "reply": "On an RTX 4090, MiMo-V2.6",
+   "engine_lines": [
+    "[mimo] prompt blocks on the GPU: up to 32768 rows (2.07 GB free on the card)",
+    "[mimo] prompt 215.04s (stalled 2.73s, experts 77.88s, attention 116.47s, routers 5.96s, 26415 demand reads); generation 12.27s (stalled 2.48s, experts 3.16s, attention 5.71s, 1198 demand reads, 4440 prefetched)",
+    "[CUDA] mimo matmul wall time (copies + compute): f32 0.000s, bf16 3.703s, fp8 46.568s, int8 0.000s, int8 blocks 0.000s, bf16 packed 21.460s",
+    "[CUDA] mimo prompt experts: 69 MoE steps, 1722033 rows, 26415 experts, 1.721s queueing and waiting, 0 left to the CPU"
+   ]
+  },
+  {
+   "run": "k2-25k",
+   "build": "a sub-block's attention kept on the device: its rows up once, the qkv, RoPE from the host's tables, the attention and o_proj there; its keys and values and o_proj's output down",
+   "prompt": "p25k.txt",
+   "first_token_s": 148.03,
+   "reply": "On an RTX 4090, MiMo-V2.6",
+   "engine_lines": [
+    "[mimo] prompt blocks on the GPU: up to 32768 rows (2.08 GB free on the card)",
+    "[mimo] experts on the GPU: 73.95s (their bytes into staging 17.96s, waiting for a staging buffer 51.26s, for the last outputs 0.72s); the rows' weighted sums 6.78s",
+    "[mimo] prompt 147.96s (stalled 3.01s, experts 77.72s, attention 49.30s, routers 5.99s, 26412 demand reads); generation 12.19s (stalled 2.50s, experts 3.16s, attention 5.63s, 1182 demand reads, 4432 prefetched)",
+    "[CUDA] mimo matmul wall time (copies + compute): f32 0.000s, bf16 3.698s, fp8 1.314s, int8 0.000s, int8 blocks 0.000s, bf16 packed 0.116s",
+    "[CUDA] mimo prompt attention kept on the device: 1750 blocks, 1746990 rows, 47.965s (on the device: qkv and RoPE 16.692s, attention 17.045s, o_proj 9.934s), 0 left to the host",
+    "[CUDA] mimo prompt experts: 69 MoE steps, 1722033 rows, 26412 experts, 1.706s queueing and waiting, 0 left to the CPU"
+   ]
+  },
+  {
+   "run": "k3-25k",
+   "build": "the experts' outputs stored by the down kernel straight into pinned host memory: the card's one copy engine took the output copies in order behind their kernels, and every later expert's upload waited (2.94 -> 1.61 ms an expert in tools/bench_mimo_moe.cu)",
+   "prompt": "p25k.txt",
+   "first_token_s": 125.65,
+   "reply": "On an RTX 4090, MiMo-V2.6",
+   "engine_lines": [
+    "[mimo] prompt blocks on the GPU: up to 32768 rows (2.08 GB free on the card)",
+    "[mimo] experts on the GPU: 51.35s (their bytes into staging 22.76s, waiting for a staging buffer 17.34s, for the last outputs 0.17s); the rows' weighted sums 6.82s",
+    "[mimo] prompt 125.58s (stalled 10.10s, experts 48.06s, attention 49.36s, routers 6.09s, 26412 demand reads); generation 12.30s (stalled 2.56s, experts 3.17s, attention 5.66s, 1172 demand reads, 4450 prefetched)",
+    "[CUDA] mimo matmul wall time (copies + compute): f32 0.000s, bf16 3.712s, fp8 1.328s, int8 0.000s, int8 blocks 0.000s, bf16 packed 0.116s",
+    "[CUDA] mimo prompt attention kept on the device: 1750 blocks, 1746990 rows, 48.019s (on the device: qkv and RoPE 16.715s, attention 17.057s, o_proj 9.943s), 0 left to the host",
+    "[CUDA] mimo prompt experts: 69 MoE steps, 1722033 rows, 26412 experts, 1.129s queueing and waiting, 0 left to the CPU"
+   ]
+  },
+  {
+   "run": "k4-25k",
+   "build": "flash attention: tiles of 128 queries (the heads sharing a key head) by 128 keys at absolute positions, online softmax with the sink",
+   "prompt": "p25k.txt",
+   "first_token_s": 122.99,
+   "reply": "On an RTX 4090, MiMo-V2.6",
+   "engine_lines": [
+    "[mimo] prompt blocks on the GPU: up to 32768 rows (1.90 GB free on the card)",
+    "[mimo] experts on the GPU: 53.12s (their bytes into staging 22.76s, waiting for a staging buffer 19.75s, for the last outputs 0.18s); the rows' weighted sums 6.92s",
+    "[mimo] prompt 122.93s (stalled 9.39s, experts 50.64s, attention 44.65s, routers 6.12s, 26410 demand reads); generation 12.61s (stalled 2.43s, experts 3.20s, attention 6.00s, 1163 demand reads, 4399 prefetched)",
+    "[CUDA] mimo matmul wall time (copies + compute): f32 0.000s, bf16 3.760s, fp8 1.373s, int8 0.000s, int8 blocks 0.000s, bf16 packed 0.127s",
+    "[CUDA] mimo prompt attention kept on the device: 1750 blocks, 1746990 rows, 43.166s (on the device: qkv and RoPE 17.599s, attention 10.630s, o_proj 10.503s), 0 left to the host",
+    "[CUDA] mimo prompt experts: 69 MoE steps, 1722033 rows, 26410 experts, 1.195s queueing and waiting, 0 left to the CPU"
+   ]
+  },
+  {
+   "run": "k5-25k",
+   "build": "experts the cache does not hold read from disk straight into pinned staging buffers (MIMO_CUDA_MOE_DIRECT), not into a cache slot and copied again",
+   "prompt": "p25k.txt",
+   "first_token_s": 117.88,
+   "reply": "On an RTX 4090, MiMo-V2.6",
+   "engine_lines": [
+    "[mimo] prompt blocks on the GPU: up to 32768 rows (1.82 GB free on the card)",
+    "[mimo] experts on the GPU: 47.78s (their bytes into staging 6.16s, waiting for a staging buffer 12.59s, for the last outputs 0.39s), 19234 read straight into staging; the rows' weighted sums 6.95s",
+    "[mimo] prompt 117.82s (stalled 0.38s, experts 54.34s, attention 44.71s, routers 6.18s, 26410 demand reads); generation 11.39s (stalled 1.39s, experts 3.13s, attention 5.94s, 820 demand reads, 3172 prefetched)",
+    "[CUDA] mimo matmul wall time (copies + compute): f32 0.000s, bf16 3.765s, fp8 1.347s, int8 0.000s, int8 blocks 0.000s, bf16 packed 0.127s",
+    "[CUDA] mimo prompt attention kept on the device: 1750 blocks, 1746990 rows, 43.185s (on the device: qkv and RoPE 17.573s, attention 10.705s, o_proj 10.483s), 0 left to the host",
+    "[CUDA] mimo prompt experts: 69 MoE steps, 1722033 rows, 26410 experts, 28.595s queueing and waiting, 0 left to the CPU"
+   ]
+  },
+  {
+   "run": "k6-25k",
+   "build": "the routers on the device from the rows already up for the experts; the block's rows in pinned memory (MIMO_CUDA_PIN)",
+   "prompt": "p25k.txt",
+   "first_token_s": 113.19,
+   "reply": "On an RTX 4090, MiMo-V2.6",
+   "engine_lines": [
+    "[mimo] prompt blocks on the GPU: up to 28772 rows (1.58 GB free on the card)",
+    "[mimo] experts on the GPU: 47.82s (their bytes into staging 6.17s, waiting for a staging buffer 12.09s, for the last outputs 0.44s), 19234 read straight into staging; the rows' weighted sums 6.95s",
+    "[mimo] prompt 113.12s (stalled 0.37s, experts 54.40s, attention 43.61s, routers 4.56s, 26410 demand reads); generation 11.22s (stalled 1.26s, experts 3.07s, attention 5.90s, 832 demand reads, 3117 prefetched)",
+    "[CUDA] mimo matmul wall time (copies + compute): f32 0.000s, bf16 0.557s, fp8 1.435s, int8 0.000s, int8 blocks 0.000s, bf16 packed 0.129s",
+    "[CUDA] mimo prompt attention kept on the device: 1750 blocks, 1746990 rows, 42.069s (on the device: qkv and RoPE 17.507s, attention 10.664s, o_proj 10.451s), 0 left to the host",
+    "[CUDA] mimo prompt experts: 69 MoE steps, 1722033 rows, 26410 experts, 29.150s queueing and waiting, 0 left to the CPU"
+   ]
+  },
+  {
+   "run": "k7-25k",
+   "build": "timers for the per-row loops (no change)",
+   "prompt": "p25k.txt",
+   "first_token_s": 113.22,
+   "reply": "On an RTX 4090, MiMo-V2.6",
+   "engine_lines": [
+    "[mimo] prompt blocks on the GPU: up to 32768 rows (1.86 GB free on the card)",
+    "[mimo] the blocks' per-row loops (norms, residuals) 7.27s, dense MLP 1.64s",
+    "[mimo] experts on the GPU: 47.83s (their bytes into staging 6.18s, waiting for a staging buffer 12.07s, for the last outputs 0.46s), 19234 read straight into staging; the rows' weighted sums 6.96s",
+    "[mimo] prompt 113.16s (stalled 0.38s, experts 54.40s, attention 43.77s, routers 4.53s, 26410 demand reads); generation 11.31s (stalled 1.28s, experts 3.11s, attention 5.96s, 827 demand reads, 3168 prefetched)",
+    "[CUDA] mimo matmul wall time (copies + compute): f32 0.000s, bf16 0.554s, fp8 1.313s, int8 0.000s, int8 blocks 0.000s, bf16 packed 0.129s",
+    "[CUDA] mimo prompt attention kept on the device: 1750 blocks, 1746990 rows, 42.231s (on the device: qkv and RoPE 17.572s, attention 10.726s, o_proj 10.472s), 0 left to the host",
+    "[CUDA] mimo prompt experts: 69 MoE steps, 1722033 rows, 26410 experts, 29.147s queueing and waiting, 0 left to the CPU"
+   ]
+  },
+  {
+   "run": "k8-25k",
+   "build": "a full layer's keys and values kept on the device for the block's next sub-block (they went up again for each of a 25,000-row block's 25 sub-blocks)",
+   "prompt": "p25k.txt",
+   "first_token_s": 111.76,
+   "reply": "On an RTX 4090, MiMo-V2.6",
+   "engine_lines": [
+    "[mimo] prompt blocks on the GPU: up to 31790 rows (1.66 GB free on the card)",
+    "[mimo] the blocks' per-row loops (norms, residuals) 7.26s, dense MLP 1.63s",
+    "[mimo] experts on the GPU: 47.97s (their bytes into staging 6.17s, waiting for a staging buffer 12.20s, for the last outputs 0.36s), 19234 read straight into staging; the rows' weighted sums 6.97s",
+    "[mimo] prompt 111.69s (stalled 0.38s, experts 54.55s, attention 42.17s, routers 4.56s, 26410 demand reads); generation 11.46s (stalled 1.43s, experts 3.13s, attention 5.95s, 831 demand reads, 3207 prefetched)",
+    "[CUDA] mimo matmul wall time (copies + compute): f32 0.000s, bf16 0.558s, fp8 1.319s, int8 0.000s, int8 blocks 0.000s, bf16 packed 0.128s",
+    "[CUDA] mimo prompt attention kept on the device: 1750 blocks, 1746990 rows, 40.642s (on the device: qkv and RoPE 17.607s, attention 9.078s, o_proj 10.494s), 0 left to the host",
+    "[CUDA] mimo prompt experts: 69 MoE steps, 1722033 rows, 26410 experts, 29.169s queueing and waiting, 0 left to the CPU"
+   ]
+  },
+  {
+   "run": "k9-25k",
+   "build": "the CPU's per-row loops (weighted sums, norms, residuals) beside the device's sub-blocks (MIMO_PIPE)",
+   "prompt": "p25k.txt",
+   "first_token_s": 97.53,
+   "reply": "On an RTX 4090, MiMo-V2.6",
+   "engine_lines": [
+    "[mimo] prompt blocks on the GPU: up to 30004 rows (1.61 GB free on the card)",
+    "[mimo] the blocks' per-row loops (norms, residuals) 4.31s, dense MLP 1.63s",
+    "[mimo] experts on the GPU: 48.01s (their bytes into staging 6.16s, waiting for a staging buffer 12.26s, for the last outputs 0.51s), 19234 read straight into staging; the rows' weighted sums 8.88s",
+    "[mimo] prompt 97.47s (stalled 0.37s, experts 56.52s, attention 29.60s, routers 4.52s, 26410 demand reads); generation 11.19s (stalled 1.34s, experts 3.06s, attention 5.84s, 831 demand reads, 3173 prefetched)",
+    "[CUDA] mimo matmul wall time (copies + compute): f32 0.000s, bf16 0.550s, fp8 1.313s, int8 0.000s, int8 blocks 0.000s, bf16 packed 0.129s",
+    "[CUDA] mimo prompt attention kept on the device: 1750 blocks, 1746990 rows, 40.324s on the device (rows up 1.769s, qkv and RoPE 17.830s, attention 8.489s, o_proj 10.546s, outputs down 1.689s), 0 left to the host",
+    "[CUDA] mimo prompt experts: 69 MoE steps, 1722033 rows, 26410 experts, 29.170s queueing and waiting, 0 left to the CPU"
+   ]
+  },
+  {
+   "run": "k10-25k",
+   "build": "one device arena for the attention, the experts and the matrices; 12 expert slots; the block from the free memory (4 x (hidden + experts) bytes a row beside 640 MB). The correctness check failed here: see \"correctness_bisect\"",
+   "prompt": "p25k.txt",
+   "first_token_s": 97.92,
+   "reply": "On an RTX 4090, MiMo-V2.6",
+   "engine_lines": [
+    "[mimo] prompt blocks on the GPU: up to 32768 rows (1.88 GB free on the card)",
+    "[mimo] the blocks' per-row loops (norms, residuals) 4.31s, dense MLP 1.61s",
+    "[mimo] experts on the GPU: 48.72s (their bytes into staging 6.24s, waiting for a staging buffer 17.70s, for the last outputs 0.17s), 19234 read straight into staging; the rows' weighted sums 8.85s",
+    "[mimo] prompt 97.86s (stalled 0.39s, experts 57.17s, attention 29.31s, routers 4.52s, 26410 demand reads); generation 11.37s (stalled 1.41s, experts 3.10s, attention 5.95s, 843 demand reads, 3188 prefetched)",
+    "[CUDA] mimo matmul wall time (copies + compute): f32 0.000s, bf16 0.586s, fp8 1.302s, int8 0.000s, int8 blocks 0.000s, bf16 packed 0.144s",
+    "[CUDA] mimo prompt attention kept on the device: 1750 blocks, 1746990 rows, 40.362s on the device (rows up 1.766s, qkv and RoPE 17.852s, attention 8.523s, o_proj 10.530s, outputs down 1.691s), 0 left to the host",
+    "[CUDA] mimo prompt experts: 69 MoE steps, 1722033 rows, 26410 experts, 24.209s queueing and waiting, 0 left to the CPU"
+   ]
+  },
+  {
+   "run": "k12-25k",
+   "build": "the scaled formats' sums by scale group (FP8 128 columns, MXFP4 32), as the CPU; the check passes (the final engine's code)",
+   "prompt": "p25k.txt",
+   "first_token_s": 93.92,
+   "reply": "On an RTX 4090 (Windows, MiMo-V2",
+   "engine_lines": [
+    "[mimo] prompt blocks on the GPU: up to 32768 rows (2.12 GB free on the card)",
+    "[mimo] the blocks' per-row loops (norms, residuals) 4.25s, dense MLP 1.58s",
+    "[mimo] experts on the GPU: 46.67s (their bytes into staging 6.24s, waiting for a staging buffer 20.39s, for the last outputs 0.15s), 19234 read straight into staging; the rows' weighted sums 8.88s",
+    "[mimo] prompt 93.86s (stalled 0.38s, experts 55.16s, attention 27.36s, routers 4.57s, 26410 demand reads); generation 11.71s (stalled 1.55s, experts 3.10s, attention 6.10s, 838 demand reads, 3242 prefetched)",
+    "[CUDA] mimo matmul wall time (copies + compute): f32 0.000s, bf16 0.594s, fp8 1.265s, int8 0.000s, int8 blocks 0.000s, bf16 packed 0.162s",
+    "[CUDA] mimo prompt attention kept on the device: 1750 blocks, 1746990 rows, 38.400s on the device (rows up 1.729s, qkv and RoPE 16.939s, attention 8.064s, o_proj 9.981s, outputs down 1.686s), 0 left to the host",
+    "[CUDA] mimo prompt experts: 69 MoE steps, 1722033 rows, 26410 experts, 19.493s queueing and waiting, 0 left to the CPU"
+   ]
+  }
+ ],
+ "correctness_bisect": {
+  "note": "check_mimo_cuda.py's 658-token prompt in 256-row blocks: the k10 engine failed the check; each probe reran its CUDA side (probe.py) with the settings shown, against the same CPU logits. k10 summed FP8's and MXFP4's products in one FMA chain with the scales folded into the weights; k11 is k10 with each scale group's products summed apart.",
+  "probes": [
+   {
+    "run": "check-k10",
+    "engine": "k10",
+    "env": {},
+    "what": "the check itself: every GPU prompt path on",
+    "argmax_matches": "622/658",
+    "max_abs_logit_difference": 21.77757,
+    "max_kl": 7.49,
+    "first_position_kl_above_1e-4": 218
+   },
+   {
+    "run": "probe-MIMO_CUDA_MOE_0",
+    "engine": "k10",
+    "env": {
+     "MIMO_CUDA_MOE": "0"
+    },
+    "what": "the experts on the CPU",
+    "argmax_matches": "651/658",
+    "max_abs_logit_difference": 9.65111,
+    "max_kl": 0.355,
+    "first_position_kl_above_1e-4": 206
+   },
+   {
+    "run": "probe-MIMO_CUDA_MOE_DIRECT_0",
+    "engine": "k10",
+    "env": {
+     "MIMO_CUDA_MOE_DIRECT": "0"
+    },
+    "what": "the experts through the cache only",
+    "argmax_matches": "622/658",
+    "max_abs_logit_difference": 21.77757,
+    "max_kl": 7.49,
+    "first_position_kl_above_1e-4": 218
+   },
+   {
+    "run": "probe-MIMO_CUDA_ATTN_0",
+    "engine": "k10",
+    "env": {
+     "MIMO_CUDA_ATTN": "0"
+    },
+    "what": "the attention on the CPU",
+    "argmax_matches": "651/658",
+    "max_abs_logit_difference": 9.65124,
+    "max_kl": 0.355,
+    "first_position_kl_above_1e-4": 206
+   },
+   {
+    "run": "probe-MIMO_CUDA_ATTN_DEV_0",
+    "engine": "k10",
+    "env": {
+     "MIMO_CUDA_ATTN_DEV": "0"
+    },
+    "what": "the attention's rows down and up between the matrices",
+    "argmax_matches": "651/658",
+    "max_abs_logit_difference": 9.65113,
+    "max_kl": 0.355,
+    "first_position_kl_above_1e-4": 206
+   },
+   {
+    "run": "probe-tiled",
+    "engine": "k10",
+    "env": {
+     "MIMO_CUDA_ATTN": "0",
+     "MIMO_CUDA_MOE": "0"
+    },
+    "what": "only the matrices on the GPU, tiled",
+    "argmax_matches": "651/658",
+    "max_abs_logit_difference": 9.65132,
+    "max_kl": 0.355,
+    "first_position_kl_above_1e-4": 206
+   },
+   {
+    "run": "probe-tiled-small",
+    "engine": "k10",
+    "env": {
+     "MIMO_CUDA_ATTN": "0",
+     "MIMO_CUDA_MOE": "0",
+     "MIMO_CUDA_SCRATCH_MB": "8"
+    },
+    "what": "the same in small pieces",
+    "argmax_matches": "651/658",
+    "max_abs_logit_difference": 9.65132,
+    "max_kl": 0.355,
+    "first_position_kl_above_1e-4": 206
+   },
+   {
+    "run": "probe-wide",
+    "engine": "k10",
+    "env": {
+     "MIMO_CUDA_ATTN": "0",
+     "MIMO_CUDA_MOE": "0",
+     "MIMO_CUDA_TILED_ROWS": "1000000"
+    },
+    "what": "only the matrices on the GPU, the decode kernels' (one warp a row)",
+    "argmax_matches": "658/658",
+    "max_abs_logit_difference": 0.00122,
+    "max_kl": 1.76e-08,
+    "first_position_kl_above_1e-4": null
+   },
+   {
+    "run": "probe-k11",
+    "engine": "k11",
+    "env": {},
+    "what": "every path on, the scaled formats' sums by scale group (the fix)",
+    "argmax_matches": "658/658",
+    "max_abs_logit_difference": 0.00844,
+    "max_kl": 8.57e-07,
+    "first_position_kl_above_1e-4": null
+   }
+  ]
+ },
+ "decode_fix": {
+  "what": "matmul_piece asked the driver (cudaPointerGetAttributes, twice) on every matrix call whether the caller's buffers were pinned, to send a prompt block's straight; a decode step's calls paid it too",
+  "before": "benchmark/before-*: r2's engine 2.623 tok/s (median; decode 3.24), this round's 2.578 (3.20); the CUDA matmuls' wall time over the benchmark's 14,208 calls: FP8 4.466 -> 4.573 s, packed bf16 2.137 -> 2.278 s",
+  "after": "only a prompt block's (tiled) calls ask: benchmark/1-4, r2's 2.607 and 2.619 against 2.621 and 2.617 (decode 3.22 - 3.24 both); the check's GPU logits the same bytes as before the change"
+ },
+ "dead_ends": [
+  {
+   "what": "blocks of 128 x 256, 8 x 16 a thread (a third fewer shared-memory reads a product, one block an SM)",
+   "result": "qkv 39.7 against 40.1 TFLOP/s: no faster"
+  },
+  {
+   "what": "four 64-output groups a thread block (NG=4) for the o_proj and qkv",
+   "result": "no clear gain over two (within the bench's 10% noise): reverted"
+  },
+  {
+   "what": "the experts' outputs copied down by the copy engine once their kernels were done, polled, or by a narrow store kernel",
+   "result": "1.8 - 2.5 ms an expert against 1.65 for the down kernel storing them into pinned memory itself (tools/bench_mimo_moe.cu): the slots waited on the copies"
+  },
+  {
+   "what": "a free slot chosen for each expert instead of the slots in turn",
+   "result": "slower: kept the turn"
+  },
+  {
+   "what": "FP8 / MXFP4 sums in one FMA chain, the scales folded into the weights (k1..k10)",
+   "result": "about 10% faster for the qkv (40 against 36.5 TFLOP/s) but ten times less accurate (2.5e-7 of the products' magnitude against 2.6e-8): the argmax left the CPU's at 7 of 658 positions with only the matrices tiled (max KL 0.36) and at 36 with everything (max KL 7.5)"
+  }
+ ]
+}

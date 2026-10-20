@@ -1,0 +1,49 @@
+{
+ "note": "The final engine's GPU side of check_mimo_cuda.py's run (correctness/result.json's config, the 658-token prompt, 32 tokens) rerun with other blocks (probe.py): the logits of every position, byte for byte.",
+ "probes": [
+  {
+   "run": "check-final",
+   "env": {},
+   "what": "the check's own GPU run: 256-row blocks, each one sub-block",
+   "logits_sha256": "03ce216b6cbcd7ebaaa0a7f85d5ea0e044b919ef8fa7fa768d56f1ba9703c24e",
+   "logits_same_bytes_as_check": true,
+   "reply_the_cpu_reply": true,
+   "engine_line": "[CUDA] mimo prompt attention kept on the device: 210 blocks, 46060 rows, 1.125s on the device (rows up 0.063s, qkv and RoPE 0.578s, attention 0.067s, o_proj 0.367s, outputs down 0.050s), 0 left to the host"
+  },
+  {
+   "run": "probe-c330",
+   "env": {
+    "MIMO_CHUNK": "330"
+   },
+   "what": "blocks of 330 rows",
+   "logits_sha256": "03ce216b6cbcd7ebaaa0a7f85d5ea0e044b919ef8fa7fa768d56f1ba9703c24e",
+   "logits_same_bytes_as_check": true,
+   "reply_the_cpu_reply": true,
+   "engine_line": "[CUDA] mimo prompt attention kept on the device: 140 blocks, 46060 rows, 1.075s on the device (rows up 0.053s, qkv and RoPE 0.507s, attention 0.055s, o_proj 0.412s, outputs down 0.048s), 0 left to the host"
+  },
+  {
+   "run": "probe-c330-r110",
+   "env": {
+    "MIMO_CHUNK": "330",
+    "MIMO_ATTN_ROWS": "110"
+   },
+   "what": "330-row blocks in 110-row sub-blocks: the pipelined loop (MIMO_PIPE), a full layer's keys and values kept on the device between sub-blocks",
+   "logits_sha256": "03ce216b6cbcd7ebaaa0a7f85d5ea0e044b919ef8fa7fa768d56f1ba9703c24e",
+   "logits_same_bytes_as_check": true,
+   "reply_the_cpu_reply": true,
+   "engine_line": "[CUDA] mimo prompt attention kept on the device: 420 blocks, 46060 rows, 1.521s on the device (rows up 0.076s, qkv and RoPE 0.552s, attention 0.097s, o_proj 0.740s, outputs down 0.056s), 0 left to the host"
+  },
+  {
+   "run": "probe-c330-mb1",
+   "env": {
+    "MIMO_CHUNK": "330",
+    "MIMO_CUDA_ATTN_MB": "1"
+   },
+   "what": "blocks of 330 rows, earlier positions' keys and values sent up in chunks of 128",
+   "logits_sha256": "03ce216b6cbcd7ebaaa0a7f85d5ea0e044b919ef8fa7fa768d56f1ba9703c24e",
+   "logits_same_bytes_as_check": true,
+   "reply_the_cpu_reply": true,
+   "engine_line": "[CUDA] mimo prompt attention kept on the device: 140 blocks, 46060 rows, 1.105s on the device (rows up 0.053s, qkv and RoPE 0.514s, attention 0.076s, o_proj 0.414s, outputs down 0.047s), 0 left to the host"
+  }
+ ]
+}

@@ -1,0 +1,14 @@
+[CUDA] mimo device 0: NVIDIA GeForce RTX 4090; native dense weights, float32 activations
+rows 1024, expert rows 520, keys 25024
+qkv fp8_tiled        11.179 ms   30.54 TFLOP/s  err 2.6e-08
+qkv gemm_tiled        9.356 ms   36.50 TFLOP/s  err 2.7e-08
+o_proj bf16p_tiled    6.705 ms   30.75 TFLOP/s  err 1.1e-07
+o_proj gemm_tiled     5.778 ms   35.68 TFLOP/s  vs bf16p_tiled 0
+expert gate+up        1.349 ms   19.40 TFLOP/s  err 1.3e-08
+expert down           0.579 ms   22.58 TFLOP/s  err 2.9e-08
+expert gate+up new    1.119 ms   23.40 TFLOP/s  err 1.1e-08
+expert down new       0.389 ms   33.67 TFLOP/s  err 4.4e-08; max |new - old| 0 of the outputs' rms
+attention full rows   109.521 ms   18.78 TFLOP/s  err 3.4e-07
+attention full flash   52.690 ms   39.03 TFLOP/s  err 2.8e-07
+attention swa  rows     0.680 ms   15.80 TFLOP/s  err 1.4e-07
+attention swa  flash    0.624 ms   17.20 TFLOP/s  err 1.4e-07

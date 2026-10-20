@@ -20,6 +20,17 @@ static float *(*p_moe_begin)(const float *, int, int, int, size_t, int, int);   
 static void *(*p_moe_staging)(void);
 static int (*p_moe_expert)(const int *, int, int);
 static int (*p_moe_end)(void);
+static int (*p_attn_block)(const MimoCudaAttnBlock *);   /* optional */
+static int (*p_moe_stages)(size_t *);                    /* the three: all or none */
+static void *(*p_moe_stage)(int, int);
+static int (*p_moe_expert_at)(int, size_t, const int *, int, int);
+static int (*p_moe_poll)(void);                         /* optional */
+static int (*p_moe_rows)(const float *, int, int);        /* the two: all or none */
+static int (*p_moe_router)(const uint16_t *, int, float *);
+static int (*p_attn_submit)(const MimoCudaAttnBlock *);   /* the two: all or none */
+static int (*p_attn_wait)(void);
+static void *(*p_host_alloc)(size_t);                     /* the two: all or none */
+static void (*p_host_free)(void *);
 int mimo_cuda_init(int device) {
     if (module) return p_init(device);
     wchar_t path[32768];
@@ -38,6 +49,25 @@ int mimo_cuda_init(int device) {
     { FARPROC fn = GetProcAddress(module, "mimo_cuda_attention"); if (fn) memcpy(&p_attention, &fn, sizeof fn); }
     { FARPROC fn = GetProcAddress(module, "mimo_cuda_matmul_packed"); if (fn) memcpy(&p_matmul_packed, &fn, sizeof fn); }
     { FARPROC fn = GetProcAddress(module, "mimo_cuda_matmul_bf16_host"); if (fn) memcpy(&p_matmul_bf16_host, &fn, sizeof fn); }
+    { FARPROC fn = GetProcAddress(module, "mimo_cuda_attn_block"); if (fn) memcpy(&p_attn_block, &fn, sizeof fn); }
+    {
+        FARPROC a = GetProcAddress(module, "mimo_cuda_moe_stages"), b = GetProcAddress(module, "mimo_cuda_moe_stage"),
+                c = GetProcAddress(module, "mimo_cuda_moe_expert_at");
+        if (a && b && c) { memcpy(&p_moe_stages, &a, sizeof a); memcpy(&p_moe_stage, &b, sizeof b); memcpy(&p_moe_expert_at, &c, sizeof c); }
+    }
+    { FARPROC fn = GetProcAddress(module, "mimo_cuda_moe_poll"); if (fn) memcpy(&p_moe_poll, &fn, sizeof fn); }
+    {
+        FARPROC a = GetProcAddress(module, "mimo_cuda_moe_rows"), b = GetProcAddress(module, "mimo_cuda_moe_router");
+        if (a && b) { memcpy(&p_moe_rows, &a, sizeof a); memcpy(&p_moe_router, &b, sizeof b); }
+    }
+    {
+        FARPROC a = GetProcAddress(module, "mimo_cuda_attn_submit"), b = GetProcAddress(module, "mimo_cuda_attn_wait");
+        if (a && b) { memcpy(&p_attn_submit, &a, sizeof a); memcpy(&p_attn_wait, &b, sizeof b); }
+    }
+    {
+        FARPROC a = GetProcAddress(module, "mimo_cuda_host_alloc"), b = GetProcAddress(module, "mimo_cuda_host_free");
+        if (a && b) { memcpy(&p_host_alloc, &a, sizeof a); memcpy(&p_host_free, &b, sizeof b); }
+    }
     {
         FARPROC b = GetProcAddress(module, "mimo_cuda_moe_begin"), s = GetProcAddress(module, "mimo_cuda_moe_staging"),
                 e = GetProcAddress(module, "mimo_cuda_moe_expert"), d = GetProcAddress(module, "mimo_cuda_moe_end");
@@ -79,5 +109,18 @@ int mimo_cuda_moe_expert(const int *rows, int r, int pair0) {
     return module && p_moe_expert ? p_moe_expert(rows, r, pair0) : 0;
 }
 int mimo_cuda_moe_end(void) { return module && p_moe_end ? p_moe_end() : 0; }
+int mimo_cuda_attn_block(const MimoCudaAttnBlock *a) { return module && p_attn_block ? p_attn_block(a) : 0; }
+int mimo_cuda_moe_stages(size_t *bytes) { if (bytes) *bytes = 0; return module && p_moe_stages ? p_moe_stages(bytes) : 0; }
+void *mimo_cuda_moe_stage(int i, int wait) { return module && p_moe_stage ? p_moe_stage(i, wait) : NULL; }
+int mimo_cuda_attn_submit(const MimoCudaAttnBlock *a) { return module && p_attn_submit ? p_attn_submit(a) : 0; }
+int mimo_cuda_attn_wait(void) { return module && p_attn_wait ? p_attn_wait() : 0; }
+void *mimo_cuda_host_alloc(size_t bytes) { return module && p_host_alloc ? p_host_alloc(bytes) : NULL; }
+void mimo_cuda_host_free(void *p) { if (module && p_host_free) p_host_free(p); }
+int mimo_cuda_moe_poll(void) { return module && p_moe_poll ? p_moe_poll() : 0; }
+int mimo_cuda_moe_rows(const float *x, int n, int H) { return module && p_moe_rows ? p_moe_rows(x, n, H) : 0; }
+int mimo_cuda_moe_router(const uint16_t *w, int E, float *logits) { return module && p_moe_router ? p_moe_router(w, E, logits) : 0; }
+int mimo_cuda_moe_expert_at(int i, size_t off, const int *rows, int r, int pair0) {
+    return module && p_moe_expert_at ? p_moe_expert_at(i, off, rows, r, pair0) : 0;
+}
 void mimo_cuda_report(void) { if (module) p_report(); }
 void mimo_cuda_shutdown(void) { if (module) { p_shutdown(); FreeLibrary(module); module = NULL; } }

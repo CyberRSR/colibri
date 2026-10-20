@@ -1,0 +1,36 @@
+[
+ {
+  "prompt": "docs/experiments/mimo-gpu-prompt-4090-2026-10-20/prompts/p4k.txt",
+  "ttft_s": 47.072956899995916,
+  "total_s": 54.249496900010854,
+  "end": [
+   "DONE",
+   "1",
+   "STAT",
+   "16",
+   "0.295",
+   "21.2",
+   "151.34",
+   "4310",
+   "1"
+  ],
+  "reply": "On an RTX 4090, the CUDA path speeds up Mi"
+ },
+ {
+  "prompt": "docs/experiments/mimo-gpu-prompt-4090-2026-10-20/prompts/p25k.txt",
+  "ttft_s": 92.32756490004249,
+  "total_s": 103.50164020003285,
+  "end": [
+   "DONE",
+   "2",
+   "STAT",
+   "16",
+   "0.155",
+   "37.1",
+   "158.91",
+   "24957",
+   "1"
+  ],
+  "reply": "On an RTX 4090 (Windows, MiMo-V2"
+ }
+]

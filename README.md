@@ -44,7 +44,7 @@ DDR5, an RTX 4090 and two NVMe volumes. Nothing is quantized beyond the checkpoi
 70-layer CPU logits are unchanged (SHA-256 `cebbf3a8...`); every step below was
 measured that way, and its raw data is in `docs/experiments/mimo-*-4090-*`. Long
 prompts now run on the GPU, in f32 like the CPU: the same argmax at every position of a
-658-token prompt (max KL 8.7e-7), the sums in another order.
+658-token prompt (max KL 8.6e-7), the sums in another order.
 
 **Download:** [the latest MiMo release](https://github.com/CyberRSR/colibri/releases)
 (`colibri-mimo-pro-4090-*-windows-x86_64.zip`). Unzip it, then run
@@ -60,8 +60,8 @@ and replies of up to **65,536 tokens**. [How it runs](docs/mimo-cuda.md).
 | eight different prompts, tok/s | 1.061 | **2.26** |
 | first token of the benchmark prompt | 8.9 s | 5.0 s |
 | a 2260-token prompt | 904 s | 203 s (r1, its prompts on the CPU) |
-| first token of a 4310-token prompt | -- | 414 s (r1) -> **69 s** |
-| first token of a 24,957-token prompt (an agent's) | -- | about an hour (r1, by its parts) -> **245 s** |
+| first token of a 4310-token prompt | -- | 414 s (r1) -> 69 s (r2) -> **47 s** |
+| first token of a 24,957-token prompt (an agent's) | -- | about an hour (r1, by its parts) -> 245 s (r2) -> **92 s** |
 
 What changed, in order (benchmark tok/s after each step, each measured A/B in its
 own series on this machine, which drifts by about 3% from day to day):
@@ -84,15 +84,18 @@ own series on this machine, which drifts by about 3% from day to day):
 | expf without MinGW's control-word switch (no 3.5% layout lottery) | `36a4fdfe` | 2.612 |
 | attention caches committed as a conversation grows: 1M context, 64k replies | `136b9f20` | 2.575 |
 | a prompt's experts, attention, matrices and routers on the GPU, in one block as large as the card allows: a 4310-token prompt 413.9 -> 68.6 s, 24,957 tokens in 244.8 s | `2147c6b1` | 2.668 |
+| a prompt's attention kept on the GPU from the qkv to o_proj (flash attention), one tiled kernel for its matrices, experts read straight into staging, the CPU's row work beside the device: 24,957 tokens 247.7 -> 92.1 s, 4310 69.3 -> 47.1 s | `4b8bd1c8` | 2.621 |
 
 Where the time goes now: each token needs 8 of 384 experts in each of 69 layers,
 about 11 GB of weights read from RAM or the disks, so decoding is bound by memory
 and disk bandwidth rather than by the CPU or the GPU. A prompt calls nearly every
 expert of every layer, so it runs on the GPU: its experts are read once per block and
-computed there as they arrive (about 12 TFLOPS in f32), its attention and matrices too
+computed there as they arrive, its attention stays on the device from the qkv to
+o_proj, and the CPU's per-row work runs beside it
 ([Prompts on the GPU](docs/mimo-cuda.md#prompts-on-the-gpu)). A 25,000-token agent
-prompt takes about 4 minutes the first time; later turns reuse the prefix and process
-only what is new. Before, on the CPU, the same prompt took about an hour.
+prompt takes about a minute and a half the first time; later turns reuse the prefix and
+process only what is new. Before, on the CPU, the same prompt took about an hour; a
+4310-token prompt is now bound by reading its experts from the drives.
 
 <details>
 <summary>По-русски</summary>
@@ -111,10 +114,10 @@ API, совместимый с OpenAI и Anthropic: `http://127.0.0.1:18080/v1`,
 
 Скорость: бенчмарк 1,159 → **2,67 ток/с**, декодирование 1,359 → **3,32**, восемь
 разных промптов 1,061 → **2,26**, первый токен 8,9 → 5,0 с. Промпт агента в 25 000
-токенов: около часа → **4 минуты** (4310 токенов: 414 → 69 с) — эксперты, внимание,
-матрицы и роутеры блока промпта считаются на GPU в f32 (на 658-токенном промпте argmax
-совпадает с CPU на всех позициях). История изменений — в таблице выше (каждый шаг
-замерен A/B).
+токенов: около часа → 4 минуты (r2) → **полторы минуты** (4310 токенов: 414 → 69 →
+**47 с**) — эксперты, внимание, матрицы и роутеры блока промпта считаются на GPU в f32
+(на 658-токенном промпте argmax совпадает с CPU на всех позициях). История изменений —
+в таблице выше (каждый шаг замерен A/B).
 
 Декодирование упирается в пропускную способность памяти и дисков (около 11 ГБ весов
 экспертов на токен); следующие ходы агента переиспользуют префикс и обрабатывают

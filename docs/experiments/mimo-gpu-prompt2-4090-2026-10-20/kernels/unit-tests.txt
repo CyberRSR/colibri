@@ -1,0 +1,62 @@
+ok fmt=0 I=1 O=1 S=1 max_abs=0; chunks bit-exact
+ok fmt=0 I=129 O=13 S=7 max_abs=4.76837e-07; chunks bit-exact
+ok fmt=0 I=6144 O=33 S=3 max_abs=9.53674e-07; chunks bit-exact
+ok fmt=0 I=257 O=129 S=17 max_abs=4.76837e-07; chunks bit-exact
+ok fmt=0 I=512 O=9 S=17 max_abs=4.76837e-07; chunks bit-exact
+ok fmt=0 I=1024 O=6 S=9 max_abs=4.76837e-07; chunks bit-exact
+ok fmt=1 I=1 O=1 S=1 max_abs=0; chunks bit-exact
+ok fmt=1 I=129 O=13 S=7 max_abs=4.76837e-07; chunks bit-exact
+ok fmt=1 I=6144 O=33 S=3 max_abs=3.8147e-06; chunks bit-exact
+ok fmt=1 I=257 O=129 S=17 max_abs=9.53674e-07; chunks bit-exact
+ok fmt=1 I=512 O=9 S=17 max_abs=9.53674e-07; chunks bit-exact
+ok fmt=1 I=1024 O=6 S=9 max_abs=9.53674e-07; chunks bit-exact
+ok fmt=2 I=1 O=1 S=1 max_abs=0; chunks bit-exact
+ok fmt=2 I=129 O=13 S=7 max_abs=3.69549e-06; chunks bit-exact
+ok fmt=2 I=6144 O=33 S=3 max_abs=2.76566e-05; chunks bit-exact
+ok fmt=2 I=257 O=129 S=17 max_abs=6.67572e-06; chunks bit-exact
+ok fmt=2 I=512 O=9 S=17 max_abs=1.00136e-05; chunks bit-exact
+ok fmt=2 I=1024 O=6 S=9 max_abs=9.53674e-06; chunks bit-exact
+ok fmt=3 I=1 O=1 S=1 max_abs=0; chunks bit-exact
+ok fmt=3 I=129 O=13 S=7 max_abs=1.14441e-05; chunks bit-exact
+ok fmt=3 I=6144 O=33 S=3 max_abs=9.53674e-05; chunks bit-exact
+ok fmt=3 I=257 O=129 S=17 max_abs=3.05176e-05; chunks bit-exact
+ok fmt=3 I=512 O=9 S=17 max_abs=2.09808e-05; chunks bit-exact
+ok fmt=3 I=1024 O=6 S=9 max_abs=2.93255e-05; chunks bit-exact
+ok fmt=4 I=1 O=1 S=1 max_abs=0; chunks bit-exact
+ok fmt=4 I=129 O=13 S=7 max_abs=1.33514e-05; chunks bit-exact
+ok fmt=4 I=6144 O=33 S=3 max_abs=4.673e-05; chunks bit-exact
+ok fmt=4 I=257 O=129 S=17 max_abs=2.67029e-05; chunks bit-exact
+ok fmt=4 I=512 O=9 S=17 max_abs=1.33514e-05; chunks bit-exact
+ok fmt=4 I=1024 O=6 S=9 max_abs=1.43051e-05; chunks bit-exact
+ok packed I=256 O=5 S=1 kind=0: the bytes of bf16 from 1956 bytes, not 2560
+ok packed I=512 O=9 S=17 kind=0: the bytes of bf16 from 6964 bytes, not 9216
+ok packed I=6144 O=33 S=3 kind=0: the bytes of bf16 from 304329 bytes, not 405504
+ok packed I=16384 O=7 S=9 kind=0: the bytes of bf16 from 172094 bytes, not 229376
+ok packed I=1024 O=130 S=8 kind=0: the bytes of bf16 from 200357 bytes, not 266240
+ok tiled fmt=5 kind=0 I=1024 O=128 S=130: max error 1.3e-07 of the products' magnitude; the sums' bytes; blocks bit-exact
+ok tiled fmt=5 kind=0 I=16384 O=64 S=130: max error 2.7e-08 of the products' magnitude; the sums' bytes; blocks bit-exact
+ok packed I=256 O=5 S=1 kind=1: the bytes of bf16 from 3044 bytes, not 2560
+ok packed I=512 O=9 S=17 kind=1: the bytes of bf16 from 10934 bytes, not 9216
+ok packed I=6144 O=33 S=3 kind=1: the bytes of bf16 from 483864 bytes, not 405504
+ok packed I=16384 O=7 S=9 kind=1: the bytes of bf16 from 273935 bytes, not 229376
+ok packed I=1024 O=130 S=8 kind=1: the bytes of bf16 from 316457 bytes, not 266240
+ok tiled fmt=5 kind=1 I=1024 O=128 S=130: max error 4.3e-07 of the products' magnitude; the sums' bytes; blocks bit-exact
+ok tiled fmt=5 kind=1 I=16384 O=64 S=130: max error 5.2e-07 of the products' magnitude; the sums' bytes; blocks bit-exact
+ok packed I=256 O=5 S=1 kind=2: the bytes of bf16 from 2009 bytes, not 2560
+ok packed I=512 O=9 S=17 kind=2: the bytes of bf16 from 7102 bytes, not 9216
+ok packed I=6144 O=33 S=3 kind=2: the bytes of bf16 from 311880 bytes, not 405504
+ok packed I=16384 O=7 S=9 kind=2: the bytes of bf16 from 175441 bytes, not 229376
+ok packed I=1024 O=130 S=8 kind=2: the bytes of bf16 from 205830 bytes, not 266240
+ok tiled fmt=5 kind=2 I=1024 O=128 S=130: max error 4.5e-07 of the products' magnitude; the sums' bytes; blocks bit-exact
+ok tiled fmt=5 kind=2 I=16384 O=64 S=130: max error 2.6e-07 of the products' magnitude; the sums' bytes; blocks bit-exact
+ok tiled fmt=1 kind=0 I=6144 O=384 S=130: max error 5.3e-08 of the products' magnitude; the sums' bytes; blocks bit-exact
+ok tiled fmt=1 kind=1 I=1024 O=128 S=150: max error 4.7e-07 of the products' magnitude; the sums' bytes; blocks bit-exact
+ok tiled fmt=2 kind=0 I=512 O=64 S=130: max error 4.3e-08 of the products' magnitude; the sums' bytes; blocks bit-exact
+ok tiled fmt=2 kind=0 I=6144 O=192 S=200: max error 1.1e-08 of the products' magnitude; the sums' bytes; blocks bit-exact
+ok fmt=2 I=128 O=7 S=3 max_abs=1.43051e-06; chunks bit-exact
+rc=0
+[CUDA] mimo device 0: NVIDIA GeForce RTX 4090; native dense weights, float32 activations
+[CUDA] mimo dense: 70 matrices, 0.019 GiB resident, 474 matmuls, 3662 rows, 0 scratch/compute fallbacks
+[CUDA] mimo matmul wall time (copies + compute): f32 0.004s, bf16 0.007s, fp8 0.005s, int8 0.002s, int8 blocks 0.002s, bf16 packed 0.029s
+[CUDA] mimo bf16 packed without loss: 21 matrices, 0.008 GiB for 0.009 GiB of bf16, 1501896 exceptions
+[CUDA] mimo device 0: NVIDIA GeForce RTX 4090; native dense weights, float32 activations
