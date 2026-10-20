@@ -572,6 +572,62 @@ __global__ static void __launch_bounds__(256) bf16p_tiled(const uint8_t *__restr
         *(float4 *)(y + (size_t)row * O + o0 + tx * 4) = make_float4(acc[i][0], acc[i][1], acc[i][2], acc[i][3]);
     }
 }
+/* Plain bf16 (fmt 1) for a prompt block: fp8_tiled's tiling, no scales (a router's logits). */
+__global__ static void __launch_bounds__(256) bf16_tiled(const uint16_t *__restrict__ w, const float *__restrict__ x,
+                                                         float *__restrict__ y, int I, int O, int S) {
+    __shared__ float xs[TL_B][TL_B + 4];
+    __shared__ float ws[TL_B][TL_B + 4];
+    int tid = threadIdx.x, tx = tid & 15, ty = tid >> 4;
+    int r0 = blockIdx.y * TL_B, o0 = blockIdx.x * TL_B, nt = I / TL_B;
+    int lr = tid >> 2, lc = (tid & 3) * 16;
+    const float *xr = r0 + lr < S ? x + (size_t)(r0 + lr) * I : nullptr;
+    const uint16_t *wr = w + (size_t)(o0 + lr) * I;
+    float acc[4][4];
+    #pragma unroll
+    for (int i = 0; i < 4; i++)
+        #pragma unroll
+        for (int j = 0; j < 4; j++) acc[i][j] = 0.f;
+    float4 xa[4];
+    uint4 wq[2];
+    #pragma unroll
+    for (int v = 0; v < 4; v++) xa[v] = xr ? ((const float4 *)(xr + lc))[v] : make_float4(0.f, 0.f, 0.f, 0.f);
+    wq[0] = ((const uint4 *)(wr + lc))[0]; wq[1] = ((const uint4 *)(wr + lc))[1];
+    for (int t = 0; t < nt; t++) {
+        #pragma unroll
+        for (int v = 0; v < 4; v++) {
+            xs[lc + 4 * v][lr] = xa[v].x; xs[lc + 4 * v + 1][lr] = xa[v].y; xs[lc + 4 * v + 2][lr] = xa[v].z; xs[lc + 4 * v + 3][lr] = xa[v].w;
+        }
+        const unsigned u[8] = {wq[0].x, wq[0].y, wq[0].z, wq[0].w, wq[1].x, wq[1].y, wq[1].z, wq[1].w};
+        #pragma unroll
+        for (int k = 0; k < 8; k++) {
+            ws[lc + 2 * k][lr] = __uint_as_float(u[k] << 16);
+            ws[lc + 2 * k + 1][lr] = __uint_as_float(u[k] & 0xffff0000u);
+        }
+        __syncthreads();
+        if (t + 1 < nt) {
+            int k1 = (t + 1) * TL_B;
+            #pragma unroll
+            for (int v = 0; v < 4; v++) xa[v] = xr ? ((const float4 *)(xr + k1 + lc))[v] : make_float4(0.f, 0.f, 0.f, 0.f);
+            wq[0] = ((const uint4 *)(wr + k1 + lc))[0]; wq[1] = ((const uint4 *)(wr + k1 + lc))[1];
+        }
+        #pragma unroll 8
+        for (int kk = 0; kk < TL_B; kk++) {
+            float4 a = *(const float4 *)&xs[kk][ty * 4], c = *(const float4 *)&ws[kk][tx * 4];
+            const float av[4] = {a.x, a.y, a.z, a.w}, cv[4] = {c.x, c.y, c.z, c.w};
+            #pragma unroll
+            for (int i = 0; i < 4; i++)
+                #pragma unroll
+                for (int j = 0; j < 4; j++) acc[i][j] = fmaf(av[i], cv[j], acc[i][j]);
+        }
+        __syncthreads();
+    }
+    #pragma unroll
+    for (int i = 0; i < 4; i++) {
+        int row = r0 + ty * 4 + i;
+        if (row >= S) break;
+        *(float4 *)(y + (size_t)row * O + o0 + tx * 4) = make_float4(acc[i][0], acc[i][1], acc[i][2], acc[i][3]);
+    }
+}
 static int wide(const MimoCudaTensor *t) {
     return ((t->fmt == 2 || t->fmt == 4) && t->I % 512 == 0) || (t->fmt == 1 && t->I % 256 == 0);
 }
@@ -607,6 +663,8 @@ static int matmul_piece(MimoCudaTensor *t, float *y, const float *x, int S, int 
         fp8_tiled<<<tgrid, 256, 0, stream>>>((const uint8_t *)t->w, t->scales, dx, dy, t->I, t->O, S);
     else if (tiled && t->fmt == 5 && t->I % TL_B == 0)
         bf16p_tiled<<<tgrid, 256, 0, stream>>>((const uint8_t *)t->w, t->codes, t->lo, t->exc_off, t->exc, dx, dy, t->I, t->O, S);
+    else if (tiled && t->fmt == 1 && t->I % TL_B == 0)
+        bf16_tiled<<<tgrid, 256, 0, stream>>>((const uint16_t *)t->w, dx, dy, t->I, t->O, S);
     else if (t->fmt == 5 && ts == 1)
         bf16x_wide<1><<<tiles,128,0,stream>>>((const uint8_t *)t->w,t->codes,t->lo,t->exc_off,t->exc,dx,dy,t->I,t->O,S);
     else if (t->fmt == 5)
@@ -695,6 +753,28 @@ extern "C" int mimo_cuda_matmul_packed(const void *packed, size_t bytes, int I, 
     uint8_t *d = (uint8_t *)pk_dev;
     t.w = d; t.codes = d + e; t.lo = d + a_lo; t.exc_off = (const unsigned *)(d + a_off); t.exc = d + a_exc;
     t.fmt = 5; t.I = I; t.O = O; t.bytes = bytes;
+    return mimo_cuda_matmul(&t, y, x, S);
+}
+/* The same for a plain bf16 host matrix [O][I] (a router's), in a buffer of its own. */
+static void *bf_dev;
+static size_t bf_cap;
+static const void *bf_host;
+extern "C" int mimo_cuda_matmul_bf16_host(const uint16_t *w, int I, int O, float *y, const float *x, int S) {
+    if (!ready || failed || !w || I < 1 || O < 1) return 0;
+    size_t bytes = (size_t)O * I * sizeof(uint16_t);
+    if (bf_host != w) {
+        if (bytes > bf_cap) {
+            void *nd = nullptr;
+            if (cudaMalloc(&nd, bytes) != cudaSuccess) { cudaGetLastError(); return 0; }
+            cudaFree(bf_dev); bf_dev = nd; bf_cap = bytes;
+        }
+        bf_host = nullptr;
+        if (!checked(cudaMemcpy(bf_dev, w, bytes, cudaMemcpyHostToDevice), "bf16 weights")) return 0;
+        bf_host = w; pk_uploads++;
+    }
+    MimoCudaTensor t;
+    memset(&t, 0, sizeof t);
+    t.w = bf_dev; t.fmt = 1; t.I = I; t.O = O; t.bytes = bytes;
     return mimo_cuda_matmul(&t, y, x, S);
 }
 
@@ -1181,6 +1261,7 @@ extern "C" void mimo_cuda_shutdown(void) {
     moe_free();
     moe_blocks = moe_experts = moe_rows_n = moe_fallback = 0; moe_seconds = 0; m_on = 0;
     cudaFree(pk_dev); pk_dev = nullptr; pk_cap = pk_bytes_up = 0; pk_host = nullptr; pk_uploads = 0;
+    cudaFree(bf_dev); bf_dev = nullptr; bf_cap = 0; bf_host = nullptr;
     if (stream) cudaStreamDestroy(stream);
     stream = nullptr; dx = dy = hx = hy = nullptr; xcap = ycap = resident = tensor_count = 0;
     calls = rows = fallback = packed_count = packed_exc = 0; packed_bytes = packed_bf16 = 0;

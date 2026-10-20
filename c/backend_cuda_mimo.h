@@ -10,6 +10,7 @@
 #ifndef COLIBRI_BACKEND_CUDA_MIMO_H
 #define COLIBRI_BACKEND_CUDA_MIMO_H
 #include <stddef.h>
+#include <stdint.h>
 #if defined(_WIN32) && defined(MIMO_CUDA_BUILDING_DLL)
 #define MIMO_CUDA_API __declspec(dllexport)
 #else
@@ -38,6 +39,8 @@ MIMO_CUDA_API int mimo_cuda_attention(const float *q, int qstride, int n, int nh
  * planes, bytes long), sent up and kept while the next call names the same bytes. */
 MIMO_CUDA_API int mimo_cuda_matmul_packed(const void *packed, size_t bytes, int I, int O, float *y,
                                           const float *x, int S);
+/* The same for a plain bf16 host matrix w [O][I] (a router's), in a buffer of its own. */
+MIMO_CUDA_API int mimo_cuda_matmul_bf16_host(const uint16_t *w, int I, int O, float *y, const float *x, int S);
 /* A prompt block's routed experts: begin with its normed rows x [n][H], the number of
  * (row, choice) pairs and the most rows one expert has; it returns a pinned buffer of
  * npairs x H floats. For each expert, in any order: its bytes (down, down scales, gate,

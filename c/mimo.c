@@ -2878,7 +2878,17 @@ static void moe(Model *m, int li, const float *xn, int n, float *out) {
     float *wt = xmalloc((size_t)n * K * sizeof(float), "routing weights");
     float *logits = xmalloc((size_t)n * E * sizeof(float), "router logits");
     double tr = now_s();
-    matmul_router(logits, xn, l->router, n, H, E);
+    /* MIMO_CUDA_ROUTER (1): a step the GPU computes the experts of computes the router's
+     * logits there too (the router sent up for it): its f32 sums in another order, as the
+     * experts' are; a decode step keeps the CPU's */
+    int router_done = 0;
+#ifdef COLI_MIMO_CUDA
+    static int cuda_router = -1;
+    if (cuda_router < 0) cuda_router = env_int("MIMO_CUDA_ROUTER", 1) != 0;
+    if (cuda_router && cuda_moe_on() && n >= g_cuda_moe_rows && !omp_in_parallel())
+        router_done = mimo_cuda_matmul_bf16_host(l->router, H, E, logits, xn, n);
+#endif
+    if (!router_done) matmul_router(logits, xn, l->router, n, H, E);
     /* each row alone, so a prompt block's rows go over the workers with the same bits */
     #pragma omp parallel for schedule(static) if (n >= 16)
     for (int t = 0; t < n; t++) {
@@ -3265,19 +3275,20 @@ static void prefill(Model *m, const int *ids, int n, float *logits, float *all_l
                     const ImageRows *img, const Echo *echo) {
     const char *mc = getenv("MIMO_CHUNK");
     int chunk = mc && *mc ? atoi(mc) : 512;
-    /* MIMO_CUDA_CHUNK (16384): with the GPU's prompt experts (MIMO_CUDA_MOE) a block reads each
+    /* MIMO_CUDA_CHUNK (32768): with the GPU's prompt experts (MIMO_CUDA_MOE) a block reads each
      * expert once for all of its rows, so a prompt goes in as few blocks as the device's memory
      * allows (not a read-out, which holds a block's logits). The block's rows take 4 x hidden
      * bytes a row there, beside the scratch of the attention, the matrices and the experts
      * (~1.1 GB, bounded whatever the block); what the card has free at the first prompt, less
-     * that and 0.4 GB for other programs, bounds the block -- an oversubscribed WDDM card pages
-     * its memory and crawls. */
+     * that and MIMO_CUDA_SPARE_MB (0: that estimate holds a gigabyte to spare) bounds the block -- an
+     * oversubscribed WDDM card pages its memory and crawls. */
     if (!(mc && *mc) && !echo && !all_logits && cuda_moe_on()) {
-        chunk = env_int("MIMO_CUDA_CHUNK", 16384);
+        chunk = env_int("MIMO_CUDA_CHUNK", 32768);
 #ifdef COLI_MIMO_CUDA
         static int fit = -1;
         if (fit < 0) {
-            double fr = (double)mimo_cuda_free_bytes(), keep = (1136.0 + 400.0) * 1048576.0;
+            double fr = (double)mimo_cuda_free_bytes(),
+                   keep = (1136.0 + (double)env_int("MIMO_CUDA_SPARE_MB", 0)) * 1048576.0;
             fit = fr > keep ? (int)((fr - keep) / (4.0 * m->c.hidden)) : 1024;
             if (fit < 1024) fit = 1024;
             fprintf(stderr, "[mimo] prompt blocks on the GPU: up to %d rows (%.2f GB free on the card)\n",

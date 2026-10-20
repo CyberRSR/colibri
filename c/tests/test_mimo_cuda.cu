@@ -116,9 +116,9 @@ static int check_packed(int I, int O, int S, int kind) {
     printf("ok packed I=%d O=%d S=%d kind=%d: the bytes of bf16 from %zu bytes, not %zu\n", I, O, S, kind, pb, bb);
     return 0;
 }
-/* A prompt block's tiled kernels (S >= 64 rows; MIMO_CUDA_TILED_ROWS): FP8 (fmt 2) and packed
- * bf16 (fmt 5, the generators above, exceptions included) against a double reference, and a
- * row's bytes the same in a block of S rows and in two blocks of 64 and S - 64. */
+/* A prompt block's tiled kernels (S >= 64 rows; MIMO_CUDA_TILED_ROWS): FP8 (fmt 2), plain bf16
+ * (fmt 1) and packed bf16 (fmt 5, the generators above, exceptions included) against a double
+ * reference, and a row's bytes the same in a block of S rows and in two of 64 and S - 64. */
 static int check_tiled(int fmt, int I, int O, int S, int kind) {
     size_t count = (size_t)I * O;
     int blocks = I / 128;
@@ -144,7 +144,7 @@ static int check_tiled(int fmt, int I, int O, int S, int kind) {
     }
     std::vector<float> x((size_t)S * I), got((size_t)S * O), split(got.size());
     for (size_t i = 0; i < x.size(); i++) x[i] = std::sin((float)(i + 1) * 0.137f);
-    MimoCudaTensor *t = fmt == 2 ? mimo_cuda_upload(q8.data(), scales.data(), 2, I, O) : mimo_cuda_upload(q16.data(), nullptr, 5, I, O);
+    MimoCudaTensor *t = fmt == 2 ? mimo_cuda_upload(q8.data(), scales.data(), 2, I, O) : mimo_cuda_upload(q16.data(), nullptr, fmt, I, O);
     if (!t || !mimo_cuda_matmul(t, got.data(), x.data(), S) || !mimo_cuda_matmul(t, split.data(), x.data(), 64) ||
         !mimo_cuda_matmul(t, split.data() + (size_t)64 * O, x.data() + (size_t)64 * I, S - 64)) {
         printf("FAIL tiled fmt=%d I=%d O=%d S=%d: upload or matmul\n", fmt, I, O, S); return 1;
@@ -191,6 +191,8 @@ int main() {
         rc |= check_tiled(5, 1024, 128, 130, kind);
         rc |= check_tiled(5, 16384, 64, 66 + 64, kind);   /* Pro's o_proj rows */
     }
+    rc |= check_tiled(1, 6144, 384, 130, 0);   /* a router: plain bf16 */
+    rc |= check_tiled(1, 1024, 128, 150, 1);
     rc |= check_tiled(2, 512, 64, 130, 0);
     rc |= check_tiled(2, 6144, 192, 200, 0);   /* Pro's qkv rows */
     mimo_cuda_report(); mimo_cuda_shutdown();
