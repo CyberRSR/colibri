@@ -1463,6 +1463,10 @@ cuda-mimo-dll: backend_cuda_mimo.cu backend_cuda_mimo.h
 	"$(NVCC)" $(NVCCFLAGS) -shared --cudart=static -DMIMO_CUDA_BUILDING_DLL backend_cuda_mimo.cu -o coli_cuda_mimo.dll
 mimo$(EXE): mimo.c backend_cuda_mimo.h $(MIMO_CUDA_OBJ) $(MIMO_OMP_OBJ) $(VK_OBJ) $(VK_SPV) .build-config
 	$(CC) $(CFLAGS) $(MIMO_CUDA_FLAGS) mimo.c $(MIMO_CUDA_OBJ) $(MIMO_OMP_OBJ) $(VK_OBJ) -o mimo$(EXE) $(LDFLAGS) $(MIMO_OMP_LDFLAGS)
+# A decode step's full attention by keys (attend_keys) against the loop by heads, bit for bit:
+# the test includes mimo.c (CPU only; the CUDA build's variables go unused).
+tests/test_mimo_attention$(EXE): tests/test_mimo_attention.c mimo.c $(VK_OBJ)
+	$(CC) $(CFLAGS) -Wno-unused-variable $< $(VK_OBJ) -o $@ $(LDFLAGS)
 
 # Tiny MiMo fixture + vendor oracle, the Kimi K3 pattern: the generator is numpy (and
 # Pillow for the test picture) and deterministic; ref.json is committed and comes from

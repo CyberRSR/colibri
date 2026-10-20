@@ -96,6 +96,8 @@ def check_exact_variants(binary, fixture, reference):
             {"MIMO_DENSE_BITS": "0", "MIMO_CAP": "4", "MIMO_CHUNK": "3"},
         "prefill one token at a time": {"MIMO_CHUNK": "1"},
         "buffered expert reads": {"MIMO_DIRECT": "0"},
+        "full attention by keys from the first key, one token at a time":
+            {"MIMO_ATTN_KEYS": "1", "MIMO_CHUNK": "1"},
     }
     for label, extra in variants.items():
         env = dict(reference["engine_env"], **extra)
@@ -211,7 +213,10 @@ def check_block_invariance(binary, fixture, reference):
         return
     variants = {"blocks of 3": {"MIMO_CHUNK": "3"},
                 "one token at a time": {"MIMO_CHUNK": "1"},
-                "cache 4 (evicts at every layer)": {"MIMO_CAP": "4"}}
+                "cache 4 (evicts at every layer)": {"MIMO_CAP": "4"},
+                # attend_keys for the blocks of up to 8 rows, against attend_heads' blocks
+                "full attention by keys, blocks of 3": {"MIMO_ATTN_KEYS": "1", "MIMO_CHUNK": "3"},
+                "full attention by keys, one token at a time": {"MIMO_ATTN_KEYS": "1", "MIMO_CHUNK": "1"}}
     inputs = [(name, case["greedy_full_ids"], None)
               for name, case in reference["cases"].items()]
     if "image" in reference:
