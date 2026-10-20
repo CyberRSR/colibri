@@ -1,0 +1,19 @@
+[
+ {
+  "prompt": "C:/Users/Cyber/AppData/Local/Temp/claude/C--colibri-dev/384caa23-e447-4661-9ea7-c4980cd7af5b/scratchpad/p4k.txt",
+  "ttft_s": 360.411392500042,
+  "total_s": 368.7504111001035,
+  "end": [
+   "DONE",
+   "1",
+   "STAT",
+   "16",
+   "0.043",
+   "27.1",
+   "149.59",
+   "4310",
+   "1"
+  ],
+  "reply": "On an RTX 4090, the CUDA path moves MiMo"
+ }
+]

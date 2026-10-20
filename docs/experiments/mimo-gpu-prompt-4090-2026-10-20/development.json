@@ -1,0 +1,86 @@
+{
+ "note": "Runs on the way, from working-tree builds; the 1-block 25k run without its MIMO_CUDA_SPARE_MB=0 overflowed the card (a 12,500-row dense MLP scratch of 1.6 GB) and paged: stopped, not recorded.",
+ "runs": [
+  {
+   "run": "lp4k-gmoe2-512",
+   "build": "GPU experts in 512-row blocks: every block reads the experts again",
+   "requests": [
+    {
+     "prompt": "p4k.txt",
+     "first_token_s": 363.03,
+     "engine_line": "[mimo] prompt 362.92s (stalled 21.21s, experts 284.05s, attention 43.02s, 152677 demand reads); generation 8.32s (stalled 1.93s, experts 3.49s, attention 1.72s, 1072 demand reads, 4179 prefetched)"
+    }
+   ]
+  },
+  {
+   "run": "lp4k-gmoe2-4096",
+   "build": "GPU experts in 4096-row blocks",
+   "requests": [
+    {
+     "prompt": "p4k.txt",
+     "first_token_s": 135.23,
+     "engine_line": "[mimo] prompt 135.09s (stalled 9.32s, experts 67.29s, attention 40.51s, 41773 demand reads); generation 8.31s (stalled 1.90s, experts 3.50s, attention 1.67s, 1066 demand reads, 4136 prefetched)"
+    }
+   ]
+  },
+  {
+   "run": "lp-big1",
+   "build": "blocks of up to 8192 rows, CPU per-row loops over the workers",
+   "requests": [
+    {
+     "prompt": "p4k.txt",
+     "first_token_s": 96.07,
+     "engine_line": "[mimo] prompt 95.96s (stalled 8.24s, experts 37.46s, attention 38.83s, 26030 demand reads); generation 8.66s (stalled 2.23s, experts 3.54s, attention 1.67s, 1183 demand reads, 4573 prefetched)"
+    },
+    {
+     "prompt": "p16k.txt",
+     "first_token_s": 501.2,
+     "engine_line": "[mimo] prompt 501.06s (stalled 5.91s, experts 180.92s, attention 245.51s, 80205 demand reads); generation 13.49s (stalled 1.77s, experts 3.29s, attention 7.14s, 959 demand reads, 3936 prefetched)"
+    }
+   ]
+  },
+  {
+   "run": "lp-big2",
+   "build": "+ tiled FP8 and packed bf16 kernels for prompt matrices",
+   "requests": [
+    {
+     "prompt": "p4k.txt",
+     "first_token_s": 77.23,
+     "engine_line": "[mimo] prompt 77.11s (stalled 7.92s, experts 37.67s, attention 20.49s, 26030 demand reads); generation 8.66s (stalled 2.25s, experts 3.54s, attention 1.67s, 1182 demand reads, 4516 prefetched)"
+    },
+    {
+     "prompt": "p16k.txt",
+     "first_token_s": 389.02,
+     "engine_line": "[mimo] prompt 388.87s (stalled 5.50s, experts 180.93s, attention 136.00s, 80435 demand reads); generation 13.15s (stalled 1.68s, experts 3.25s, attention 7.01s, 964 demand reads, 3935 prefetched)"
+    }
+   ]
+  },
+  {
+   "run": "lp-big4",
+   "build": "+ bounded scratch (192 MB pieces, 1024-row expert pieces), blocks of up to 16384 rows",
+   "requests": [
+    {
+     "prompt": "p4k.txt",
+     "first_token_s": 71.49,
+     "engine_line": "[mimo] prompt 71.40s (stalled 7.99s, experts 37.16s, attention 19.79s, 26030 demand reads); generation 8.73s (stalled 2.29s, experts 3.52s, attention 1.72s, 1195 demand reads, 4584 prefetched)"
+    },
+    {
+     "prompt": "p16k.txt",
+     "first_token_s": 290.59,
+     "engine_line": "[mimo] prompt 290.46s (stalled 2.08s, experts 115.92s, attention 133.74s, 40876 demand reads); generation 13.06s (stalled 1.60s, experts 3.24s, attention 7.00s, 950 demand reads, 3791 prefetched)"
+    }
+   ]
+  },
+  {
+   "run": "lp25k-1blk",
+   "build": "+ one block for the 25k prompt (MIMO_CUDA_SPARE_MB=0), router still on the CPU",
+   "requests": [
+    {
+     "prompt": "p16k.txt",
+     "first_token_s": 252.94,
+     "engine_line": "[mimo] prompt 252.81s (stalled 2.47s, experts 86.14s, attention 126.70s, routers 25.02s, 26412 demand reads); generation 13.87s (stalled 2.38s, experts 3.29s, attention 6.97s, 1134 demand reads, 4477 prefetched)"
+    }
+   ]
+  }
+ ]
+}

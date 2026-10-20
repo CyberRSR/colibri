@@ -116,6 +116,57 @@ static int check_packed(int I, int O, int S, int kind) {
     printf("ok packed I=%d O=%d S=%d kind=%d: the bytes of bf16 from %zu bytes, not %zu\n", I, O, S, kind, pb, bb);
     return 0;
 }
+/* A prompt block's tiled kernels (S >= 64 rows; MIMO_CUDA_TILED_ROWS): FP8 (fmt 2), plain bf16
+ * (fmt 1) and packed bf16 (fmt 5, the generators above, exceptions included) against a double
+ * reference, and a row's bytes the same in a block of S rows and in two of 64 and S - 64. */
+static int check_tiled(int fmt, int I, int O, int S, int kind) {
+    size_t count = (size_t)I * O;
+    int blocks = I / 128;
+    std::vector<unsigned char> q8(count);
+    std::vector<uint16_t> q16(count);
+    std::vector<float> w(count), scales((size_t)O * (blocks ? blocks : 1));
+    for (size_t i = 0; i < scales.size(); i++) scales[i] = 0.01f * (1 + i % 11);
+    for (size_t j = 0; j < count; j++) {
+        if (fmt == 2) {
+            unsigned v = (unsigned)(j * 73 + j / 7) % 256;
+            if ((v & 127) == 127) v ^= 1;
+            q8[j] = (unsigned char)v;
+            w[j] = fp8(v) * scales[(j / I) * blocks + (j % I) / 128];
+        } else {
+            int o = (int)(j / I), i = (int)(j % I);
+            uint16_t b;
+            if (kind == 0) { float f = std::sin((float)(j + 7) * 0.17f) * 0.03f; uint32_t u; memcpy(&u, &f, 4); b = (uint16_t)(u >> 16); }
+            else if (kind == 1) b = (uint16_t)((rng() & 0x807f) | ((rng() % 141) << 7));
+            else b = (uint16_t)((rng() & 0x807f) | ((o % 2 ? 100 + i % 16 : 120) << 7));
+            q16[j] = b;
+            uint32_t u = (uint32_t)b << 16; memcpy(&w[j], &u, 4);
+        }
+    }
+    std::vector<float> x((size_t)S * I), got((size_t)S * O), split(got.size());
+    for (size_t i = 0; i < x.size(); i++) x[i] = std::sin((float)(i + 1) * 0.137f);
+    MimoCudaTensor *t = fmt == 2 ? mimo_cuda_upload(q8.data(), scales.data(), 2, I, O) : mimo_cuda_upload(q16.data(), nullptr, fmt, I, O);
+    if (!t || !mimo_cuda_matmul(t, got.data(), x.data(), S) || !mimo_cuda_matmul(t, split.data(), x.data(), 64) ||
+        !mimo_cuda_matmul(t, split.data() + (size_t)64 * O, x.data() + (size_t)64 * I, S - 64)) {
+        printf("FAIL tiled fmt=%d I=%d O=%d S=%d: upload or matmul\n", fmt, I, O, S); return 1;
+    }
+    double max_rel = 0;
+    for (int s = 0; s < S; s++) for (int o = 0; o < O; o++) {
+        double acc = 0, mag = 0;
+        for (int i = 0; i < I; i++) {
+            double p = (double)x[(size_t)s * I + i] * w[(size_t)o * I + i];
+            acc += p; mag += std::abs(p);
+        }
+        double g = got[(size_t)s * O + o], err = std::abs(g - acc);
+        if (!std::isfinite(g) || err > 1e-6 * mag + 1e-30) {
+            printf("FAIL tiled fmt=%d kind=%d I=%d O=%d S=%d at row %d out %d: got=%g want=%g\n", fmt, kind, I, O, S, s, o, g, acc);
+            return 1;
+        }
+        if (mag > 0 && err / mag > max_rel) max_rel = err / mag;
+    }
+    if (memcmp(got.data(), split.data(), got.size() * sizeof(float))) { printf("FAIL tiled fmt=%d: rows differ by block\n", fmt); return 1; }
+    printf("ok tiled fmt=%d kind=%d I=%d O=%d S=%d: max error %.2g of the products' magnitude; blocks bit-exact\n", fmt, kind, I, O, S, max_rel);
+    return 0;
+}
 int main() {
     if (!mimo_cuda_init(0)) return 1;
     float w = 1;
@@ -137,7 +188,13 @@ int main() {
         rc |= check_packed(6144, 33, 3, kind);
         rc |= check_packed(16384, 7, 9, kind);   /* Pro's o_proj rows */
         rc |= check_packed(1024, 130, 8, kind);
+        rc |= check_tiled(5, 1024, 128, 130, kind);
+        rc |= check_tiled(5, 16384, 64, 66 + 64, kind);   /* Pro's o_proj rows */
     }
+    rc |= check_tiled(1, 6144, 384, 130, 0);   /* a router: plain bf16 */
+    rc |= check_tiled(1, 1024, 128, 150, 1);
+    rc |= check_tiled(2, 512, 64, 130, 0);
+    rc |= check_tiled(2, 6144, 192, 200, 0);   /* Pro's qkv rows */
     mimo_cuda_report(); mimo_cuda_shutdown();
     if (!mimo_cuda_init(0)) return 1;
     rc |= check(2, 128, 7, 3);

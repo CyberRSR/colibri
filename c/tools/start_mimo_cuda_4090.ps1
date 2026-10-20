@@ -44,7 +44,6 @@ $env:MIMO_CUDA_DENSE_GB = [string]$DenseGB
 $env:MIMO_CUDA_OPROJ_INT8 = $(if ($OprojInt8) { '1' } else { '0' })
 $env:MIMO_CUDA_RESERVE_GB = [string]$ReserveGB
 $env:MIMO_CUDA_RELEASE_HOST = '1'
-$env:MIMO_CHUNK = '512'
 $env:MIMO_CTX = [string]$Context
 $env:MIMO_DENSE_BITS = '0'
 $env:MIMO_IDOT = '0'
@@ -55,7 +54,8 @@ $env:OMP_NUM_THREADS = [string]$Threads
 $env:COLI_NO_OMP_TUNE = '1'
 $env:COLI_VULKAN = '0'
 $env:COLI_GPU = '0'
-foreach ($key in @('MIMO_CUDA_FAULT', 'MIMO_LAYERS', 'MIMO_TRACE', 'MIMO_LOGITS', 'MIMO_ROUTE_TRACE',
+# MIMO_CHUNK unset: prompts go to the GPU in blocks as large as its memory allows (docs/mimo-cuda.md)
+foreach ($key in @('MIMO_CHUNK', 'MIMO_CUDA_FAULT', 'MIMO_LAYERS', 'MIMO_TRACE', 'MIMO_LOGITS', 'MIMO_ROUTE_TRACE',
                    'MIMO_IO_THREADS', 'MIMO_READ_THREADS')) {
     Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue
 }

@@ -1,0 +1,36 @@
+[
+ {
+  "prompt": "C:/Users/Cyber/AppData/Local/Temp/claude/C--colibri-dev/384caa23-e447-4661-9ea7-c4980cd7af5b/scratchpad/p4k.txt",
+  "ttft_s": 68.62002509995364,
+  "total_s": 77.05496009998024,
+  "end": [
+   "DONE",
+   "1",
+   "STAT",
+   "16",
+   "0.208",
+   "20.3",
+   "150.79",
+   "4310",
+   "1"
+  ],
+  "reply": "On an RTX 4090, the CUDA path speeds up Mi"
+ },
+ {
+  "prompt": "C:/Users/Cyber/AppData/Local/Temp/claude/C--colibri-dev/384caa23-e447-4661-9ea7-c4980cd7af5b/scratchpad/p16k.txt",
+  "ttft_s": 244.7639645000454,
+  "total_s": 258.3477345999563,
+  "end": [
+   "DONE",
+   "2",
+   "STAT",
+   "16",
+   "0.062",
+   "34.3",
+   "158.53",
+   "24957",
+   "1"
+  ],
+  "reply": "On an RTX 4090, MiMo-V2.6"
+ }
+]

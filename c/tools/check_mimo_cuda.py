@@ -26,6 +26,9 @@ def main():
     p.add_argument("--threads", type=int, default=24)
     p.add_argument("--release-host", action="store_true")
     p.add_argument("--prompt-file", type=Path, help="UTF-8 fully rendered chat prompt")
+    p.add_argument("--chunk", type=int, default=64,
+                   help="prompt rows a block (MIMO_CHUNK); 64 or more puts a block's experts, attention "
+                        "and matrices on the GPU's prompt kernels")
     a = p.parse_args()
     if a.tokens < 1:
         p.error("--tokens must be positive")
@@ -34,7 +37,7 @@ def main():
     prompt = a.prompt_file.read_text(encoding="utf-8") if a.prompt_file else PROMPT
     vocab = json.loads((model / "config.json").read_text())["vocab_size"]
     config = {"MIMO_DIRS": a.shards, "MIMO_DENSE_BITS": "0", "MIMO_IDOT": "0",
-              "MIMO_DIRECT": "1", "MIMO_READ_THREADS": "16", "MIMO_CHUNK": "64",
+              "MIMO_DIRECT": "1", "MIMO_READ_THREADS": "16", "MIMO_CHUNK": str(a.chunk),
               "OMP_NUM_THREADS": str(a.threads), "COLI_NO_OMP_TUNE": "1", "COLI_TEMP": "0",
               "MIMO_CTX": "16384", "COLI_VULKAN": "0", "MIMO_CUDA_DENSE_GB": "20",
               "MIMO_CUDA_RESERVE_GB": "2", "SERVE": "0"}
