@@ -1,0 +1,55 @@
+[
+ {
+  "name": "t1",
+  "prompt_tokens": 4318,
+  "ttft_s": 47.429,
+  "total_s": 59.552,
+  "end": [
+   "DONE",
+   "1",
+   "STAT",
+   "32",
+   "0.538",
+   "32.2",
+   "151.34",
+   "4318",
+   "1"
+  ],
+  "reply": "The user wants two things: a three-sentence summary of speed on RTX 4090, and a one-sentence description of what the text",
+  "engine": [
+   "[mimo] prompt blocks on the GPU: up to 32768 rows (1.86 GB free on the card)",
+   "[PREFIX] no reuse, 0 of 4318 prompt tokens",
+   "[PIN] turn photo of 4318 tokens",
+   "[mimo] streaming: 27836 demand reads, 6720 prefetched (4594 used, 2126 unused, 849 of them cancelled unread), predicted 78.2% of 17664 choices, 675.96 GB read, 3.40s stalled, 0.24s predicting; attention matmuls: qkv 0.36s, o_proj 0.84s; 9.47 experts a wave",
+   "[mimo] experts on the GPU: 39.44s (their bytes into staging 5.90s, waiting for a staging buffer 31.97s, for the last outputs 0.10s), 18847 read straight into staging; the rows' weighted sums 1.55s",
+   "[mimo] MTP: 11 steps of up to 2 drafts, 20 kept (10 of 11, 10 of 10), 2.82 tokens a step, 0.80s drafting",
+   "[mimo] prompt 47.36s (stalled 0.37s, experts 40.61s, attention 4.29s, routers 0.83s, 26023 demand reads); generation 12.12s (stalled 3.03s, experts 6.21s, attention 1.62s, 1813 demand reads, 6720 prefetched)"
+  ]
+ },
+ {
+  "name": "t2-short",
+  "prompt_tokens": 4353,
+  "ttft_s": 8.071,
+  "total_s": 16.583,
+  "end": [
+   "DONE",
+   "2",
+   "STAT",
+   "21",
+   "1.266",
+   "65.6",
+   "151.34",
+   "4353",
+   "0"
+  ],
+  "reply": "The user wants a three-word summary of what the text is about.</think>MiMo CUDA offload.",
+  "engine": [
+   "[PREFIX] reusing 4318 of 4353 prompt tokens (photo)",
+   "[PIN] resumed from the photo of 4318 tokens, 35 to prefill",
+   "[PIN] no turn photo: the rows of this prompt are not those of it computed cold",
+   "[mimo] streaming: 6553 demand reads, 4857 prefetched (3547 used, 1310 unused, 594 of them cancelled unread), predicted 79.3% of 11592 choices, 216.90 GB read, 5.35s stalled, 0.17s predicting; attention matmuls: qkv 0.26s, o_proj 0.61s; 2.66 experts a wave",
+   "[mimo] MTP: 8 steps of up to 2 drafts, 13 kept (8 of 8, 5 of 5), 2.62 tokens a step, 0.76s drafting",
+   "[mimo] prompt 8.07s (stalled 3.21s, experts 4.24s, attention 0.44s, routers 0.03s, 5497 demand reads); generation 8.51s (stalled 2.14s, experts 4.14s, attention 1.14s, 1056 demand reads, 4857 prefetched)"
+  ]
+ }
+]

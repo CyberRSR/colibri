@@ -1,0 +1,37 @@
+{"name": "t1", "prompt_tokens": 4318, "ttft_s": 47.907, "total_s": 60.542}
+  [PREFIX] no reuse, 0 of 4318 prompt tokens
+  [mimo] prompt blocks on the GPU: up to 32768 rows (1.85 GB free on the card)
+  [PIN] turn photo of 4318 tokens
+  [mimo] prompt 47.84s (stalled 0.43s, experts 40.94s, attention 4.43s, routers 0.83s, 26023 demand reads); generation 12.64s (stalled 3.44s, experts 6.22s, attention 1.63s, 1811 demand reads, 6707 prefetched)
+{"name": "t2-short", "prompt_tokens": 4353, "ttft_s": 11.598, "total_s": 19.821}
+  [PREFIX] reusing 4318 of 4353 prompt tokens (photo)
+  [PIN] resumed from the photo of 4318 tokens, 35 to prefill
+  [PIN] turn photo of 4353 tokens
+  [mimo] prompt 11.60s (stalled 0.03s, experts 11.03s, attention 0.40s, routers 0.07s, 5470 demand reads); generation 8.22s (stalled 1.95s, experts 4.12s, attention 1.14s, 995 demand reads, 4615 prefetched)
+{"name": "other", "prompt_tokens": 14, "ttft_s": 3.919, "total_s": 5.038}
+  [PREFIX] no reuse, 0 of 14 prompt tokens
+  [PIN] no turn photo: the rows of this prompt are not those of it computed cold
+  [mimo] prompt 3.92s (stalled 1.57s, experts 1.94s, attention 0.31s, routers 0.03s, 2461 demand reads); generation 1.12s (stalled 0.28s, experts 0.57s, attention 0.12s, 111 demand reads, 641 prefetched)
+{"name": "t2-short-cold", "prompt_tokens": 4353, "ttft_s": 39.284, "total_s": 47.08}
+  [PIN] released the photo of 4318 tokens: the state no longer holds it
+  [PREFIX] no reuse, 0 of 4353 prompt tokens
+  [PIN] turn photo of 4353 tokens
+  [mimo] prompt 39.28s (stalled 0.02s, experts 32.82s, attention 4.37s, routers 0.82s, 20290 demand reads); generation 7.80s (stalled 1.57s, experts 4.05s, attention 1.13s, 919 demand reads, 4119 prefetched)
+{"name": "t1-again", "prompt_tokens": 4318, "ttft_s": 39.021, "total_s": 50.573}
+  [PREFIX] no reuse, 0 of 4318 prompt tokens
+  [PIN] turn photo of 4318 tokens
+  [mimo] prompt 39.02s (stalled 0.02s, experts 32.81s, attention 4.25s, routers 0.82s, 20347 demand reads); generation 11.55s (stalled 2.54s, experts 6.13s, attention 1.60s, 1582 demand reads, 6050 prefetched)
+{"name": "t2-long", "prompt_tokens": 6148, "ttft_s": 34.139, "total_s": 48.194}
+  [PREFIX] reusing 4318 of 6148 prompt tokens (photo)
+  [PIN] resumed from the photo of 4318 tokens, 1830 to prefill
+  [PIN] turn photo of 6148 tokens
+  [mimo] prompt 34.14s (stalled 0.02s, experts 30.79s, attention 2.45s, routers 0.39s, 19922 demand reads); generation 14.06s (stalled 3.17s, experts 7.04s, attention 2.32s, 1734 demand reads, 7174 prefetched)
+{"name": "other-2", "prompt_tokens": 14, "ttft_s": 4.622, "total_s": 5.618}
+  [PREFIX] no reuse, 0 of 14 prompt tokens
+  [PIN] no turn photo: the rows of this prompt are not those of it computed cold
+  [mimo] prompt 4.62s (stalled 2.18s, experts 2.03s, attention 0.32s, routers 0.03s, 3046 demand reads); generation 1.00s (stalled 0.18s, experts 0.57s, attention 0.11s, 115 demand reads, 558 prefetched)
+{"name": "t2-long-cold", "prompt_tokens": 6148, "ttft_s": 43.127, "total_s": 57.011}
+  [PIN] released the photo of 4318 tokens: the state no longer holds it
+  [PREFIX] no reuse, 0 of 6148 prompt tokens
+  [PIN] turn photo of 6148 tokens
+  [mimo] prompt 43.13s (stalled 0.02s, experts 34.20s, attention 6.01s, routers 1.16s, 20439 demand reads); generation 13.89s (stalled 3.03s, experts 7.01s, attention 2.29s, 1734 demand reads, 6959 prefetched)

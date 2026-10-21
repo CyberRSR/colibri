@@ -1,0 +1,32 @@
+series1  1-base-drop    1 documents    first token   94.04 s  end  121.03 s  prompt  25054  44c375561a84  no reuse, 0 of 25054 prompt tokens
+series1  1-base-drop    2 tool result  first token   97.52 s  end  123.31 s  prompt  26701  f23d2b1b00ea  no reuse, 0 of 26701 prompt tokens
+series1  1-base-drop    3 follow-up    first token   97.20 s  end  125.56 s  prompt  26724  a0cfa9b2215a  no reuse, 0 of 26724 prompt tokens
+series1  1-base-drop    4 follow-up    first token   97.66 s  end  124.91 s  prompt  26741  514b6fd9ecb7  no reuse, 0 of 26741 prompt tokens
+series1  2-new-drop     1 documents    first token   94.27 s  end  121.21 s  prompt  25054  44c375561a84  no reuse, 0 of 25054 prompt tokens
+series1  2-new-drop     2 tool result  first token   34.48 s  end   60.25 s  prompt  26701  f23d2b1b00ea  resumed from the photo of 25054 tokens, 1647 to prefill
+series1  2-new-drop     3 follow-up    first token   10.29 s  end   36.95 s  prompt  26724  a0cfa9b2215a  resumed from the photo of 26701 tokens, 23 to prefill
+series1  2-new-drop     4 follow-up    first token    7.15 s  end   34.27 s  prompt  26741  514b6fd9ecb7  resumed from the photo of 26724 tokens, 17 to prefill
+series1  3-base-keep    1 documents    first token   93.83 s  end  120.83 s  prompt  25054  44c375561a84  no reuse, 0 of 25054 prompt tokens
+series1  3-base-keep    2 tool result  first token   34.53 s  end   60.27 s  prompt  26765  5f0f06534988  reusing 25117 of 26765 prompt tokens
+series1  3-base-keep    3 follow-up    first token   13.80 s  end   40.92 s  prompt  26852  ecef578e6e4d  reusing 26828 of 26852 prompt tokens
+series1  3-base-keep    4 follow-up    first token   10.08 s  end   36.16 s  prompt  26933  9c4760857998  reusing 26915 of 26933 prompt tokens
+series1  4-new-keep     1 documents    first token   96.19 s  end  123.80 s  prompt  25054  44c375561a84  no reuse, 0 of 25054 prompt tokens
+series1  4-new-keep     2 tool result  first token   34.53 s  end   59.74 s  prompt  26765  5f0f06534988  reusing 25117 of 26765 prompt tokens
+series1  4-new-keep     3 follow-up    first token   15.10 s  end   42.08 s  prompt  26852  ecef578e6e4d  reusing 26828 of 26852 prompt tokens
+series1  4-new-keep     4 follow-up    first token   11.04 s  end   36.93 s  prompt  26933  9c4760857998  reusing 26915 of 26933 prompt tokens
+series2  1-new-drop     1 documents    first token   96.93 s  end  124.22 s  prompt  25054  44c375561a84  no reuse, 0 of 25054 prompt tokens
+series2  1-new-drop     2 tool result  first token   34.41 s  end   60.42 s  prompt  26701  f23d2b1b00ea  resumed from the photo of 25054 tokens, 1647 to prefill
+series2  1-new-drop     3 follow-up    first token   10.34 s  end   37.46 s  prompt  26724  a0cfa9b2215a  resumed from the photo of 26701 tokens, 23 to prefill
+series2  1-new-drop     4 follow-up    first token    7.10 s  end   34.33 s  prompt  26741  514b6fd9ecb7  resumed from the photo of 26724 tokens, 17 to prefill
+series2  2-base-drop    1 documents    first token   96.32 s  end  123.60 s  prompt  25054  44c375561a84  no reuse, 0 of 25054 prompt tokens
+series2  2-base-drop    2 tool result  first token  100.23 s  end  126.18 s  prompt  26701  f23d2b1b00ea  no reuse, 0 of 26701 prompt tokens
+series2  2-base-drop    3 follow-up    first token  100.25 s  end  128.81 s  prompt  26724  a0cfa9b2215a  no reuse, 0 of 26724 prompt tokens
+series2  2-base-drop    4 follow-up    first token   99.90 s  end  127.12 s  prompt  26741  514b6fd9ecb7  no reuse, 0 of 26741 prompt tokens
+series2  3-new-keep     1 documents    first token   94.77 s  end  121.67 s  prompt  25054  44c375561a84  no reuse, 0 of 25054 prompt tokens
+series2  3-new-keep     2 tool result  first token   34.44 s  end   59.58 s  prompt  26765  5f0f06534988  reusing 25117 of 26765 prompt tokens
+series2  3-new-keep     3 follow-up    first token   14.74 s  end   41.60 s  prompt  26852  ecef578e6e4d  reusing 26828 of 26852 prompt tokens
+series2  3-new-keep     4 follow-up    first token   10.85 s  end   36.57 s  prompt  26933  9c4760857998  reusing 26915 of 26933 prompt tokens
+series2  4-base-keep    1 documents    first token   94.24 s  end  121.23 s  prompt  25054  44c375561a84  no reuse, 0 of 25054 prompt tokens
+series2  4-base-keep    2 tool result  first token   34.30 s  end   59.41 s  prompt  26765  5f0f06534988  reusing 25117 of 26765 prompt tokens
+series2  4-base-keep    3 follow-up    first token   14.76 s  end   41.55 s  prompt  26852  ecef578e6e4d  reusing 26828 of 26852 prompt tokens
+series2  4-base-keep    4 follow-up    first token   10.79 s  end   36.49 s  prompt  26933  9c4760857998  reusing 26915 of 26933 prompt tokens

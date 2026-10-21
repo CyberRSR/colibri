@@ -127,6 +127,44 @@ carrying `nan`. It never resumes from the live state of the previous turn, becau
 positions before it would have no frame. A chat turn without `logprobs` keeps the
 ordinary prefix reuse.
 
+### Turn photos: agent clients that drop the reasoning
+
+A chat client resends the whole conversation every turn, and the state the last turn
+left is a prefix of it only when the client sends back exactly what the model wrote.
+OpenAI-compatible agent clients send the assistant's turn back with its content and tool
+calls but without `reasoning_content`, which the template then renders as
+`<think></think>`: the new prompt leaves the state right after the last prompt's
+`<think>` cue, and the whole conversation used to be computed again every turn (Pro on
+the RTX 4090 machine: 30 s for an 811-token conversation, about 90 s at 25,000 tokens).
+
+So every prompt that generates also takes a snapshot of its end, a **turn photo**, kept
+in a pool of its own (`MIMO_TURN_PHOTOS`, default 2, the least recently used replaced;
+about 80 MB each on Pro): System One's snapshots stay as many as `COLI_PIN_SLOTS` says,
+and a read-out neither takes a turn photo nor resumes from one. The next turn resumes
+from the deepest photo that is a prefix of it (`[PIN] resumed from the photo of N
+tokens, M to prefill`) and computes only the reply as the client sent it back and the
+new messages. A client that sends the reasoning back keeps the live prefix, which goes
+further. A repeated turn (a retry) resumes from the turn before.
+
+A turn resumed from a photo is the bytes of the same prompt computed cold: its logits,
+its reply and its MTP drafts, as `tests/test_mimo_prefix_serve.py` checks against a cold
+engine. Three things make it so:
+
+- the photo holds the trunk's last hidden rows as well, so that the MTP layers' windows
+  are filled from the same positions as after the prompt computed cold (they are emptied
+  when a photo goes back: they held rows of the reply the client threw away);
+- with `MIMO_CUDA` a prompt's rows take the kernels of the prompt's length
+  (`MIMO_PROMPT_KERNELS`, [Prompts on the GPU](mimo-cuda.md#prompts-on-the-gpu)): a tail
+  of a few dozen rows would otherwise run on the decode path where the same prompt cold
+  runs on the GPU's prompt kernels;
+- a photo is taken only of a prompt whose rows are those bytes: not of one that went on
+  from the live prefix, whose reply decode steps computed (its tail keeps its own
+  kernels, as before), and with `MIMO_CUDA` not of one too short for the GPU's prompt
+  kernels (`COLI_PREFIX_LOG=1` says `[PIN] no turn photo`).
+
+`COLI_KV_PREFIX=0` turns turn photos off with the prefix reuse; `MIMO_TURN_PHOTOS=0` turns
+off only them.
+
 Resuming is exact to the bit, and that needed one change to the forward. The MoE output
 of a row used to be summed in the order its experts first appeared **in the prefill
 block**, which depends on the other rows of the block. The same position came out with
@@ -152,8 +190,9 @@ prompt computed cold.
 `make -C c mimo-tiny-serve-check` serves the same fixture and compares against a cold
 engine, frame by frame: prefix reuse across turns, System One options that slide the window
 past the snapshot, nested snapshots and a sibling question, a snapshot made stale by an
-unrelated prompt, prompts with a picture, and `/v1/systemone` and chat logprobs through the
-gateway. Every option must process only its own tokens. The gateway's patches
+unrelated prompt, prompts with a picture, turn photos (an agent loop that drops the
+reasoning: each turn's logits, reply and MTP drafts), and `/v1/systemone` and chat logprobs
+through the gateway. Every option must process only its own tokens. The gateway's patches
 match the official Qwen2-VL processor bit for bit on the fixture's picture.
 
 On the real checkpoint, `tools/mimo_real_check.py` builds Xiaomi's model from the
@@ -469,6 +508,9 @@ photo equal to the same prompt computed cold) are the CPU's, and hold with
 | `MIMO_MEM_TEST_GB` | unset | Tests: the memory available is this, less what the caches and the pool hold, instead of the OS's measure (`tests/mimo_tiny_harness.py` makes the pool give buffers back). |
 | `MIMO_CAP` | 64 | Expert cache slots per layer when no argument gives one. |
 | `MIMO_MAX_IMAGE_TOKENS` | unset | Gateway: ceiling on what one picture costs in prompt tokens. |
+| `MIMO_TURN_PHOTOS` | 2 | Turn photos kept: every prompt that generates takes a snapshot of its end, and a later turn that begins with it resumes there instead of computing it again ([Turn photos](#turn-photos-agent-clients-that-drop-the-reasoning)); the least recently used is replaced. 0: none. |
+| `MIMO_PROMPT_KERNELS` | 1 | With `MIMO_CUDA`: a prompt's rows take the kernels of the prompt's length, whatever block, attention piece or resumed tail they are in, so a prompt resumed from a photo is the bytes of the prompt computed cold. At short contexts a short tail pays for it (35 rows after 4318 tokens: 11.6 s against 8.1 on the decode path, which does not move every expert it routes to over PCIe); at long ones it gains (about 20 rows after 26,700 tokens: 7-10 s against 10-14, the decode path's attention on the CPU). 0: each step's own rows choose, as before ([Prompts on the GPU](mimo-cuda.md#prompts-on-the-gpu)), and every turn takes a photo; the turns are then not the cold prompt's bytes. A live prefix's tail always keeps its steps' own kernels. |
+| `MIMO_PROMPT_LOGITS` | unset | Append each served prompt's last logits (f32, the vocabulary's width) to this file: what the tests compare a resumed prompt with the same prompt cold by. |
 | `MIMO_LOGITS` | unset | Oracle: dump every prompt position's logits (f32) to this file. |
 | `MIMO_TRACE` | unset | Oracle: dump the residual after every sublayer of the first block. |
 | `MIMO_DIRS` | unset | Extra directories holding shards (multi-disk). |

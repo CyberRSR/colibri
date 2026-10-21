@@ -1,0 +1,213 @@
+[
+ {
+  "name": "t1",
+  "prompt_tokens": 4318,
+  "ttft_s": 47.438,
+  "total_s": 59.614,
+  "end": [
+   "DONE",
+   "1",
+   "STAT",
+   "32",
+   "0.537",
+   "32.2",
+   "151.34",
+   "4318",
+   "1"
+  ],
+  "reply": "The user wants two things: a three-sentence summary of speed on RTX 4090, and a one-sentence description of what the text",
+  "engine": [
+   "[PREFIX] no reuse, 0 of 4318 prompt tokens",
+   "[mimo] prompt blocks on the GPU: up to 32768 rows (1.85 GB free on the card)",
+   "[PIN] turn photo of 4318 tokens",
+   "[mimo] streaming: 27819 demand reads, 6701 prefetched (4594 used, 2107 unused, 849 of them cancelled unread), predicted 78.2% of 17664 choices, 675.24 GB read, 3.50s stalled, 0.23s predicting; attention matmuls: qkv 0.37s, o_proj 0.83s; 9.44 experts a wave",
+   "[mimo] experts on the GPU: 39.51s (their bytes into staging 5.89s, waiting for a staging buffer 32.02s, for the last outputs 0.10s), 18847 read straight into staging; the rows' weighted sums 1.56s",
+   "[mimo] MTP: 11 steps of up to 2 drafts, 20 kept (10 of 11, 10 of 10), 2.82 tokens a step, 0.80s drafting",
+   "[mimo] prompt 47.37s (stalled 0.39s, experts 40.66s, attention 4.29s, routers 0.81s, 26023 demand reads); generation 12.18s (stalled 3.11s, experts 6.20s, attention 1.61s, 1796 demand reads, 6701 prefetched)"
+  ]
+ },
+ {
+  "name": "t2-short",
+  "prompt_tokens": 4353,
+  "ttft_s": 11.637,
+  "total_s": 19.824,
+  "end": [
+   "DONE",
+   "2",
+   "STAT",
+   "21",
+   "1.059",
+   "65.8",
+   "151.34",
+   "4353",
+   "0"
+  ],
+  "reply": "The user wants a three-word summary of what the text is about.</think>MiMo CUDA offload.",
+  "engine": [
+   "[PREFIX] reusing 4318 of 4353 prompt tokens (photo)",
+   "[PIN] resumed from the photo of 4318 tokens, 35 to prefill",
+   "[PIN] turn photo of 4353 tokens",
+   "[mimo] streaming: 6502 demand reads, 4617 prefetched (3287 used, 1330 unused, 541 of them cancelled unread), predicted 79.3% of 11592 choices, 212.13 GB read, 1.91s stalled, 0.17s predicting; attention matmuls: qkv 0.26s, o_proj 0.61s; 6.48 experts a wave",
+   "[mimo] experts on the GPU: 11.08s (their bytes into staging 7.20s, waiting for a staging buffer 2.47s, for the last outputs 0.17s), 853 read straight into staging; the rows' weighted sums 0.02s",
+   "[mimo] MTP: 8 steps of up to 2 drafts, 13 kept (8 of 8, 5 of 5), 2.62 tokens a step, 0.72s drafting",
+   "[mimo] prompt 11.64s (stalled 0.02s, experts 11.07s, attention 0.40s, routers 0.06s, 5500 demand reads); generation 8.19s (stalled 1.89s, experts 4.12s, attention 1.15s, 1002 demand reads, 4617 prefetched)"
+  ]
+ },
+ {
+  "name": "other",
+  "prompt_tokens": 14,
+  "ttft_s": 3.913,
+  "total_s": 5.028,
+  "end": [
+   "DONE",
+   "3",
+   "STAT",
+   "4",
+   "0.796",
+   "53.9",
+   "151.34",
+   "14",
+   "1"
+  ],
+  "reply": "The user wants me",
+  "engine": [
+   "[PREFIX] no reuse, 0 of 14 prompt tokens",
+   "[PIN] no turn photo: the rows of this prompt are not those of it computed cold",
+   "[mimo] streaming: 2579 demand reads, 643 prefetched (520 used, 123 unused, 57 of them cancelled unread), predicted 82.8% of 1656 choices, 63.47 GB read, 1.88s stalled, 0.02s predicting; attention matmuls: qkv 0.13s, o_proj 0.27s; 2.28 experts a wave",
+   "[mimo] MTP: 1 steps of up to 2 drafts, 2 kept (1 of 1, 1 of 1), 3.00 tokens a step, 0.10s drafting",
+   "[mimo] prompt 3.91s (stalled 1.59s, experts 1.92s, attention 0.31s, routers 0.03s, 2468 demand reads); generation 1.12s (stalled 0.29s, experts 0.56s, attention 0.12s, 111 demand reads, 643 prefetched)"
+  ]
+ },
+ {
+  "name": "t2-short-cold",
+  "prompt_tokens": 4353,
+  "ttft_s": 39.106,
+  "total_s": 46.869,
+  "end": [
+   "DONE",
+   "4",
+   "STAT",
+   "21",
+   "0.448",
+   "41.2",
+   "152.00",
+   "4353",
+   "0"
+  ],
+  "reply": "The user wants a three-word summary of what the text is about.</think>MiMo CUDA offload.",
+  "engine": [
+   "[PIN] released the photo of 4318 tokens: the state no longer holds it",
+   "[PREFIX] no reuse, 0 of 4353 prompt tokens",
+   "[PIN] turn photo of 4353 tokens",
+   "[mimo] streaming: 21189 demand reads, 4107 prefetched (2813 used, 1294 unused, 471 of them cancelled unread), predicted 79.3% of 11592 choices, 497.84 GB read, 1.56s stalled, 0.16s predicting; attention matmuls: qkv 0.26s, o_proj 0.61s; 14.52 experts a wave",
+   "[mimo] experts on the GPU: 31.15s (their bytes into staging 7.03s, waiting for a staging buffer 8.43s, for the last outputs 0.18s), 18179 read straight into staging; the rows' weighted sums 1.54s",
+   "[mimo] MTP: 8 steps of up to 2 drafts, 13 kept (8 of 8, 5 of 5), 2.62 tokens a step, 0.73s drafting",
+   "[mimo] prompt 39.11s (stalled 0.01s, experts 32.67s, attention 4.38s, routers 0.81s, 20282 demand reads); generation 7.76s (stalled 1.55s, experts 4.04s, attention 1.14s, 907 demand reads, 4107 prefetched)"
+  ]
+ },
+ {
+  "name": "t1-again",
+  "prompt_tokens": 4318,
+  "ttft_s": 39.061,
+  "total_s": 50.513,
+  "end": [
+   "DONE",
+   "5",
+   "STAT",
+   "32",
+   "0.633",
+   "46.5",
+   "152.01",
+   "4318",
+   "1"
+  ],
+  "reply": "The user wants two things: a three-sentence summary of speed on RTX 4090, and a one-sentence description of what the text",
+  "engine": [
+   "[PREFIX] no reuse, 0 of 4318 prompt tokens",
+   "[PIN] turn photo of 4318 tokens",
+   "[mimo] streaming: 21936 demand reads, 6034 prefetched (4115 used, 1919 unused, 658 of them cancelled unread), predicted 78.2% of 17664 choices, 547.72 GB read, 2.49s stalled, 0.23s predicting; attention matmuls: qkv 0.36s, o_proj 0.84s; 10.59 experts a wave",
+   "[mimo] experts on the GPU: 31.32s (their bytes into staging 7.32s, waiting for a staging buffer 10.03s, for the last outputs 0.18s), 17828 read straight into staging; the rows' weighted sums 1.54s",
+   "[mimo] MTP: 11 steps of up to 2 drafts, 20 kept (10 of 11, 10 of 10), 2.82 tokens a step, 0.79s drafting",
+   "[mimo] prompt 39.06s (stalled 0.02s, experts 32.81s, attention 4.27s, routers 0.81s, 20363 demand reads); generation 11.45s (stalled 2.47s, experts 6.13s, attention 1.61s, 1573 demand reads, 6034 prefetched)"
+  ]
+ },
+ {
+  "name": "t2-long",
+  "prompt_tokens": 6148,
+  "ttft_s": 34.063,
+  "total_s": 48.109,
+  "end": [
+   "DONE",
+   "6",
+   "STAT",
+   "32",
+   "0.665",
+   "49.5",
+   "152.01",
+   "6148",
+   "1"
+  ],
+  "reply": "The user asks how this text relates to the text before. The first text was about MiMo CUDA offload (mimo-cuda.md), the second is",
+  "engine": [
+   "[PREFIX] reusing 4318 of 6148 prompt tokens (photo)",
+   "[PIN] resumed from the photo of 4318 tokens, 1830 to prefill",
+   "[PIN] turn photo of 6148 tokens",
+   "[mimo] streaming: 21682 demand reads, 7228 prefetched (5040 used, 2188 unused, 731 of them cancelled unread), predicted 77.4% of 19320 choices, 565.10 GB read, 3.15s stalled, 0.30s predicting; attention matmuls: qkv 0.46s, o_proj 1.23s; 8.62 experts a wave",
+   "[mimo] experts on the GPU: 30.14s (their bytes into staging 7.31s, waiting for a staging buffer 10.57s, for the last outputs 0.14s), 17367 read straight into staging; the rows' weighted sums 0.63s",
+   "[mimo] MTP: 17 steps of up to 2 drafts, 14 kept (9 of 11, 5 of 6), 1.82 tokens a step, 0.97s drafting",
+   "[mimo] prompt 34.06s (stalled 0.02s, experts 30.73s, attention 2.45s, routers 0.39s, 19933 demand reads); generation 14.05s (stalled 3.13s, experts 7.04s, attention 2.32s, 1749 demand reads, 7228 prefetched)"
+  ]
+ },
+ {
+  "name": "other-2",
+  "prompt_tokens": 14,
+  "ttft_s": 4.653,
+  "total_s": 5.654,
+  "end": [
+   "DONE",
+   "7",
+   "STAT",
+   "4",
+   "0.707",
+   "43.5",
+   "152.01",
+   "14",
+   "1"
+  ],
+  "reply": "The user wants me",
+  "engine": [
+   "[PREFIX] no reuse, 0 of 14 prompt tokens",
+   "[PIN] no turn photo: the rows of this prompt are not those of it computed cold",
+   "[mimo] streaming: 3163 demand reads, 553 prefetched (432 used, 121 unused, 55 of them cancelled unread), predicted 82.8% of 1656 choices, 73.42 GB read, 2.39s stalled, 0.02s predicting; attention matmuls: qkv 0.14s, o_proj 0.28s; 1.78 experts a wave",
+   "[mimo] MTP: 1 steps of up to 2 drafts, 2 kept (1 of 1, 1 of 1), 3.00 tokens a step, 0.09s drafting",
+   "[mimo] prompt 4.65s (stalled 2.21s, experts 2.01s, attention 0.33s, routers 0.03s, 3049 demand reads); generation 1.00s (stalled 0.18s, experts 0.57s, attention 0.12s, 114 demand reads, 553 prefetched)"
+  ]
+ },
+ {
+  "name": "t2-long-cold",
+  "prompt_tokens": 6148,
+  "ttft_s": 43.242,
+  "total_s": 57.225,
+  "end": [
+   "DONE",
+   "8",
+   "STAT",
+   "32",
+   "0.559",
+   "48.9",
+   "152.56",
+   "6148",
+   "1"
+  ],
+  "reply": "The user asks how this text relates to the text before. The first text was about MiMo CUDA offload (mimo-cuda.md), the second is",
+  "engine": [
+   "[PIN] released the photo of 4318 tokens: the state no longer holds it",
+   "[PREFIX] no reuse, 0 of 6148 prompt tokens",
+   "[PIN] turn photo of 6148 tokens",
+   "[mimo] streaming: 22254 demand reads, 6957 prefetched (4873 used, 2084 unused, 655 of them cancelled unread), predicted 77.4% of 19320 choices, 572.66 GB read, 3.10s stalled, 0.30s predicting; attention matmuls: qkv 0.46s, o_proj 1.22s; 9.02 experts a wave",
+   "[mimo] experts on the GPU: 32.17s (their bytes into staging 7.20s, waiting for a staging buffer 9.33s, for the last outputs 0.25s), 18112 read straight into staging; the rows' weighted sums 2.18s",
+   "[mimo] MTP: 17 steps of up to 2 drafts, 14 kept (9 of 11, 5 of 6), 1.82 tokens a step, 1.00s drafting",
+   "[mimo] prompt 43.24s (stalled 0.02s, experts 34.30s, attention 6.03s, routers 1.16s, 20489 demand reads); generation 13.98s (stalled 3.08s, experts 7.02s, attention 2.31s, 1765 demand reads, 6957 prefetched)"
+  ]
+ }
+]

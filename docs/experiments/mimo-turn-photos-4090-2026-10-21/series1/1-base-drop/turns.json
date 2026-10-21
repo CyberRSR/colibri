@@ -1,0 +1,62 @@
+{
+ "mode": "drop",
+ "tokens": 64,
+ "turns": [
+  {
+   "ttft_s": 94.04,
+   "total_s": 121.03,
+   "reasoning": "The user wants a three-sentence summary of what the documents say about speed on an RTX 4090. Let me gather the relevant numbers.\n\nRTX 4090 mentions:\n- MiMo CUDA offload on RTX 4090: benchmark numbers 1.791",
+   "content": "",
+   "tool_calls": [],
+   "usage": {
+    "prompt_tokens": 25054,
+    "completion_tokens": 64,
+    "total_tokens": 25118
+   },
+   "finish": "length",
+   "name": "1 documents"
+  },
+  {
+   "ttft_s": 97.52,
+   "total_s": 123.31,
+   "reasoning": "The user wants a three-sentence summary of what the documents say about speed on an RTX 4090. Let me gather the key numbers:\n\n- MiMo-V2.6-Pro on RTX 4090 (24 GiB) with native dense CUDA offload: ~1.",
+   "content": "",
+   "tool_calls": [],
+   "usage": {
+    "prompt_tokens": 26701,
+    "completion_tokens": 64,
+    "total_tokens": 26765
+   },
+   "finish": "length",
+   "name": "2 tool result"
+  },
+  {
+   "ttft_s": 97.2,
+   "total_s": 125.56,
+   "reasoning": "The user asks: \"Which of the two numbers is the time to the first token?\" — presumably referring to some pair of numbers in the documents. But I haven't given a summary yet — my previous turn was cut off (I read a file and then the user interrupted with a new question). The user says \"",
+   "content": "",
+   "tool_calls": [],
+   "usage": {
+    "prompt_tokens": 26724,
+    "completion_tokens": 64,
+    "total_tokens": 26788
+   },
+   "finish": "length",
+   "name": "3 follow-up"
+  },
+  {
+   "ttft_s": 97.66,
+   "total_s": 124.91,
+   "reasoning": "The user asks \"Which of the two numbers is the time to the first token?\" — but the conversation is odd: I apparently was asked to summarize in three sentences about speed on RTX 4090, then the user asked which of the two numbers is the time to the first token, and now says",
+   "content": "",
+   "tool_calls": [],
+   "usage": {
+    "prompt_tokens": 26741,
+    "completion_tokens": 64,
+    "total_tokens": 26805
+   },
+   "finish": "length",
+   "name": "4 follow-up"
+  }
+ ]
+}

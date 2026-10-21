@@ -171,7 +171,19 @@ a prompt block now runs on the GPU:
 
 Not the CPU's bytes: the same f32 quantities summed in other orders, as the CUDA
 matmuls already were; a prompt block's rows get the same bytes whatever block or
-sub-block they are in. A decode step (one to three rows) keeps the CPU path
+sub-block they are in. A step smaller than these thresholds takes the decode path, and a
+prompt has such steps: a block's last attention piece can be a few rows, and a prompt
+resumed from a photo prefills only its tail. So a prompt's rows take the kernels of the
+prompt's length (`MIMO_PROMPT_KERNELS`, default 1): every row of a prompt of 64 tokens or
+more takes the prompt kernels wherever it is cut, and a turn resumed from a photo is the
+bytes of the same prompt computed cold ([Turn photos](mimo.md#turn-photos-agent-clients-that-drop-the-reasoning));
+the head still takes a prompt's last row alone, as before. For a short tail that can cost
+time or save it: the GPU's experts move every expert the rows route to over PCIe, where
+the CPU reads it in place, and the decode path takes the rows' attention on the CPU, which
+grows with the context (35 rows after 4318 tokens: 11.6 s on the prompt kernels against
+8.1 on the decode path; about 20 rows after 26,700: 7-10 s against 10-14). A live prefix's
+tail (a client that sent the reasoning back) is never the cold prompt's bytes and keeps its
+steps' kernels, as before. A decode step (one to three rows) keeps the CPU path
 ([Decode at long contexts](#decode-at-long-contexts)). Measured on
 the RTX 4090 machine, a 4310-token prompt: 413.9 s with the CPU's prompts, 68.6 s in r2
 ([the first round](experiments/mimo-gpu-prompt-4090-2026-10-20/README.md)), 47.1 s now;
@@ -197,6 +209,7 @@ sub-blocks of 110 and with the keys sent up in chunks.
 | `MIMO_PIPE` | 1 | The CPU's per-row work beside the device's sub-blocks; 0: one after the other |
 | `MIMO_CUDA_PIN` | 1 | A prompt block's rows in pinned memory |
 | `MIMO_CUDA_TILED_ROWS` | 64 | The fewest rows a matrix call needs for the tiled kernels |
+| `MIMO_PROMPT_KERNELS` | 1 | A prompt's rows (from nothing or from an exact photo) choose their kernels by the prompt's length, not their step's (a smaller matrix call goes up padded to the tiled kernels' rows); 0: by the step's rows, as a live prefix's tail and a read-out always do |
 | `MIMO_CUDA_PACKED_ROWS` | 64 | The fewest rows for an o_proj the GPU does not hold to go up for the call |
 | `MIMO_CUDA_SCRATCH_MB` | 192 | The scratch of a matrix call's piece |
 | `MIMO_CUDA_MOE_RCAP` | 1024 | Rows of an expert computed at once (tests set it low) |

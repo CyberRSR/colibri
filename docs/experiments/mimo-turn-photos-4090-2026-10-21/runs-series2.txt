@@ -1,0 +1,20 @@
+== 1 new drop
+{"name": "1 documents", "ttft_s": 96.93, "total_s": 124.22, "usage": {"prompt_tokens": 25054, "completion_tokens": 64, "total_tokens": 25118}, "finish": "length"}
+{"name": "2 tool result", "ttft_s": 34.41, "total_s": 60.42, "usage": {"prompt_tokens": 26701, "completion_tokens": 64, "total_tokens": 26765}, "finish": "length"}
+{"name": "3 follow-up", "ttft_s": 10.34, "total_s": 37.46, "usage": {"prompt_tokens": 26724, "completion_tokens": 64, "total_tokens": 26788}, "finish": "length"}
+{"name": "4 follow-up", "ttft_s": 7.1, "total_s": 34.33, "usage": {"prompt_tokens": 26741, "completion_tokens": 64, "total_tokens": 26805}, "finish": "length"}
+== 2 base drop
+{"name": "1 documents", "ttft_s": 96.32, "total_s": 123.6, "usage": {"prompt_tokens": 25054, "completion_tokens": 64, "total_tokens": 25118}, "finish": "length"}
+{"name": "2 tool result", "ttft_s": 100.23, "total_s": 126.18, "usage": {"prompt_tokens": 26701, "completion_tokens": 64, "total_tokens": 26765}, "finish": "length"}
+{"name": "3 follow-up", "ttft_s": 100.25, "total_s": 128.81, "usage": {"prompt_tokens": 26724, "completion_tokens": 64, "total_tokens": 26788}, "finish": "length"}
+{"name": "4 follow-up", "ttft_s": 99.9, "total_s": 127.12, "usage": {"prompt_tokens": 26741, "completion_tokens": 64, "total_tokens": 26805}, "finish": "length"}
+== 3 new keep
+{"name": "1 documents", "ttft_s": 94.77, "total_s": 121.67, "usage": {"prompt_tokens": 25054, "completion_tokens": 64, "total_tokens": 25118}, "finish": "length"}
+{"name": "2 tool result", "ttft_s": 34.44, "total_s": 59.58, "usage": {"prompt_tokens": 26765, "completion_tokens": 64, "total_tokens": 26829}, "finish": "length"}
+{"name": "3 follow-up", "ttft_s": 14.74, "total_s": 41.6, "usage": {"prompt_tokens": 26852, "completion_tokens": 64, "total_tokens": 26916}, "finish": "length"}
+{"name": "4 follow-up", "ttft_s": 10.85, "total_s": 36.57, "usage": {"prompt_tokens": 26933, "completion_tokens": 64, "total_tokens": 26997}, "finish": "length"}
+== 4 base keep
+{"name": "1 documents", "ttft_s": 94.24, "total_s": 121.23, "usage": {"prompt_tokens": 25054, "completion_tokens": 64, "total_tokens": 25118}, "finish": "length"}
+{"name": "2 tool result", "ttft_s": 34.3, "total_s": 59.41, "usage": {"prompt_tokens": 26765, "completion_tokens": 64, "total_tokens": 26829}, "finish": "length"}
+{"name": "3 follow-up", "ttft_s": 14.76, "total_s": 41.55, "usage": {"prompt_tokens": 26852, "completion_tokens": 64, "total_tokens": 26916}, "finish": "length"}
+{"name": "4 follow-up", "ttft_s": 10.79, "total_s": 36.49, "usage": {"prompt_tokens": 26933, "completion_tokens": 64, "total_tokens": 26997}, "finish": "length"}

@@ -63,6 +63,7 @@ and replies of up to **65,536 tokens**. [How it runs](docs/mimo-cuda.md).
 | first token of a 4310-token prompt | -- | 414 s (r1) -> 69 s (r2) -> **47 s** |
 | first token of a 24,957-token prompt (an agent's) | -- | about an hour (r1, by its parts) -> 245 s (r2) -> **92 s** |
 | a reply after that prompt, tok/s (128 tokens, greedy) | -- | 1.40 (r3) -> **2.32** |
+| the next agent turn at 26,700 tokens, a client that drops the reasoning: first token | -- | 97-100 s (r4) -> **7-34 s** |
 
 What changed, in order (benchmark tok/s after each step, each measured A/B in its
 own series on this machine, which drifts by about 3% from day to day):
@@ -87,6 +88,7 @@ own series on this machine, which drifts by about 3% from day to day):
 | a prompt's experts, attention, matrices and routers on the GPU, in one block as large as the card allows: a 4310-token prompt 413.9 -> 68.6 s, 24,957 tokens in 244.8 s | `2147c6b1` | 2.668 |
 | a prompt's attention kept on the GPU from the qkv to o_proj (flash attention), one tiled kernel for its matrices, experts read straight into staging, the CPU's row work beside the device: 24,957 tokens 247.7 -> 92.1 s, 4310 69.3 -> 47.1 s | `4b8bd1c8` | 2.621 |
 | a decode step's full attention by keys over every worker, eight exps a call, the same sums in the same order: 128 tokens after a 24,957-token prompt 90.7 -> 54.6 s, after 4310 tokens 48.5 -> 45.5 s | `8008234f` | 2.638 |
+| a photo of every turn's prompt, resumed by the next turn when the client sends the reply back without its reasoning, the same bytes as the conversation computed whole: an agent turn at 26,700 tokens 97-100 s -> 7-34 s | `0accfa07` | 2.669 |
 
 Where the time goes now: each token needs 8 of 384 experts in each of 69 layers,
 about 11 GB of weights read from RAM or the disks, so decoding is bound by memory
@@ -95,8 +97,11 @@ expert of every layer, so it runs on the GPU: its experts are read once per bloc
 computed there as they arrive, its attention stays on the device from the qkv to
 o_proj, and the CPU's per-row work runs beside it
 ([Prompts on the GPU](docs/mimo-cuda.md#prompts-on-the-gpu)). A 25,000-token agent
-prompt takes about a minute and a half the first time; later turns reuse the prefix and
-process only what is new. Before, on the CPU, the same prompt took about an hour; a
+prompt takes about a minute and a half the first time; later turns process only what is
+new, also when the client sends the model's replies back without their reasoning, as
+OpenAI-compatible agents do: each turn resumes from a photo of the turn before
+([Turn photos](docs/mimo.md#turn-photos-agent-clients-that-drop-the-reasoning)).
+Before, on the CPU, the same prompt took about an hour; a
 4310-token prompt is now bound by reading its experts from the drives. A decode step reads
 the whole conversation's attention caches from RAM (2.6 GB a step at 25,000 tokens), now
 over every worker and once a step: a reply after a 25,000-token prompt comes at 2.3 tokens a
@@ -128,7 +133,10 @@ API, совместимый с OpenAI и Anthropic: `http://127.0.0.1:18080/v1`,
 
 Декодирование упирается в пропускную способность памяти и дисков (около 11 ГБ весов
 экспертов на токен); следующие ходы агента переиспользуют префикс и обрабатывают
-только новые токены.
+только новые токены — теперь и тогда, когда клиент присылает ответы модели обратно без
+рассуждений (`reasoning_content`), как делают OpenAI-совместимые агенты: каждый ход
+продолжает «снимок» конца предыдущего промпта. Ход агента при контексте 26 700 токенов:
+97–100 с (r4) → **7–34 с**, ответы байт-в-байт те же, что при полном пересчёте.
 
 </details>
 
