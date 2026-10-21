@@ -1,0 +1,20 @@
+cpu: complete
+cuda: complete
+{
+  "passed": true,
+  "positions": 17,
+  "argmax_matches": 17,
+  "max_abs_logit_difference": 4.57763671875e-05,
+  "max_kl_cpu_to_cuda": 1.4709953778534417e-11,
+  "greedy_reply_equal": true
+}
+cpu: complete
+cuda: complete
+{
+  "passed": true,
+  "positions": 658,
+  "argmax_matches": 658,
+  "max_abs_logit_difference": 0.008439064025878906,
+  "max_kl_cpu_to_cuda": 8.571084839830486e-07,
+  "greedy_reply_equal": true
+}

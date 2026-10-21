@@ -1,0 +1,87 @@
+{"name": "t1", "prompt_tokens": 4318, "ttft_s": 47.709, "total_s": 59.772}
+  [PREFIX] no reuse, 0 of 4318 prompt tokens
+  [mimo] prompt blocks on the GPU: up to 32768 rows (1.93 GB free on the card)
+  [PIN] turn photo of 4318 tokens
+  [mimo] prompt 47.58s (stalled 0.40s, experts 40.71s, attention 4.17s, routers 0.88s, 26023 demand reads); generation 12.06s (stalled 2.63s, experts 6.34s, attention 1.62s, 1809 demand reads, 6714 prefetched)
+{"name": "t2-short", "prompt_tokens": 4353, "ttft_s": 11.635, "total_s": 19.848}
+  [PREFIX] reusing 4318 of 4353 prompt tokens (photo)
+  [PIN] resumed from the photo of 4318 tokens, 35 to prefill
+  [PIN] turn photo of 4353 tokens
+  [mimo] prompt 11.63s (stalled 0.02s, experts 11.06s, attention 0.40s, routers 0.07s, 5495 demand reads); generation 8.21s (stalled 1.61s, experts 4.23s, attention 1.15s, 1026 demand reads, 4652 prefetched)
+{"name": "other", "prompt_tokens": 14, "ttft_s": 3.927, "total_s": 5.037}
+  [PREFIX] no reuse, 0 of 14 prompt tokens
+  [PIN] no turn photo: the rows of this prompt are not those of it computed cold
+  [mimo] prompt 3.93s (stalled 1.45s, experts 2.02s, attention 0.35s, routers 0.03s, 2474 demand reads); generation 1.11s (stalled 0.24s, experts 0.58s, attention 0.11s, 114 demand reads, 643 prefetched)
+{"name": "t2-short-cold", "prompt_tokens": 4353, "ttft_s": 39.122, "total_s": 46.915}
+  [PIN] released the photo of 4318 tokens: the state no longer holds it
+  [PREFIX] no reuse, 0 of 4353 prompt tokens
+  [PIN] turn photo of 4353 tokens
+  [mimo] prompt 39.12s (stalled 0.01s, experts 32.52s, attention 4.26s, routers 0.88s, 20279 demand reads); generation 7.79s (stalled 1.30s, experts 4.14s, attention 1.13s, 913 demand reads, 4080 prefetched)
+{"name": "t1-again", "prompt_tokens": 4318, "ttft_s": 38.892, "total_s": 50.263}
+  [PREFIX] no reuse, 0 of 4318 prompt tokens
+  [PIN] turn photo of 4318 tokens
+  [mimo] prompt 38.89s (stalled 0.02s, experts 32.57s, attention 4.15s, routers 0.88s, 20339 demand reads); generation 11.37s (stalled 2.04s, experts 6.26s, attention 1.58s, 1572 demand reads, 5978 prefetched)
+{"name": "t2-long", "prompt_tokens": 6148, "ttft_s": 33.86, "total_s": 47.766}
+  [PREFIX] reusing 4318 of 6148 prompt tokens (photo)
+  [PIN] resumed from the photo of 4318 tokens, 1830 to prefill
+  [PIN] turn photo of 6148 tokens
+  [mimo] prompt 33.86s (stalled 0.01s, experts 30.41s, attention 2.42s, routers 0.42s, 19908 demand reads); generation 13.91s (stalled 2.65s, experts 7.21s, attention 2.28s, 1765 demand reads, 7199 prefetched)
+{"name": "other-2", "prompt_tokens": 14, "ttft_s": 4.655, "total_s": 5.663}
+  [PREFIX] no reuse, 0 of 14 prompt tokens
+  [PIN] no turn photo: the rows of this prompt are not those of it computed cold
+  [mimo] prompt 4.65s (stalled 2.05s, experts 2.13s, attention 0.36s, routers 0.03s, 3049 demand reads); generation 1.01s (stalled 0.14s, experts 0.58s, attention 0.11s, 116 demand reads, 557 prefetched)
+{"name": "t2-long-cold", "prompt_tokens": 6148, "ttft_s": 43.115, "total_s": 56.928}
+  [PIN] released the photo of 4318 tokens: the state no longer holds it
+  [PREFIX] no reuse, 0 of 6148 prompt tokens
+  [PIN] turn photo of 6148 tokens
+  [mimo] prompt 43.11s (stalled 0.02s, experts 33.95s, attention 5.85s, routers 1.27s, 20516 demand reads); generation 13.81s (stalled 2.55s, experts 7.20s, attention 2.29s, 1761 demand reads, 6966 prefetched)
+exact [
+ {
+  "turn": "t2-short",
+  "prompt_tokens": 4353,
+  "resumed": [
+   "[PIN] resumed from the photo of 4318 tokens, 35 to prefill"
+  ],
+  "prompt_s": 11.635,
+  "cold_prompt_s": 39.122,
+  "logits_same_bytes": true,
+  "logits_sha256": "792181ec12bb61a4cf17bc27eee3de5f708b60abcc94d3db76f14ec1b97663eb",
+  "reply_same_bytes": true,
+  "reply_sha256": "6315ba05a353044f9e9c77cf666f1bcd7de17051b97eb2666696e40162ae5e8e"
+ },
+ {
+  "turn": "t2-long",
+  "prompt_tokens": 6148,
+  "resumed": [
+   "[PIN] resumed from the photo of 4318 tokens, 1830 to prefill"
+  ],
+  "prompt_s": 33.86,
+  "cold_prompt_s": 43.115,
+  "logits_same_bytes": true,
+  "logits_sha256": "0fda4a8455d2697cc8e09c13a26a031efed99bf88c880e02fd54737e1f2f2bb5",
+  "reply_same_bytes": true,
+  "reply_sha256": "7b4d98057dc3d584cf2afb880dcf65fa6ba398a3cef6bd818bf66e98efc106ff"
+ }
+]
+{"name": "1 documents", "ttft_s": 94.39, "total_s": 121.37, "usage": {"prompt_tokens": 25054, "completion_tokens": 64, "total_tokens": 25118}, "finish": "length"}
+{"name": "2 tool result", "ttft_s": 34.57, "total_s": 60.46, "usage": {"prompt_tokens": 26701, "completion_tokens": 64, "total_tokens": 26765}, "finish": "length"}
+{"name": "3 follow-up", "ttft_s": 10.26, "total_s": 37.21, "usage": {"prompt_tokens": 26724, "completion_tokens": 64, "total_tokens": 26788}, "finish": "length"}
+{"name": "4 follow-up", "ttft_s": 7.07, "total_s": 34.12, "usage": {"prompt_tokens": 26741, "completion_tokens": 64, "total_tokens": 26805}, "finish": "length"}
+cuda: ready, warmup + 3 runs x 64 tokens
+run 0: 2.1514 tok/s overall, 2.9723 decode, TTFT 8.551s
+run 1: 2.6755 tok/s overall, 3.3244 decode, TTFT 4.970s
+run 2: 2.6593 tok/s overall, 3.3052 decode, TTFT 5.005s
+run 3: 2.6763 tok/s overall, 3.3267 decode, TTFT 4.976s
+median 2.6755 tok/s; release-build\benchmark\1-release
+cuda: ready, warmup + 3 runs x 64 tokens
+run 0: 2.0941 tok/s overall, 2.8634 decode, TTFT 8.559s
+run 1: 2.6670 tok/s overall, 3.3194 decode, TTFT 5.017s
+run 2: 2.6627 tok/s overall, 3.3191 decode, TTFT 5.055s
+run 3: 2.6669 tok/s overall, 3.3181 decode, TTFT 5.011s
+median 2.6669 tok/s; release-build\benchmark\2-measured
+cuda: ready, warmup + 3 runs x 64 tokens
+run 0: 2.0907 tok/s overall, 2.8578 decode, TTFT 8.567s
+run 1: 2.6640 tok/s overall, 3.3161 decode, TTFT 5.026s
+run 2: 2.6635 tok/s overall, 3.3131 decode, TTFT 5.013s
+run 3: 2.6619 tok/s overall, 3.3083 decode, TTFT 5.000s
+median 2.6635 tok/s; release-build\benchmark\3-release

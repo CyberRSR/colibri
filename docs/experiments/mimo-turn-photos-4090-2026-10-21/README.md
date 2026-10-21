@@ -133,15 +133,28 @@ the agents in use send them is not measured yet.
   Brio and System One gateway tests, the CUDA fallback tests and the sampled-draft tests
   pass.
 
+## The release's build (`release-build/`)
+
+Release `mimo-pro-4090-r5` was built from the merge into main (`f375866f`): its `mimo.exe`
+(4b098911) and `coli_cuda_mimo.dll` (16d2f342) are other bytes than the measured ones (main
+carries other engines' changes; the DLL is never the same bytes). Run the same way
+(`release-build/run_release.sh`), they gave the measured build's CPU and CUDA logits and
+replies on both correctness prompts byte for byte, the resumed turns' logits and replies
+(`792181ec...`, `0fda4a84...`; 11.6 against 39.1 s and 33.9 against 43.1 s), the agent
+loop dropping the reasoning in 94.4, 34.6, 10.3 and 7.1 s with every turn's hash the
+measured one's (`same-bytes.json`), and the decode benchmark at 2.676 and 2.664 tok/s, the
+measured build between them at 2.667, every reply `0305abcd...`. `make test-c` passes on the
+merge (without `CUDA_DLL=1`, in its own worktree).
+
 ## Files
 
 `summary.json` and `summary.txt` (every turn of both series: times, prompt tokens, how its
 prompt started, the hash of what it returned), `series1/`, `series2/` (each run's
 `turns.json`, the gateway's log with the engine's lines, the card's telemetry), `runs/`
 (the SERVE-pipe runs: `results.json`, the engine's log, `compare.json`, `logits.sha256`),
-`correctness/`, `benchmark/`, the scripts (`agent_loop.py`, `api_run.py`, `run_api.sh`,
-`summarize.py`, `turns.py`, `make_plans.py`, `compare.py`, `run_tail.sh`, `run_checks.sh`)
-and the plans, `sha256.json`.
+`correctness/`, `benchmark/`, `release-build/`, the scripts (`agent_loop.py`, `api_run.py`,
+`run_api.sh`, `summarize.py`, `turns.py`, `make_plans.py`, `compare.py`, `run_tail.sh`,
+`run_checks.sh`) and the plans, `sha256.json`.
 
 ## Reproduce
 
