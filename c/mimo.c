@@ -715,6 +715,61 @@ static size_t dw_bytes(const DW *d) {
 }
 #endif
 
+/* ---- a prompt's kernels ------------------------------------------------------------------
+ * With MIMO_CUDA a step's kernels depend on its rows: a step of 64 rows or more
+ * (MIMO_CUDA_TILED_ROWS, MIMO_CUDA_PACKED_ROWS, MIMO_CUDA_MOE_ROWS; 32 for the attention,
+ * MIMO_CUDA_ATTN_ROWS) runs its matrices, experts and attention on the GPU's prompt kernels,
+ * a smaller one the decode path (the matrices' decode kernels, the CPU's experts and
+ * attention): the same f32 quantities summed in other orders. A prompt's steps are its
+ * blocks and their attention pieces (MIMO_ATTN_ROWS), so a block's last piece could be a few
+ * rows on the decode path while the rest of it ran on the GPU; and a prompt resumed from a
+ * photo prefills only its tail, often a few dozen rows, where the prompt computed cold has a
+ * block of thousands. MIMO_PROMPT_KERNELS (1): while a prompt is prefilled from nothing or
+ * from an exact photo (mimo_serve_start), g_prompt_rows is its length, and each choice below
+ * is made for max(rows, g_prompt_rows): every row of a prompt takes the kernels its length
+ * gives, whichever piece it is in and wherever it was resumed, and each of those kernels
+ * computes a row by itself -- a prompt resumed from a photo is the bytes of the prompt
+ * computed cold. 0 the rest of the time: a decode step keeps its kernels, so do a read-out
+ * and a live prefix's tail, and the head takes a prompt's last row alone (head_cpu). */
+static int g_prompt_rows;
+static int kernel_rows(int n) { return n > g_prompt_rows ? n : g_prompt_rows; }
+/* MIMO_CUDA_TILED_ROWS as the DLL reads it: a call of that many rows takes the tiled kernels */
+static int cuda_tiled_rows(void) {
+    static int r = -1;
+    if (r < 0) r = env_int("MIMO_CUDA_TILED_ROWS", 64);
+    return r;
+}
+/* MIMO_CUDA_PACKED_ROWS (64): a packed bf16 matrix the device does not hold (an o_proj the
+ * GPU had no room for) goes up for a step of that many rows or more -- a prompt block --
+ * and is computed there; a decode step keeps reading it in RAM. 0: never. */
+static int cuda_packed_rows(void) {
+    static int r = -1;
+    if (r < 0) r = env_int("MIMO_CUDA_PACKED_ROWS", 64);
+    return r;
+}
+#ifdef COLI_MIMO_CUDA
+/* A matrix call on the device (packed: the host's packed bf16, sent up for it). With
+ * g_prompt_rows asking for the tiled kernels and fewer rows than they take, the rows go up
+ * padded with zeros to that many and only theirs come back. */
+static int cuda_rows(const DW *d, float *y, const float *x, int S, int packed) {
+    int R = cuda_tiled_rows();
+    if (R <= S || kernel_rows(S) < R) R = S;
+    float *xr = (float *)x, *yr = y;
+    if (R > S) {
+        xr = xcalloc((size_t)R * d->I, sizeof(float), "padded rows");
+        memcpy(xr, x, (size_t)S * d->I * sizeof(float));
+        yr = xmalloc((size_t)R * d->O * sizeof(float), "padded outputs");
+    }
+    int ok = packed ? mimo_cuda_matmul_packed(d->w, d->pk_bytes, d->I, d->O, yr, xr, R)
+                    : mimo_cuda_matmul(d->cuda, yr, xr, R);
+    if (R > S) {
+        if (ok) memcpy(y, yr, (size_t)S * d->O * sizeof(float));
+        free(xr); free(yr);
+    }
+    return ok;
+}
+#endif
+
 static void dw_matmul(float *y, const float *x, int S, const DW *d) {
 #ifdef COLI_MIMO_CUDA
     /* Vision may call dw_matmul inside an OpenMP region. The CUDA scratch is
@@ -727,15 +782,11 @@ static void dw_matmul(float *y, const float *x, int S, const DW *d) {
         if (g_mimo_cuda_fault && ++g_mimo_cuda_calls == g_mimo_cuda_fault) {
             fprintf(stderr, "[CUDA] mimo fault injection: returning to CPU at matmul %llu\n", g_mimo_cuda_calls);
             g_mimo_cuda = 0;
-        } else if (mimo_cuda_matmul(d->cuda, y, x, S)) return;
+        } else if (cuda_rows(d, y, x, S, 0)) return;
     }
-    /* MIMO_CUDA_PACKED_ROWS (64): a packed bf16 matrix the device does not hold (an o_proj the
-     * GPU had no room for) goes up for a step of that many rows or more -- a prompt block --
-     * and is computed there; a decode step keeps reading it in RAM. 0: never. */
-    static int packed_rows = -1;
-    if (packed_rows < 0) packed_rows = env_int("MIMO_CUDA_PACKED_ROWS", 64);
-    if (g_mimo_cuda && cuda_thread && !d->cuda && d->fmt == DW_BF16P && packed_rows > 0 && S >= packed_rows &&
-        mimo_cuda_matmul_packed(d->w, d->pk_bytes, d->I, d->O, y, x, S)) return;
+    int packed_rows = cuda_packed_rows();
+    if (g_mimo_cuda && cuda_thread && !d->cuda && d->fmt == DW_BF16P && packed_rows > 0 && kernel_rows(S) >= packed_rows &&
+        cuda_rows(d, y, x, S, 1)) return;
 #endif
 #ifdef COLI_VULKAN
     if (dw_matmul_vk(y, x, S, d)) return;
@@ -2519,19 +2570,22 @@ static void attention_rows(Model *m, int li, const float *xn, int n, float *out)
  * quantity summed in another order, as the CUDA matmuls are. Returns 0 when the device does
  * not take it, and the CPU computes it. */
 static int g_cuda_attn = -1, g_cuda_attn_rows;
-static int attention_gpu(Model *m, const Layer *l, int swa, const float *qkv, int rows, int n, int nh, int kvh,
-                         int hd, int vd, const float *const *Kr, const float *const *Vr, int lo, int nkeys,
-                         int p0, int window, float scale, float *ctxv) {
-#ifdef COLI_MIMO_CUDA
+static void cuda_attn_env(void) {
     if (g_cuda_attn < 0) {
         g_cuda_attn = env_int("MIMO_CUDA_ATTN", 1) != 0;
         g_cuda_attn_rows = env_int("MIMO_CUDA_ATTN_ROWS", 32);
     }
+}
+static int attention_gpu(Model *m, const Layer *l, int swa, const float *qkv, int rows, int n, int nh, int kvh,
+                         int hd, int vd, const float *const *Kr, const float *const *Vr, int lo, int nkeys,
+                         int p0, int window, float scale, float *ctxv) {
+#ifdef COLI_MIMO_CUDA
+    cuda_attn_env();
     int cuda_thread = 1;
 #ifdef _OPENMP
     cuda_thread = !omp_in_parallel();
 #endif
-    if (!g_mimo_cuda || !g_cuda_attn || !cuda_thread || n < g_cuda_attn_rows) return 0;
+    if (!g_mimo_cuda || !g_cuda_attn || !cuda_thread || kernel_rows(n) < g_cuda_attn_rows) return 0;
     size_t kd = (size_t)kvh * hd, vdd = (size_t)kvh * vd;
     const float *K = Kr[0], *V = Vr[0];   /* a full layer's: the cache's rows lo.., in order */
     float *kc = NULL, *vc = NULL;
@@ -2594,10 +2648,7 @@ static int attention_dev(Model *m, int li, const float *xn, int n, int p0, float
 static int attn_dev_prep(Model *m, int li, const float *xn, int n, int p0, float *out, AttnDev *d) {
     static int on = -1;
     if (on < 0) on = env_int("MIMO_CUDA_ATTN_DEV", 1) != 0;
-    if (g_cuda_attn < 0) {
-        g_cuda_attn = env_int("MIMO_CUDA_ATTN", 1) != 0;
-        g_cuda_attn_rows = env_int("MIMO_CUDA_ATTN_ROWS", 32);
-    }
+    cuda_attn_env();
     int cuda_thread = 1;
 #ifdef _OPENMP
     cuda_thread = !omp_in_parallel();
@@ -2605,7 +2656,7 @@ static int attn_dev_prep(Model *m, int li, const float *xn, int n, int p0, float
     Cfg *c = &m->c;
     Layer *l = &m->L[li];
     int k = c->swa[li], rd = c->rope_dim[k];
-    if (!on || !g_mimo_cuda || !g_cuda_attn || !cuda_thread || n < g_cuda_attn_rows || rd < 2 || !l->qkv.cuda ||
+    if (!on || !g_mimo_cuda || !g_cuda_attn || !cuda_thread || kernel_rows(n) < g_cuda_attn_rows || rd < 2 || !l->qkv.cuda ||
         (!l->o.cuda && !(l->o.fmt == DW_BF16P && l->o.w))) return 0;
     int nh = c->heads[k], kvh = c->kv_heads[k], hd = c->head_dim[k], vd = c->v_dim[k];
     size_t kd = (size_t)kvh * hd, vdd = (size_t)kvh * vd;
@@ -3137,7 +3188,7 @@ static float *moe_gpu(Model *m, int li, const float *xn, int rows_up, int n, con
 #ifdef _OPENMP
     cuda_thread = !omp_in_parallel();
 #endif
-    if (!cuda_moe_on() || !cuda_thread || n < g_cuda_moe_rows) return NULL;
+    if (!cuda_moe_on() || !cuda_thread || kernel_rows(n) < g_cuda_moe_rows) return NULL;
     int H = c->hidden, E = c->n_experts, K = c->topk, MI = c->moe_inter;
     /* the union in first-use order and each expert's (row, choice) pairs numbered as
      * moe_cpu numbers them: expert by expert in that order, rows ascending */
@@ -3383,7 +3434,7 @@ static void moe_experts(Model *m, int li, const float *xn, int n, MoeOut *mo) {
 #ifdef COLI_MIMO_CUDA
     static int cuda_router = -1;
     if (cuda_router < 0) cuda_router = env_int("MIMO_CUDA_ROUTER", 1) != 0;
-    if (cuda_moe_on() && n >= g_cuda_moe_rows && !omp_in_parallel()) {
+    if (cuda_moe_on() && kernel_rows(n) >= g_cuda_moe_rows && !omp_in_parallel()) {
         rows_up = mimo_cuda_moe_rows(xn, n, H);
         if (cuda_router)
             router_done = rows_up ? mimo_cuda_moe_router(l->router, E, logits)
@@ -3640,9 +3691,11 @@ static void layers_pipe(Model *m, float *hc, int nc, int pc, float *xn, float *t
 /* The final norm and lm_head on the CPU: every row of hc into lc (all_rows), or its last. */
 static void head_cpu(Model *m, const float *hc, int nc, float *lc, int all_rows, float *xn) {
     Cfg *c = &m->c;
-    int H = c->hidden, from = all_rows ? 0 : nc - 1, rows = nc - from;
+    int H = c->hidden, from = all_rows ? 0 : nc - 1, rows = nc - from, prompt = g_prompt_rows;
     for (int t = from; t < nc; t++) rmsnorm(xn + (size_t)(t - from) * H, hc + (size_t)t * H, m->norm, H, c->eps);
+    g_prompt_rows = 0;   /* the head's own rows, as in every prompt's last block */
     dw_matmul(lc, xn, rows, &m->head);
+    g_prompt_rows = prompt;
 }
 
 #ifdef COLI_VULKAN
@@ -3908,16 +3961,9 @@ static void echo_frame(const Echo *e, int pos, int token, const float *lo, int v
     fflush(stdout);
 }
 
-/* A prompt in blocks of MIMO_CHUNK rows (default 512): the last block's last
- * row (or every row, for the teacher-forcing dump) comes back in `logits`.
- * With `echo`, every row of every block goes through the head and is read out
- * as it comes; only one block of logits is ever held, not the prompt's. A block
- * computes each expert once for all of its rows that chose it, so a long prompt
- * in blocks of 64 read and streamed most of a layer's experts for every 64 rows:
- * 2260 tokens took 498 s in blocks of 64 and 213 s in blocks of 512 (the logits
- * are the same bytes whatever the blocks). */
-static void prefill(Model *m, const int *ids, int n, float *logits, float *all_logits,
-                    const ImageRows *img, const Echo *echo) {
+/* The rows of prefill()'s blocks for n rows (echo: a read-out, all_logits: the teacher-forcing
+ * dump; both hold a block's logits). */
+static int prefill_chunk(Model *m, int n, int echo, int all_logits) {
     const char *mc = getenv("MIMO_CHUNK");
     int chunk = mc && *mc ? atoi(mc) : 512;
     /* MIMO_CUDA_CHUNK (32768): with the GPU's prompt experts (MIMO_CUDA_MOE) a block reads each
@@ -3957,6 +4003,47 @@ static void prefill(Model *m, const int *ids, int n, float *logits, float *all_l
         int nb = (n + chunk - 1) / chunk;
         chunk = (n + nb - 1) / nb;
     }
+    return chunk;
+}
+/* Whether every step of a prefill of n rows -- its blocks and their attention pieces of
+ * MIMO_ATTN_ROWS -- has the rows for every one of the GPU's prompt kernels (need) */
+static int prefill_steps_ok(Model *m, int n, int echo, int need) {
+    int chunk = prefill_chunk(m, n, echo, 0), R = attn_rows_env();
+    int last = n - (n - 1) / chunk * chunk, size[2] = { n > chunk ? chunk : last, last };
+    for (int i = 0; i < 2; i++) {
+        int piece = size[i] > R ? R : size[i], rest = size[i] > R ? size[i] % R : 0;
+        if (piece < need || (rest && rest < need)) return 0;
+    }
+    return 1;
+}
+/* The rows from which a step takes every one of the GPU's prompt kernels (g_prompt_rows):
+ * 0 when no kernel depends on a step's rows -- the CPU's compute a row the same bytes in any
+ * block, and so does each of the GPU's. */
+static int prompt_rows_need(void) {
+#ifdef COLI_MIMO_CUDA
+    if (!g_mimo_cuda) return 0;
+    cuda_attn_env();
+    int r = g_cuda_attn ? g_cuda_attn_rows : 0, t = cuda_tiled_rows(), p = cuda_packed_rows();
+    if (t > r) r = t;
+    if (p > r) r = p;
+    if (cuda_moe_on() && g_cuda_moe_rows > r) r = g_cuda_moe_rows;
+    return r;
+#else
+    return 0;
+#endif
+}
+
+/* A prompt in blocks of MIMO_CHUNK rows (default 512): the last block's last
+ * row (or every row, for the teacher-forcing dump) comes back in `logits`.
+ * With `echo`, every row of every block goes through the head and is read out
+ * as it comes; only one block of logits is ever held, not the prompt's. A block
+ * computes each expert once for all of its rows that chose it, so a long prompt
+ * in blocks of 64 read and streamed most of a layer's experts for every 64 rows:
+ * 2260 tokens took 498 s in blocks of 64 and 213 s in blocks of 512 (the logits
+ * are the same bytes whatever the blocks). */
+static void prefill(Model *m, const int *ids, int n, float *logits, float *all_logits,
+                    const ImageRows *img, const Echo *echo) {
+    int chunk = prefill_chunk(m, n, echo != NULL, all_logits != NULL);
     int used = 0, V = m->c.vocab;
     float *rows = NULL;
     if (echo && !all_logits) {
@@ -4440,21 +4527,63 @@ static int sample_draft(const float *logits, int vocab, float temperature, float
  * Nothing else carries over: the sinks are weights, the router has no state,
  * and the expert cache changes the time, never the numbers. On Flash the rings
  * of the 39 windowed layers are 128 x 8 x (192 + 128) floats each, about 50 MB
- * a photo, so COLI_PIN_SLOTS (default 4) is what bounds the memory. */
+ * a photo, so COLI_PIN_SLOTS (default 4) is what bounds the memory.
+ *
+ * TURN PHOTOS. A chat client resends the conversation every turn, and the state
+ * the last turn left is a prefix of it only if the client sends back exactly what
+ * the model wrote. Agent clients send the assistant's turn back without its
+ * reasoning, which the template then renders as <think></think>: the new prompt
+ * leaves that state right after the last prompt's <think> cue, kv_prefix_reuse()
+ * finds no prefix, and every turn computed the whole conversation again (Pro on
+ * the RTX 4090 machine: 30 s for an 811-token conversation, about 90 at 25,000
+ * tokens). So every prompt that generates also takes a photo of its end, into a
+ * pool of its own (MIMO_TURN_PHOTOS): System One keeps its COLI_PIN_SLOTS, and a
+ * read-out (logprobs=k) neither takes a turn photo nor resumes from one. The next
+ * turn resumes from it and prefills what follows: the reply as the client sends
+ * it back and the new messages.
+ *
+ * A turn photo stands for its prompt computed cold, to the bit. It is taken only
+ * when the prompt's rows are those bytes ("exact"), and a tail resumed from an
+ * exact photo takes the kernels the prompt computed cold gives its rows
+ * (g_prompt_rows). The rows that are not: the ones a decode step computed (a
+ * live prefix's reply), and with MIMO_CUDA the ones of a block too small for the
+ * GPU's prompt kernels, which a longer prompt's blocks would give them. On the
+ * CPU every row is exact: its kernels compute a row the same bytes in any block.
+ *
+ * MIMO_MTP: a photo also holds the trunk's last hidden rows (g_mtp.keep), so that
+ * mtp_warm fills the MTP blocks' windows from the positions it fills them from
+ * after the prompt computed cold, and the drafts come out the same. The blocks'
+ * own windows hold rows of whatever ran after the photo; putting a photo back
+ * empties them, as model_reset does, and mtp_warm fills them again. */
 typedef struct {
     int n_layers;
     int rows[MIMO_MAX_LAYERS];               /* 0: a full-attention layer */
     size_t kd[MIMO_MAX_LAYERS], vd[MIMO_MAX_LAYERS];
     float *K[MIMO_MAX_LAYERS], *V[MIMO_MAX_LAYERS];
     int *ring_pos[MIMO_MAX_LAYERS];
+    float *hid;                              /* MIMO_MTP: g_mtp.keep, or NULL */
+    int hid_lo;                              /* the first position whose hidden row it holds */
+    int exact;                               /* its rows are the bytes of its prompt computed cold */
 } PinState;
 
-static ColiPinPool g_pins;
+static ColiPinPool g_pins, g_turns;
+
+/* MIMO_TURN_PHOTOS (2): the turn photos kept, the least recently used replaced; each is
+ * the size of a System One photo (Pro's 60 windowed layers: about 80 MB). 0: none. */
+static int turn_photos(Model *m) {
+    if (!g_turns.vocab) {
+        int n = env_int("MIMO_TURN_PHOTOS", 2);
+        g_turns.n = n < 0 ? 0 : n > COLI_PIN_SLOTS_MAX ? COLI_PIN_SLOTS_MAX : n;
+        g_turns.vocab = m->c.vocab;
+    }
+    return g_turns.n;
+}
 
 static void pin_state_free(void *v) {
     PinState *st = (PinState *)v;
     if (!st) return;
     for (int li = 0; li < st->n_layers; li++) { free(st->K[li]); free(st->V[li]); free(st->ring_pos[li]); }
+    free(st->hid);
     free(st);
 }
 
@@ -4486,6 +4615,11 @@ static PinState *pin_state_save(Model *m, PinState *st) {
         memcpy(st->V[li], l->V, st->vd[li] * sizeof(float));
         memcpy(st->ring_pos[li], l->ring_pos, (size_t)l->rows * sizeof(int));
     }
+    if (g_mtp.on) {   /* the hidden rows are a help to the drafts, not part of the state */
+        size_t hb = (size_t)g_mtp.keep_rows * c->hidden * sizeof(float);
+        if (!st->hid) st->hid = malloc(hb);
+        if (st->hid) memcpy(st->hid, g_mtp.keep, hb);
+    }
     return st;
 }
 
@@ -4501,52 +4635,63 @@ static int pin_state_load(Model *m, const PinState *st) {
         memcpy(l->V, st->V[li], st->vd[li] * sizeof(float));
         memcpy(l->ring_pos, st->ring_pos[li], (size_t)l->rows * sizeof(int));
     }
+    if (st->hid && g_mtp.on) memcpy(g_mtp.keep, st->hid, (size_t)g_mtp.keep_rows * c->hidden * sizeof(float));
 #ifdef COLI_VULKAN
     mc_rings_rewritten(m);   /* the dense chain's copies of the rings go up again */
 #endif
     return 1;
 }
 
-/* Only a request that asks for it takes a photo, and it goes into the pool,
- * where no other request writes: an ordinary prompt can make a photo stale
- * (it rewrites the rows the photo stands on), never replace it. */
-static void pin_save(Model *m, const int *ids, int n, const float *logits) {
-    coli_pin_pool_init(&g_pins, m->c.vocab);
-    ColiPin *k = coli_pin_store(&g_pins, ids, n, logits);
+/* A request that asks for it (pin=1) takes a photo into g_pins, where no other
+ * request writes: an ordinary prompt can make a photo stale (it rewrites the
+ * rows the photo stands on), never replace it. Turn photos go to g_turns.
+ * hid_lo: the first position whose hidden row g_mtp.keep holds for this prompt. */
+static void pin_save(Model *m, ColiPinPool *pool, const int *ids, int n, const float *logits, int hid_lo, int exact) {
+    if (pool == &g_pins) coli_pin_pool_init(&g_pins, m->c.vocab);
+    ColiPin *k = coli_pin_store(pool, ids, n, logits);
     if (!k) return;
     PinState *st = pin_state_save(m, (PinState *)k->state);
     if (!st) { k->state = NULL; k->len = 0; return; }   /* without its rings it would lie */
+    st->hid_lo = hid_lo;
+    st->exact = exact;
     k->state = st;
-    fprintf(stderr, "[PIN] photo of %d tokens\n", n);
+    fprintf(stderr, pool == &g_turns ? "[PIN] turn photo of %d tokens\n" : "[PIN] photo of %d tokens\n", n);
     fflush(stderr);
 }
 
 /* The deepest photo that is a strict prefix of this prompt and whose rows the
- * state still holds, put back: the rings, the position and the record. Returns
- * its length and its logits (the predictor of the first fresh token), or 0.
+ * state still holds, put back: the rings, the hidden rows, the position and the
+ * record; with `turns` the turn photos are candidates too. Returns its length,
+ * its logits (the predictor of the first fresh token) and the photo, or 0.
  * A photo whose rows are gone cannot help any more: it is released, memory and
  * all, and the next deepest is tried instead of giving up. */
-static int pin_restore(Model *m, const int *ids, int n, const float **logit) {
+static int pin_restore(Model *m, const int *ids, int n, int turns, const float **logit, const PinState **photo) {
+    Cfg *c = &m->c;
     *logit = NULL;
-    int s = coli_pin_best(&g_pins, ids, n);
-    while (s >= 0) {
-        ColiPin *k = &g_pins.slot[s];
+    *photo = NULL;
+    for (;;) {
+        ColiPinPool *pool = &g_pins;
+        int s = coli_pin_best(&g_pins, ids, n), t = turns ? coli_pin_best(&g_turns, ids, n) : -1;
+        if (t >= 0 && (s < 0 || g_turns.slot[t].len > g_pins.slot[s].len)) { pool = &g_turns; s = t; }
+        if (s < 0) return 0;
+        ColiPin *k = &pool->slot[s];
         if (k->logit && kv_prefix_holds(&m->kvp, k->ids, k->len) &&
             pin_state_load(m, (const PinState *)k->state)) {
             m->pos = k->len;
             kv_prefix_clear(&m->kvp);
             kv_prefix_record(&m->kvp, k->ids, 0, k->len);
+            for (int li = c->n_layers; li < c->n_layers + g_mtp.n; li++)   /* the MTP blocks' windows */
+                for (int r = 0; r < m->L[li].rows; r++) m->L[li].ring_pos[r] = -1;
             *logit = k->logit;
-            coli_pin_touch(&g_pins, s);
+            *photo = (const PinState *)k->state;
+            coli_pin_touch(pool, s);
             return k->len;
         }
         fprintf(stderr, "[PIN] released the photo of %d tokens: the state no longer holds it\n", k->len);
         k->len = 0;
         pin_state_free(k->state);
         k->state = NULL;
-        s = coli_pin_best(&g_pins, ids, n);
     }
-    return 0;
 }
 
 /* ------------------------------------------------------------------ serve ---- */
@@ -4704,6 +4849,7 @@ typedef struct {
     uint64_t mtps0, mtpd0[MIMO_MTP_MAX], mtpk0[MIMO_MTP_MAX];   /* MTP steps, each block's drafts tried and kept */
     double mtpt0;                                                /* and the drafting time */
     int n_prompt, budget, reuse;
+    int warm;   /* the first position whose trunk hidden row g_mtp.keep holds for this prompt (mtp_warm) */
 } MimoReq;
 
 /* The streaming's share of a request, on stderr: demand reads (the stalls PROF
@@ -4810,7 +4956,8 @@ static int mimo_serve_start(Model *m, Tok *tokenizer, ColiServeCommand *cmd, int
     /* Where this prompt starts. A chat client resends the whole transcript:
      * if this prompt begins with the ids the state was built from, only the
      * tail is fed (COLI_KV_PREFIX=0 turns that off). A photo (SUBMIT pin=1
-     * earlier) resumes a prompt that begins with it.
+     * earlier, or a turn's: TURN PHOTOS above) resumes a prompt that begins
+     * with it.
      *
      * With the read-out on (logprobs=k) only a photo will do. The read-out
      * owes a frame to every position it does not inherit a predictor for,
@@ -4822,15 +4969,33 @@ static int mimo_serve_start(Model *m, Tok *tokenizer, ColiServeCommand *cmd, int
      * that would leave the first option token without its predictor.
      *
      * An image refuses both: the pad ids do not describe the picture. */
-    int prefix_on = env_int("COLI_KV_PREFIX", 1) != 0;
-    int reuse = 0;
+    int prefix_on = env_int("COLI_KV_PREFIX", 1) != 0, readout = cmd->logprobs > 0;
+    int reuse = 0, live = 0;
     const float *pin_logit = NULL;
+    const PinState *photo = NULL;
     if (!(*pending)) {
-        if (cmd->logprobs > 0) reuse = pin_restore(m, ids, n_prompt, &pin_logit);
+        if (readout) reuse = pin_restore(m, ids, n_prompt, 0, &pin_logit, &photo);
         else {
-            reuse = prefix_on ? kv_prefix_reuse(&m->kvp, ids, n_prompt) : 0;
-            if (!reuse) reuse = pin_restore(m, ids, n_prompt, &pin_logit);
+            reuse = live = prefix_on ? kv_prefix_reuse(&m->kvp, ids, n_prompt) : 0;
+            if (!reuse) reuse = pin_restore(m, ids, n_prompt, prefix_on, &pin_logit, &photo);
         }
+    }
+    /* Whether this prompt's rows will be the bytes a longer prompt computed cold gives them
+     * (exact, TURN PHOTOS above). With MIMO_PROMPT_KERNELS a prompt that starts from nothing or
+     * from an exact photo takes the kernels of its length (g_prompt_rows): exact when it is long
+     * enough for every GPU prompt kernel. A tail on a live prefix keeps its steps' own kernels,
+     * as before: the reply before it came from decode steps, so it is not exact whatever it
+     * takes. (Which is faster for a few rows depends on the context: the prompt kernels move
+     * every expert the rows route to over PCIe, the decode path takes their attention on the
+     * CPU. A 35-row tail after 4318 tokens: 11.6 s on the prompt kernels, 8.1 on the decode
+     * path; tails of about 20 rows after 26,700: 7-10 s against 10-14.) So do a read-out and
+     * MIMO_PROMPT_KERNELS=0: exact when each of its steps is long enough. */
+    int need = prompt_rows_need(), exact = 1, whole = 0;
+    if (need) {
+        whole = !readout && !live && (!reuse || photo->exact) && env_int("MIMO_PROMPT_KERNELS", 1) != 0;
+        if (live) exact = 0;
+        else if (whole) exact = n_prompt >= need;
+        else exact = (!reuse || photo->exact) && prefill_steps_ok(m, n_prompt - reuse, readout, need);
     }
     if (getenv("COLI_PREFIX_LOG"))
         fprintf(stderr, "[PREFIX] %s %d of %d prompt tokens%s\n", reuse ? "reusing" : "no reuse,", reuse,
@@ -4847,18 +5012,39 @@ static int mimo_serve_start(Model *m, Tok *tokenizer, ColiServeCommand *cmd, int
     }
     ImageRows img = { image, image_rows };
     Echo echo = { cmd->id, cmd->logprobs, tokenizer, pin_logit };
+    if (whole) g_prompt_rows = n_prompt;   /* the prompt's rows only, not the tower's */
     prefill(m, ids + reuse, n_prompt - reuse, logits, NULL, image ? &img : NULL,
-            cmd->logprobs > 0 ? &echo : NULL);
+            readout ? &echo : NULL);
+    g_prompt_rows = 0;
     if (image) kv_prefix_taint(&m->kvp);
+    /* MIMO_PROMPT_LOGITS=<file>: every prompt's last logits appended to it (f32, the vocabulary's
+     * width), to compare a resumed prompt with the same prompt computed cold */
+    static FILE *plog;
+    static int plog_tried;
+    if (!plog_tried++) {
+        const char *pl = getenv("MIMO_PROMPT_LOGITS");
+        if (pl && *pl && !(plog = fopen(pl, "ab"))) { fprintf(stderr, "[mimo] cannot write %s\n", pl); exit(1); }
+    }
+    if (plog) { fwrite(logits, sizeof(float), (size_t)c->vocab, plog); fflush(plog); }
+    /* the first position whose trunk hidden row g_mtp.keep holds for this prompt: from a
+     * photo, the photo's; after a live prefix, the tail's, as mtp_warm always took them */
+    int warm = !reuse ? 0 : photo && photo->hid ? photo->hid_lo : reuse;
     if (cmd->pin) {
         /* a photo is described by its ids, and these do not describe the picture */
         if (image) fprintf(stderr, "[PIN] no photo: the prompt carries a picture\n");
-        else pin_save(m, ids, n_prompt, logits);
+        else pin_save(m, &g_pins, ids, n_prompt, logits, warm, exact);
+    } else if (prefix_on && !image && !readout && turn_photos(m)) {
+        /* MIMO_PROMPT_KERNELS=0 gave up the bytes of the cold prompt for the speed of a short
+         * tail: it takes every turn's photo, and resumes from it */
+        if (exact || env_int("MIMO_PROMPT_KERNELS", 1) == 0) pin_save(m, &g_turns, ids, n_prompt, logits, warm, exact);
+        else if (getenv("COLI_PREFIX_LOG"))
+            fprintf(stderr, "[PIN] no turn photo: the rows of this prompt are not those of it computed cold\n");
     }
     free(image);
     rq->started = started; rq->disk0 = disk0; rq->expert0 = expert0; rq->attn0 = attn0; rq->route0 = route0;
     rq->hits0 = hits0; rq->miss0 = miss0; rq->fw0 = fw0; rq->n_prompt = n_prompt; rq->budget = budget;
     rq->reuse = reuse;
+    rq->warm = warm;
     rq->prefilled = now_s(); rq->pdisk = m->t_disk; rq->pexpert = m->t_expert; rq->pattn = m->t_attn; rq->proute = m->t_route;
     rq->pmiss = m->miss; rq->ppfi = m->pf_issued;
     return 1;
@@ -5113,7 +5299,7 @@ static void serve_loop(Model *m, Tok *tokenizer, const char *dir) {
             if (!spec) prefill(m, &token, 1, logits, NULL, NULL, NULL);
             else if (!done) {
                 int most = budget - emitted - 1;   /* the drafts whose tokens could still go out */
-                if (most > 0 && !warm++) mtp_warm(m, ids, rq.reuse, n_prompt);   /* after the first token is out */
+                if (most > 0 && !warm++) mtp_warm(m, ids, rq.warm, n_prompt);   /* after the first token is out */
                 qn = mtp_step(m, token, most, logits, rows, command.temperature, command.top_p, queue, &computed);
                 qi = 0;
             }
@@ -5503,7 +5689,9 @@ int main(int argc, char **argv) {
     }
     ImageRows img = { image, image_rows };
     double tp = now_s();
+    if (!dump && env_int("MIMO_PROMPT_KERNELS", 1) != 0 && prompt_rows_need()) g_prompt_rows = n;   /* as served */
     prefill(m, ids, n, logits, all, image ? &img : NULL, NULL);
+    g_prompt_rows = 0;
     double prefill_s = now_s() - tp;
     if (dump) {
         FILE *f = fopen(dump, "wb");
