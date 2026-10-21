@@ -1,0 +1,44 @@
+cpu: complete
+cuda: complete
+{
+  "passed": true,
+  "positions": 17,
+  "argmax_matches": 17,
+  "max_abs_logit_difference": 4.57763671875e-05,
+  "max_kl_cpu_to_cuda": 1.4709953778534417e-11,
+  "greedy_reply_equal": true
+}
+cpu: complete
+cuda: complete
+{
+  "passed": true,
+  "positions": 658,
+  "argmax_matches": 658,
+  "max_abs_logit_difference": 0.008439064025878906,
+  "max_kl_cpu_to_cuda": 8.571084839830486e-07,
+  "greedy_reply_equal": true
+}
+cuda: ready, warmup + 3 runs x 64 tokens
+run 0: 2.1243 tok/s overall, 2.9213 decode, TTFT 8.562s
+run 1: 2.6719 tok/s overall, 3.3205 decode, TTFT 4.980s
+run 2: 2.6665 tok/s overall, 3.3116 decode, TTFT 4.978s
+run 3: 2.6669 tok/s overall, 3.3231 decode, TTFT 5.040s
+median 2.6669 tok/s; benchmark\1-base
+cuda: ready, warmup + 3 runs x 64 tokens
+run 0: 2.1165 tok/s overall, 2.9032 decode, TTFT 8.539s
+run 1: 2.6705 tok/s overall, 3.3243 decode, TTFT 5.014s
+run 2: 2.6716 tok/s overall, 3.3190 decode, TTFT 4.974s
+run 3: 2.6676 tok/s overall, 3.3215 decode, TTFT 5.025s
+median 2.6705 tok/s; benchmark\2-new
+cuda: ready, warmup + 3 runs x 64 tokens
+run 0: 2.0824 tok/s overall, 2.8417 decode, TTFT 8.563s
+run 1: 2.6677 tok/s overall, 3.3214 decode, TTFT 5.023s
+run 2: 2.6667 tok/s overall, 3.3256 decode, TTFT 5.056s
+run 3: 2.6553 tok/s overall, 3.3049 decode, TTFT 5.041s
+median 2.6667 tok/s; benchmark\3-base
+cuda: ready, warmup + 3 runs x 64 tokens
+run 0: 2.0964 tok/s overall, 2.8730 decode, TTFT 8.599s
+run 1: 2.6693 tok/s overall, 3.3228 decode, TTFT 5.016s
+run 2: 2.6649 tok/s overall, 3.3156 decode, TTFT 5.015s
+run 3: 2.6700 tok/s overall, 3.3191 decode, TTFT 4.989s
+median 2.6693 tok/s; benchmark\4-new

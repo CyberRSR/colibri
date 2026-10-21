@@ -1,0 +1,472 @@
+[
+ {
+  "series": "series1",
+  "run": "1-base-drop",
+  "turn": "1 documents",
+  "ttft_s": 94.04,
+  "total_s": 121.03,
+  "prompt_tokens": 25054,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] no reuse, 0 of 25054 prompt tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 94.01s (stalled 0.38s, experts 55.18s, attention 27.52s, routers 4.54s, 26444 demand reads); generation 26.99s (stalled 5.26s, experts 12.85s, attention 6.43s, 3380 demand reads, 12573 prefetched)",
+  "returned_sha256": "44c375561a84d9923ddefdd84358a49350414435b22bc11afa033f40024b2cc6"
+ },
+ {
+  "series": "series1",
+  "run": "1-base-drop",
+  "turn": "2 tool result",
+  "ttft_s": 97.52,
+  "total_s": 123.31,
+  "prompt_tokens": 26701,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] no reuse, 0 of 26701 prompt tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 97.44s (stalled 0.02s, experts 55.48s, attention 29.89s, routers 4.75s, 20653 demand reads); generation 25.79s (stalled 5.04s, experts 12.49s, attention 6.00s, 3292 demand reads, 12649 prefetched)",
+  "returned_sha256": "f23d2b1b00ea675ee6f661cb4fb6201bb6576d8f82309184e97cc18aa05dc66c"
+ },
+ {
+  "series": "series1",
+  "run": "1-base-drop",
+  "turn": "3 follow-up",
+  "ttft_s": 97.2,
+  "total_s": 125.56,
+  "prompt_tokens": 26724,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] no reuse, 0 of 26724 prompt tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 97.12s (stalled 0.04s, experts 55.39s, attention 29.94s, routers 4.75s, 20733 demand reads); generation 28.35s (stalled 5.25s, experts 13.33s, attention 7.12s, 3094 demand reads, 12415 prefetched)",
+  "returned_sha256": "a0cfa9b2215a754945ae486ea601781509cfa1429f569cc49f5abeeef16e0e80"
+ },
+ {
+  "series": "series1",
+  "run": "1-base-drop",
+  "turn": "4 follow-up",
+  "ttft_s": 97.66,
+  "total_s": 124.91,
+  "prompt_tokens": 26741,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] no reuse, 0 of 26741 prompt tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 97.59s (stalled 0.03s, experts 55.94s, attention 29.96s, routers 4.69s, 20766 demand reads); generation 27.25s (stalled 4.95s, experts 13.17s, attention 6.62s, 3391 demand reads, 12751 prefetched)",
+  "returned_sha256": "514b6fd9ecb79257a5670d1df9f889defdf10eed71dc931b925fa1a88963b65f"
+ },
+ {
+  "series": "series1",
+  "run": "2-new-drop",
+  "turn": "1 documents",
+  "ttft_s": 94.27,
+  "total_s": 121.21,
+  "prompt_tokens": 25054,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] no reuse, 0 of 25054 prompt tokens",
+   "[PIN] turn photo of 25054 tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 94.23s (stalled 0.37s, experts 54.94s, attention 27.92s, routers 4.58s, 26444 demand reads); generation 26.94s (stalled 5.25s, experts 12.81s, attention 6.42s, 3398 demand reads, 12602 prefetched)",
+  "returned_sha256": "44c375561a84d9923ddefdd84358a49350414435b22bc11afa033f40024b2cc6"
+ },
+ {
+  "series": "series1",
+  "run": "2-new-drop",
+  "turn": "2 tool result",
+  "ttft_s": 34.48,
+  "total_s": 60.25,
+  "prompt_tokens": 26701,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] reusing 25054 of 26701 prompt tokens (photo)",
+   "[PIN] resumed from the photo of 25054 tokens, 1647 to prefill",
+   "[PIN] turn photo of 26701 tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 34.40s (stalled 0.02s, experts 30.36s, attention 3.18s, routers 0.36s, 19730 demand reads); generation 25.78s (stalled 4.99s, experts 12.47s, attention 6.00s, 3272 demand reads, 12640 prefetched)",
+  "returned_sha256": "f23d2b1b00ea675ee6f661cb4fb6201bb6576d8f82309184e97cc18aa05dc66c"
+ },
+ {
+  "series": "series1",
+  "run": "2-new-drop",
+  "turn": "3 follow-up",
+  "ttft_s": 10.29,
+  "total_s": 36.95,
+  "prompt_tokens": 26724,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] reusing 26701 of 26724 prompt tokens (photo)",
+   "[PIN] resumed from the photo of 26701 tokens, 23 to prefill",
+   "[PIN] turn photo of 26724 tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 10.21s (stalled 0.01s, experts 9.51s, attention 0.55s, routers 0.06s, 4831 demand reads); generation 26.67s (stalled 3.85s, experts 13.09s, attention 7.13s, 2701 demand reads, 10605 prefetched)",
+  "returned_sha256": "a0cfa9b2215a754945ae486ea601781509cfa1429f569cc49f5abeeef16e0e80"
+ },
+ {
+  "series": "series1",
+  "run": "2-new-drop",
+  "turn": "4 follow-up",
+  "ttft_s": 7.15,
+  "total_s": 34.27,
+  "prompt_tokens": 26741,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] reusing 26724 of 26741 prompt tokens (photo)",
+   "[PIN] resumed from the photo of 26724 tokens, 17 to prefill",
+   "[PIN] turn photo of 26741 tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 7.07s (stalled 0.00s, experts 6.40s, attention 0.54s, routers 0.06s, 2822 demand reads); generation 27.12s (stalled 4.92s, experts 13.11s, attention 6.63s, 3287 demand reads, 12412 prefetched)",
+  "returned_sha256": "514b6fd9ecb79257a5670d1df9f889defdf10eed71dc931b925fa1a88963b65f"
+ },
+ {
+  "series": "series1",
+  "run": "3-base-keep",
+  "turn": "1 documents",
+  "ttft_s": 93.83,
+  "total_s": 120.83,
+  "prompt_tokens": 25054,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] no reuse, 0 of 25054 prompt tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 93.80s (stalled 0.38s, experts 54.93s, attention 27.54s, routers 4.52s, 26444 demand reads); generation 27.00s (stalled 5.31s, experts 12.81s, attention 6.43s, 3376 demand reads, 12537 prefetched)",
+  "returned_sha256": "44c375561a84d9923ddefdd84358a49350414435b22bc11afa033f40024b2cc6"
+ },
+ {
+  "series": "series1",
+  "run": "3-base-keep",
+  "turn": "2 tool result",
+  "ttft_s": 34.53,
+  "total_s": 60.27,
+  "prompt_tokens": 26765,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] reusing 25117 of 26765 prompt tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 34.45s (stalled 0.02s, experts 30.43s, attention 3.17s, routers 0.35s, 19692 demand reads); generation 25.74s (stalled 4.41s, experts 12.52s, attention 6.56s, 3138 demand reads, 11927 prefetched)",
+  "returned_sha256": "5f0f06534988c0104db6c1f4efc5d2e8abba9c97423cb7e5b5df0c88e0ef1cfe"
+ },
+ {
+  "series": "series1",
+  "run": "3-base-keep",
+  "turn": "3 follow-up",
+  "ttft_s": 13.8,
+  "total_s": 40.92,
+  "prompt_tokens": 26852,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] reusing 26828 of 26852 prompt tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 13.73s (stalled 3.29s, experts 3.25s, attention 7.06s, routers 0.02s, 4803 demand reads); generation 27.12s (stalled 4.47s, experts 13.26s, attention 7.16s, 3018 demand reads, 11987 prefetched)",
+  "returned_sha256": "ecef578e6e4d1e409ebf2d5dc59e4da8256aa5fc85df2e88830676e86057363f"
+ },
+ {
+  "series": "series1",
+  "run": "3-base-keep",
+  "turn": "4 follow-up",
+  "ttft_s": 10.08,
+  "total_s": 36.16,
+  "prompt_tokens": 26933,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] reusing 26915 of 26933 prompt tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 10.00s (stalled 1.87s, experts 2.36s, attention 5.67s, routers 0.02s, 3031 demand reads); generation 26.08s (stalled 4.28s, experts 12.97s, attention 6.75s, 3047 demand reads, 12285 prefetched)",
+  "returned_sha256": "9c4760857998f7d9a8112cbfc2b1063f23c344657b1642af821b92a0fcd7d0e9"
+ },
+ {
+  "series": "series1",
+  "run": "4-new-keep",
+  "turn": "1 documents",
+  "ttft_s": 96.19,
+  "total_s": 123.8,
+  "prompt_tokens": 25054,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] no reuse, 0 of 25054 prompt tokens",
+   "[PIN] turn photo of 25054 tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 96.14s (stalled 0.38s, experts 55.70s, attention 28.98s, routers 4.59s, 26444 demand reads); generation 27.61s (stalled 5.42s, experts 12.96s, attention 6.71s, 3387 demand reads, 12554 prefetched)",
+  "returned_sha256": "44c375561a84d9923ddefdd84358a49350414435b22bc11afa033f40024b2cc6"
+ },
+ {
+  "series": "series1",
+  "run": "4-new-keep",
+  "turn": "2 tool result",
+  "ttft_s": 34.53,
+  "total_s": 59.74,
+  "prompt_tokens": 26765,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] reusing 25117 of 26765 prompt tokens",
+   "[PIN] no turn photo: the rows of this prompt are not those of it computed cold"
+  ],
+  "engine_prompt": "[mimo] prompt 34.46s (stalled 0.01s, experts 30.28s, attention 3.25s, routers 0.37s, 19694 demand reads); generation 25.21s (stalled 3.61s, experts 12.74s, attention 6.36s, 3153 demand reads, 11914 prefetched)",
+  "returned_sha256": "5f0f06534988c0104db6c1f4efc5d2e8abba9c97423cb7e5b5df0c88e0ef1cfe"
+ },
+ {
+  "series": "series1",
+  "run": "4-new-keep",
+  "turn": "3 follow-up",
+  "ttft_s": 15.1,
+  "total_s": 42.08,
+  "prompt_tokens": 26852,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] reusing 26828 of 26852 prompt tokens",
+   "[PIN] no turn photo: the rows of this prompt are not those of it computed cold"
+  ],
+  "engine_prompt": "[mimo] prompt 14.96s (stalled 3.06s, experts 3.44s, attention 8.32s, routers 0.03s, 4814 demand reads); generation 26.98s (stalled 3.81s, experts 13.53s, attention 7.28s, 3042 demand reads, 12006 prefetched)",
+  "returned_sha256": "ecef578e6e4d1e409ebf2d5dc59e4da8256aa5fc85df2e88830676e86057363f"
+ },
+ {
+  "series": "series1",
+  "run": "4-new-keep",
+  "turn": "4 follow-up",
+  "ttft_s": 11.04,
+  "total_s": 36.93,
+  "prompt_tokens": 26933,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] reusing 26915 of 26933 prompt tokens",
+   "[PIN] no turn photo: the rows of this prompt are not those of it computed cold"
+  ],
+  "engine_prompt": "[mimo] prompt 10.88s (stalled 1.68s, experts 2.51s, attention 6.58s, routers 0.02s, 3046 demand reads); generation 25.89s (stalled 3.60s, experts 13.22s, attention 6.88s, 3036 demand reads, 12305 prefetched)",
+  "returned_sha256": "9c4760857998f7d9a8112cbfc2b1063f23c344657b1642af821b92a0fcd7d0e9"
+ },
+ {
+  "series": "series2",
+  "run": "1-new-drop",
+  "turn": "1 documents",
+  "ttft_s": 96.93,
+  "total_s": 124.22,
+  "prompt_tokens": 25054,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] no reuse, 0 of 25054 prompt tokens",
+   "[PIN] turn photo of 25054 tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 96.90s (stalled 0.37s, experts 55.70s, attention 28.53s, routers 4.89s, 26444 demand reads); generation 27.29s (stalled 4.33s, experts 13.36s, attention 6.80s, 3388 demand reads, 12581 prefetched)",
+  "returned_sha256": "44c375561a84d9923ddefdd84358a49350414435b22bc11afa033f40024b2cc6"
+ },
+ {
+  "series": "series2",
+  "run": "1-new-drop",
+  "turn": "2 tool result",
+  "ttft_s": 34.41,
+  "total_s": 60.42,
+  "prompt_tokens": 26701,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] reusing 25054 of 26701 prompt tokens (photo)",
+   "[PIN] resumed from the photo of 25054 tokens, 1647 to prefill",
+   "[PIN] turn photo of 26701 tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 34.26s (stalled 0.02s, experts 30.06s, attention 3.22s, routers 0.38s, 19743 demand reads); generation 26.01s (stalled 4.14s, experts 12.90s, attention 6.42s, 3295 demand reads, 12714 prefetched)",
+  "returned_sha256": "f23d2b1b00ea675ee6f661cb4fb6201bb6576d8f82309184e97cc18aa05dc66c"
+ },
+ {
+  "series": "series2",
+  "run": "1-new-drop",
+  "turn": "3 follow-up",
+  "ttft_s": 10.34,
+  "total_s": 37.46,
+  "prompt_tokens": 26724,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] reusing 26701 of 26724 prompt tokens (photo)",
+   "[PIN] resumed from the photo of 26701 tokens, 23 to prefill",
+   "[PIN] turn photo of 26724 tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 10.18s (stalled 0.02s, experts 9.45s, attention 0.57s, routers 0.06s, 4825 demand reads); generation 27.13s (stalled 3.14s, experts 13.57s, attention 7.47s, 2733 demand reads, 10660 prefetched)",
+  "returned_sha256": "a0cfa9b2215a754945ae486ea601781509cfa1429f569cc49f5abeeef16e0e80"
+ },
+ {
+  "series": "series2",
+  "run": "1-new-drop",
+  "turn": "4 follow-up",
+  "ttft_s": 7.1,
+  "total_s": 34.33,
+  "prompt_tokens": 26741,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] reusing 26724 of 26741 prompt tokens (photo)",
+   "[PIN] resumed from the photo of 26724 tokens, 17 to prefill",
+   "[PIN] turn photo of 26741 tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 6.96s (stalled 0.00s, experts 6.28s, attention 0.56s, routers 0.06s, 2835 demand reads); generation 27.23s (stalled 3.81s, experts 13.57s, attention 7.04s, 3309 demand reads, 12446 prefetched)",
+  "returned_sha256": "514b6fd9ecb79257a5670d1df9f889defdf10eed71dc931b925fa1a88963b65f"
+ },
+ {
+  "series": "series2",
+  "run": "2-base-drop",
+  "turn": "1 documents",
+  "ttft_s": 96.32,
+  "total_s": 123.6,
+  "prompt_tokens": 25054,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] no reuse, 0 of 25054 prompt tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 96.27s (stalled 0.37s, experts 55.67s, attention 28.01s, routers 4.86s, 26444 demand reads); generation 27.28s (stalled 4.51s, experts 13.23s, attention 6.79s, 3385 demand reads, 12612 prefetched)",
+  "returned_sha256": "44c375561a84d9923ddefdd84358a49350414435b22bc11afa033f40024b2cc6"
+ },
+ {
+  "series": "series2",
+  "run": "2-base-drop",
+  "turn": "2 tool result",
+  "ttft_s": 100.23,
+  "total_s": 126.18,
+  "prompt_tokens": 26701,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] no reuse, 0 of 26701 prompt tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 100.08s (stalled 0.03s, experts 56.20s, attention 30.36s, routers 5.15s, 20675 demand reads); generation 25.95s (stalled 4.17s, experts 12.83s, attention 6.40s, 3284 demand reads, 12692 prefetched)",
+  "returned_sha256": "f23d2b1b00ea675ee6f661cb4fb6201bb6576d8f82309184e97cc18aa05dc66c"
+ },
+ {
+  "series": "series2",
+  "run": "2-base-drop",
+  "turn": "3 follow-up",
+  "ttft_s": 100.25,
+  "total_s": 128.81,
+  "prompt_tokens": 26724,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] no reuse, 0 of 26724 prompt tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 100.11s (stalled 0.03s, experts 56.35s, attention 30.46s, routers 5.13s, 20725 demand reads); generation 28.56s (stalled 4.28s, experts 13.78s, attention 7.54s, 3124 demand reads, 12431 prefetched)",
+  "returned_sha256": "a0cfa9b2215a754945ae486ea601781509cfa1429f569cc49f5abeeef16e0e80"
+ },
+ {
+  "series": "series2",
+  "run": "2-base-drop",
+  "turn": "4 follow-up",
+  "ttft_s": 99.9,
+  "total_s": 127.12,
+  "prompt_tokens": 26741,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] no reuse, 0 of 26741 prompt tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 99.77s (stalled 0.03s, experts 56.08s, attention 30.41s, routers 5.13s, 20756 demand reads); generation 27.22s (stalled 4.07s, experts 13.50s, attention 6.90s, 3395 demand reads, 12802 prefetched)",
+  "returned_sha256": "514b6fd9ecb79257a5670d1df9f889defdf10eed71dc931b925fa1a88963b65f"
+ },
+ {
+  "series": "series2",
+  "run": "3-new-keep",
+  "turn": "1 documents",
+  "ttft_s": 94.77,
+  "total_s": 121.67,
+  "prompt_tokens": 25054,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] no reuse, 0 of 25054 prompt tokens",
+   "[PIN] turn photo of 25054 tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 94.74s (stalled 0.37s, experts 54.74s, attention 27.41s, routers 4.86s, 26444 demand reads); generation 26.90s (stalled 4.39s, experts 13.12s, attention 6.68s, 3375 demand reads, 12519 prefetched)",
+  "returned_sha256": "44c375561a84d9923ddefdd84358a49350414435b22bc11afa033f40024b2cc6"
+ },
+ {
+  "series": "series2",
+  "run": "3-new-keep",
+  "turn": "2 tool result",
+  "ttft_s": 34.44,
+  "total_s": 59.58,
+  "prompt_tokens": 26765,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] reusing 25117 of 26765 prompt tokens",
+   "[PIN] no turn photo: the rows of this prompt are not those of it computed cold"
+  ],
+  "engine_prompt": "[mimo] prompt 34.33s (stalled 0.02s, experts 30.22s, attention 3.15s, routers 0.38s, 19696 demand reads); generation 25.14s (stalled 3.73s, experts 12.63s, attention 6.24s, 3154 demand reads, 11958 prefetched)",
+  "returned_sha256": "5f0f06534988c0104db6c1f4efc5d2e8abba9c97423cb7e5b5df0c88e0ef1cfe"
+ },
+ {
+  "series": "series2",
+  "run": "3-new-keep",
+  "turn": "3 follow-up",
+  "ttft_s": 14.74,
+  "total_s": 41.6,
+  "prompt_tokens": 26852,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] reusing 26828 of 26852 prompt tokens",
+   "[PIN] no turn photo: the rows of this prompt are not those of it computed cold"
+  ],
+  "engine_prompt": "[mimo] prompt 14.59s (stalled 3.09s, experts 3.39s, attention 7.97s, routers 0.03s, 4809 demand reads); generation 26.87s (stalled 3.93s, experts 13.43s, attention 7.16s, 3042 demand reads, 12016 prefetched)",
+  "returned_sha256": "ecef578e6e4d1e409ebf2d5dc59e4da8256aa5fc85df2e88830676e86057363f"
+ },
+ {
+  "series": "series2",
+  "run": "3-new-keep",
+  "turn": "4 follow-up",
+  "ttft_s": 10.85,
+  "total_s": 36.57,
+  "prompt_tokens": 26933,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] reusing 26915 of 26933 prompt tokens",
+   "[PIN] no turn photo: the rows of this prompt are not those of it computed cold"
+  ],
+  "engine_prompt": "[mimo] prompt 10.70s (stalled 1.67s, experts 2.49s, attention 6.42s, routers 0.02s, 3043 demand reads); generation 25.72s (stalled 3.70s, experts 13.12s, attention 6.73s, 3046 demand reads, 12342 prefetched)",
+  "returned_sha256": "9c4760857998f7d9a8112cbfc2b1063f23c344657b1642af821b92a0fcd7d0e9"
+ },
+ {
+  "series": "series2",
+  "run": "4-base-keep",
+  "turn": "1 documents",
+  "ttft_s": 94.24,
+  "total_s": 121.23,
+  "prompt_tokens": 25054,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] no reuse, 0 of 25054 prompt tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 94.21s (stalled 0.36s, experts 54.68s, attention 27.00s, routers 4.85s, 26444 demand reads); generation 27.00s (stalled 4.54s, experts 13.10s, attention 6.64s, 3387 demand reads, 12552 prefetched)",
+  "returned_sha256": "44c375561a84d9923ddefdd84358a49350414435b22bc11afa033f40024b2cc6"
+ },
+ {
+  "series": "series2",
+  "run": "4-base-keep",
+  "turn": "2 tool result",
+  "ttft_s": 34.3,
+  "total_s": 59.41,
+  "prompt_tokens": 26765,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] reusing 25117 of 26765 prompt tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 34.16s (stalled 0.02s, experts 30.10s, attention 3.12s, routers 0.37s, 19706 demand reads); generation 25.11s (stalled 3.71s, experts 12.65s, attention 6.25s, 3149 demand reads, 11945 prefetched)",
+  "returned_sha256": "5f0f06534988c0104db6c1f4efc5d2e8abba9c97423cb7e5b5df0c88e0ef1cfe"
+ },
+ {
+  "series": "series2",
+  "run": "4-base-keep",
+  "turn": "3 follow-up",
+  "ttft_s": 14.76,
+  "total_s": 41.55,
+  "prompt_tokens": 26852,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] reusing 26828 of 26852 prompt tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 14.62s (stalled 3.07s, experts 3.39s, attention 8.02s, routers 0.03s, 4830 demand reads); generation 26.80s (stalled 3.90s, experts 13.42s, attention 7.12s, 3035 demand reads, 12040 prefetched)",
+  "returned_sha256": "ecef578e6e4d1e409ebf2d5dc59e4da8256aa5fc85df2e88830676e86057363f"
+ },
+ {
+  "series": "series2",
+  "run": "4-base-keep",
+  "turn": "4 follow-up",
+  "ttft_s": 10.79,
+  "total_s": 36.49,
+  "prompt_tokens": 26933,
+  "completion_tokens": 64,
+  "started": [
+   "[PREFIX] reusing 26915 of 26933 prompt tokens"
+  ],
+  "engine_prompt": "[mimo] prompt 10.65s (stalled 1.67s, experts 2.49s, attention 6.38s, routers 0.02s, 3032 demand reads); generation 25.70s (stalled 3.68s, experts 13.12s, attention 6.73s, 3036 demand reads, 12333 prefetched)",
+  "returned_sha256": "9c4760857998f7d9a8112cbfc2b1063f23c344657b1642af821b92a0fcd7d0e9"
+ }
+]

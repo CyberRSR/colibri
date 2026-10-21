@@ -1,0 +1,10 @@
+test_a_live_prefix_keeps_its_own_kernels_and_takes_no_photo (__main__.MimoTurnPhotoCudaTest.test_a_live_prefix_keeps_its_own_kernels_and_takes_no_photo)
+A client that sends the reply back as the model wrote it resumes from the ... ok
+test_a_short_tail_is_the_cold_prompt_to_the_bit (__main__.MimoTurnPhotoCudaTest.test_a_short_tail_is_the_cold_prompt_to_the_bit) ... ok
+test_without_the_prompts_kernels_a_tail_is_not_the_cold_prompt (__main__.MimoTurnPhotoCudaTest.test_without_the_prompts_kernels_a_tail_is_not_the_cold_prompt)
+MIMO_PROMPT_KERNELS=0, the step-by-step choice: the tail on the decode ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 2.631s
+
+OK

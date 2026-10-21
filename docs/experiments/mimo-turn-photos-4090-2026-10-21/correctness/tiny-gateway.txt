@@ -1,0 +1,50 @@
+test_a_request_without_the_keys_is_byte_identical (test_brio_serve.MimoBrioServe.test_a_request_without_the_keys_is_byte_identical)
+Chat must not be able to tell the channel exists. ... ok
+test_a_snapshot_scores_exactly_like_a_cold_recompute (test_brio_serve.MimoBrioServe.test_a_snapshot_scores_exactly_like_a_cold_recompute) ... ok
+test_a_stale_snapshot_is_not_restored (test_brio_serve.MimoBrioServe.test_a_stale_snapshot_is_not_restored)
+A snapshot whose rows the state no longer holds must be refused. ... ok
+test_read_only_generates_nothing (test_brio_serve.MimoBrioServe.test_read_only_generates_nothing)
+max_tokens=0 means read the prompt and stop: no DATA frame at all. ... ok
+test_read_only_needs_the_channel (test_brio_serve.MimoBrioServe.test_read_only_needs_the_channel)
+max_tokens=0 without logprobs stays a malformed request. ... ok
+test_the_snapshot_only_reads_the_fresh_tail (test_brio_serve.MimoBrioServe.test_the_snapshot_only_reads_the_fresh_tail)
+The point of the snapshot: the shared prefix is not read again. ... ok
+test_chat_logprobs_reach_the_engine (test_systemone_api.MimoSystemOneEndToEnd.test_chat_logprobs_reach_the_engine) ... [mimo] MTP: decode steps verify up to 2 drafts, from the checkpoint's first 2 MTP layers, while the probabilities the layers give them multiply to 0.6 or more (MIMO_MTP=0: off)
+[mimo] expert cache: one pool of 40 slots for every layer (MIMO_CACHE_GLOBAL)
+[mimo] expert readers: 2 on 1 device(s)
+[OMP] spinning team: 2 threads spin 2000 us between regions (COLI_OMP_SPIN_US; COLI_OMP_SPIN=0: libgomp's team)
+[mimo] 11 bf16 matrices packed without loss for the CPU: 0.00 GB for 0.00 GB
+[mimo] 6 layers (4 sliding window 8, 2 full), 16 experts top-4, cache 8/layer, dense native, ctx 256, vision -- loaded in 0.01s
+[mimo] streaming: 84 demand reads, 34 prefetched (16 used, 18 unused, 7 of them cancelled unread), predicted 55.0% of 100 choices, 0.00 GB read, 0.00s stalled, 0.00s predicting; attention matmuls: qkv 0.00s, o_proj 0.00s; 1.43 experts a wave
+[mimo] prompt 0.02s (stalled 0.00s, experts[api] 127.0.0.1 - "POST /v1/chat/completions HTTP/1.1" 200 -
+ 0.00s, attention 0.00s, routers 0.00s, 71 demand reads); generation 0.00s (stalled 0.00s, experts 0.00s, attention 0.00s, 13 demand reads, 34 prefetched)
+ok
+test_options_read_only_their_own_tokens_and_score_like_a_cold_engine (test_systemone_api.MimoSystemOneEndToEnd.test_options_read_only_their_own_tokens_and_score_like_a_cold_engine) ... [mimo] MTP: decode steps verify up to 2 drafts, from the checkpoint's first 2 MTP layers, while the probabilities the layers give them multiply to 0.6 or more (MIMO_MTP=0: off)
+[mimo] expert cache: one pool of 40 slots for every layer (MIMO_CACHE_GLOBAL)
+[mimo] expert readers: 2 on 1 device(s)
+[OMP] spinning team: 2 threads spin 2000 us between regions (COLI_OMP_SPIN_US; COLI_OMP_SPIN=0: libgomp's team)
+[mimo] 11 bf16 matrices packed without loss for the CPU: 0.00 GB for 0.00 GB
+[mimo] 6 layers (4 sliding window 8, 2 full), 16 experts top-4, cache 8/layer, dense native, ctx 256, vision -- loaded in 0.01s
+[PIN] photo of 53 tokens
+[mimo] streaming: 71 demand reads, 0 prefetched (0 used, 0 unused, 0 of them cancelled unread), predicted 0.0% of 0 choices, 0.00 GB read, 0.00s stalled, 0.00s predicting; attention matmuls: qkv 0.00s, o_proj 0.00s; 1.01 experts a wave
+[mimo] prompt 0.01s (stalled 0.00s, experts 0.00s, attention 0.00s, routers 0.00s, 71 demand reads); generation 0.00s (stalled 0.00s, experts 0.00s, attention 0.00s, 0 demand reads, 0 prefetched)
+[PIN] resumed from the photo of 53 tokens, 117 to prefill
+[PIN] photo of 170 tokens
+[mimo] streaming: 38 demand reads, 0 prefetched (0 used, 0 unused, 0 of them cancelled unread), predicted 0.0% of 0 choices, 0.00 GB read, 0.00s stalled, 0.00s predicting; attention matmuls: qkv 0.00s, o_proj 0.00s; 2.14 experts a wave
+[mimo] prompt 0.02s (stalled 0.00s, experts 0.00s, attention 0.01s, routers 0.00s, 38 demand reads); generation 0.00s (stalled 0.00s, experts 0.00s, attention 0.00s, 0 demand reads, 0 prefetched)
+[PIN] resumed from the photo of 170 tokens, 8 to prefill
+[mimo] streaming: 19 demand reads, 0 prefetched (0 used, 0 unused, 0 of them cancelled unread), predicted 0.0% of 0 choices, 0.00 GB read, 0.00s stalled, 0.00s predicting; attention matmuls: qkv 0.00s, o_proj 0.00s; 1.67 experts a wave
+[mimo] prompt 0.00s (stalled 0.00s, experts 0.00s, attention 0.00s, routers 0.00s, 19 demand reads); generation 0.00s (stalled 0.00s, experts 0.00s, attention 0.00s, 0 demand reads, 0 prefetched)
+[PIN] resumed from the photo of 170 tokens, 5 to prefill
+[mimo] streaming: 15 demand reads, 0 prefetched (0 used, 0 unused, 0 of them cancelled unread), predicted 0.0% of 0 choices, 0.00 GB read, 0.00s stalled, 0.00s predicting; attention matmuls: qkv 0.00s, o_proj 0.00s; 2.30 experts a wave
+[mimo] prompt 0.00s (stalled 0.00s, experts 0.00s, attention 0.00s, routers 0.00s, 15 demand reads); generation 0.00s (stalled 0.00s, experts 0.00s, attention 0.00s, 0 demand reads, 0 prefetched)
+[PIN] resumed from the photo of 170 tokens, 21 to prefill
+[mimo] streaming: 33 demand reads, 0 prefetched (0 used, 0 unused, 0 of them cancelled unread), predicted 0.0% of 0 choices, 0.00 GB read, 0.00s stalled, 0.00s predicting; attention matmuls: qkv 0.00s, o_proj 0.00s; 1.92 experts a wave
+[mimo] prompt 0.01s (stalled 0.00s, experts 0.00s, attention 0.00s, routers 0.00s, 33 demand reads); generation 0.00s (stalled 0.00s, experts 0.00s, attention 0.00s[api] 127.0.0.1 - "POST /v1/systemone HTTP/1.1" 200 -
+, 0 demand reads, 0 prefetched)
+ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 1.365s
+
+OK

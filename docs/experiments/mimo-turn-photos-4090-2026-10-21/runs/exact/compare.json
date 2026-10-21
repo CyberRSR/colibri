@@ -1,0 +1,28 @@
+[
+ {
+  "turn": "t2-short",
+  "prompt_tokens": 4353,
+  "resumed": [
+   "[PIN] resumed from the photo of 4318 tokens, 35 to prefill"
+  ],
+  "prompt_s": 11.637,
+  "cold_prompt_s": 39.106,
+  "logits_same_bytes": true,
+  "logits_sha256": "792181ec12bb61a4cf17bc27eee3de5f708b60abcc94d3db76f14ec1b97663eb",
+  "reply_same_bytes": true,
+  "reply_sha256": "6315ba05a353044f9e9c77cf666f1bcd7de17051b97eb2666696e40162ae5e8e"
+ },
+ {
+  "turn": "t2-long",
+  "prompt_tokens": 6148,
+  "resumed": [
+   "[PIN] resumed from the photo of 4318 tokens, 1830 to prefill"
+  ],
+  "prompt_s": 34.063,
+  "cold_prompt_s": 43.242,
+  "logits_same_bytes": true,
+  "logits_sha256": "0fda4a8455d2697cc8e09c13a26a031efed99bf88c880e02fd54737e1f2f2bb5",
+  "reply_same_bytes": true,
+  "reply_sha256": "7b4d98057dc3d584cf2afb880dcf65fa6ba398a3cef6bd818bf66e98efc106ff"
+ }
+]

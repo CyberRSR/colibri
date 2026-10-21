@@ -1,0 +1,27 @@
+test_invalid_device (__main__.FallbackTest.test_invalid_device) ... ok
+test_missing_dll (__main__.FallbackTest.test_missing_dll) ... ok
+test_partial_placement (__main__.FallbackTest.test_partial_placement) ... ok
+test_released_weights (__main__.FallbackTest.test_released_weights) ... ok
+test_released_weights_recover_after_failure (__main__.FallbackTest.test_released_weights_recover_after_failure) ... ok
+test_zero_budget (__main__.FallbackTest.test_zero_budget) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.897s
+
+OK
+test_distribution (__main__.SampleDraft.test_distribution) ... ok
+test_same_draws_as_the_whole_sort (__main__.SampleDraft.test_same_draws_as_the_whole_sort) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 14.077s
+
+OK
+test_mimo_calls_only_what_is_served (__main__.OmpSpin.test_mimo_calls_only_what_is_served) ... 
+  test_mimo_calls_only_what_is_served (__main__.OmpSpin.test_mimo_calls_only_what_is_served) (src='backend_vulkan.c', defs=['-DCOLI_VULKAN']) ... skipped 'backend_vulkan.c: no Vulkan headers'
+  test_mimo_calls_only_what_is_served (__main__.OmpSpin.test_mimo_calls_only_what_is_served) (src='vk_chain.c', defs=['-DCOLI_VULKAN']) ... skipped 'vk_chain.c: no Vulkan headers'
+test_regions (__main__.OmpSpin.test_regions) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 8.203s
+
+OK (skipped=2)

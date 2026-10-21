@@ -1,0 +1,42 @@
+test_a_photo_whose_rows_were_overwritten_is_not_restored (__main__.MimoBrioPhotoTest.test_a_photo_whose_rows_were_overwritten_is_not_restored) ... ok
+test_a_prompt_with_a_picture_takes_no_photo (__main__.MimoBrioPhotoTest.test_a_prompt_with_a_picture_takes_no_photo)
+pin=1 on a prompt with a picture: the photo would be filed under ids ... ok
+test_a_read_only_request_may_fill_the_context (__main__.MimoBrioPhotoTest.test_a_read_only_request_may_fill_the_context) ... ok
+test_an_image_prompt_never_resumes_from_a_photo (__main__.MimoBrioPhotoTest.test_an_image_prompt_never_resumes_from_a_photo)
+The prompt begins with the photo's ids, so the ids alone would say ... ok
+test_logprobs_change_no_generated_byte (__main__.MimoBrioPhotoTest.test_logprobs_change_no_generated_byte) ... ok
+test_nested_photos_and_a_sibling_question (__main__.MimoBrioPhotoTest.test_nested_photos_and_a_sibling_question) ... ok
+test_options_that_cross_the_window_resume_from_the_photo_exactly (__main__.MimoBrioPhotoTest.test_options_that_cross_the_window_resume_from_the_photo_exactly) ... ok
+test_the_read_out_covers_every_position_unless_a_photo_does (__main__.MimoBrioPhotoTest.test_the_read_out_covers_every_position_unless_a_photo_does)
+What the gateway's `echo` needs: one frame per prompt position, the ... ok
+test_a_diverging_prompt_is_not_reused (__main__.MimoPrefixServeTest.test_a_diverging_prompt_is_not_reused)
+ok
+test_a_shorter_prompt_after_a_longer_one (__main__.MimoPrefixServeTest.test_a_shorter_prompt_after_a_longer_one)
+The record only ever grows its length, so a miss has to CLEAR it ... ok
+test_a_turn_that_replays_the_reply_is_never_wrong (__main__.MimoPrefixServeTest.test_a_turn_that_replays_the_reply_is_never_wrong)
+The real chat shape: the client appends the assistant's reply and a ... ok
+test_reuse_matches_the_same_engine_with_reuse_disabled (__main__.MimoPrefixServeTest.test_reuse_matches_the_same_engine_with_reuse_disabled)
+The A/B the kill switch exists for: same process lifetime, same two ... ok
+test_reused_prefix_yields_identical_tokens (__main__.MimoPrefixServeTest.test_reused_prefix_yields_identical_tokens) ... ok
+test_three_turns_keep_reusing (__main__.MimoPrefixServeTest.test_three_turns_keep_reusing)
+Each turn holds a longer prefix than the last. On an engine that ... ok
+test_a_live_prefix_keeps_its_own_kernels_and_takes_no_photo (__main__.MimoTurnPhotoCudaTest.test_a_live_prefix_keeps_its_own_kernels_and_takes_no_photo)
+A client that sends the reply back as the model wrote it resumes from the ... skipped 'explicit CUDA hardware test (MIMO_CUDA_TEST=1) with the built engine and fixture'
+test_a_short_tail_is_the_cold_prompt_to_the_bit (__main__.MimoTurnPhotoCudaTest.test_a_short_tail_is_the_cold_prompt_to_the_bit) ... skipped 'explicit CUDA hardware test (MIMO_CUDA_TEST=1) with the built engine and fixture'
+test_without_the_prompts_kernels_a_tail_is_not_the_cold_prompt (__main__.MimoTurnPhotoCudaTest.test_without_the_prompts_kernels_a_tail_is_not_the_cold_prompt)
+MIMO_PROMPT_KERNELS=0, the step-by-step choice: the tail on the decode ... skipped 'explicit CUDA hardware test (MIMO_CUDA_TEST=1) with the built engine and fixture'
+test_a_prompt_with_a_picture_takes_no_turn_photo (__main__.MimoTurnPhotoTest.test_a_prompt_with_a_picture_takes_no_turn_photo) ... ok
+test_a_read_out_never_resumes_from_a_turn_photo (__main__.MimoTurnPhotoTest.test_a_read_out_never_resumes_from_a_turn_photo) ... ok
+test_a_repeated_turn_resumes_from_the_turn_before (__main__.MimoTurnPhotoTest.test_a_repeated_turn_resumes_from_the_turn_before)
+A client that asks the same turn again (a retry, a regenerate): its own ... ok
+test_every_turn_resumes_from_the_photo_of_the_turn_before (__main__.MimoTurnPhotoTest.test_every_turn_resumes_from_the_photo_of_the_turn_before) ... ok
+test_system_one_keeps_its_photos (__main__.MimoTurnPhotoTest.test_system_one_keeps_its_photos)
+System One's photos are as many as COLI_PIN_SLOTS says: chat turns that ... ok
+test_the_drafts_hold_after_a_photo_however_many_are_verified (__main__.MimoTurnPhotoTest.test_the_drafts_hold_after_a_photo_however_many_are_verified)
+The MTP blocks' windows hold rows of the reply the next turn threw ... ok
+test_the_switches_turn_them_off (__main__.MimoTurnPhotoTest.test_the_switches_turn_them_off) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 3.997s
+
+OK (skipped=3)
