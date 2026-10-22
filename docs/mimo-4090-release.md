@@ -26,7 +26,9 @@ The history and the measurements: [README](https://github.com/CyberRSR/colibri#t
 присылает ответы модели обратно без рассуждений (`reasoning_content`), как делает
 большинство OpenAI-совместимых клиентов: движок делает «снимок» конца каждого промпта, и
 следующий ход продолжает с него (при 26 700 токенах: 7–34 с вместо 97–100 с в r4,
-ответы байт-в-байт те же). Длинный промпт обрабатывается на GPU:
+ответы байт-в-байт те же). Ответ инструмента может содержать нулевые байты (например,
+прочитанный агентом бинарный файл): они доходят до модели как есть (r6; раньше шлюз
+отвечал 400 «NUL bytes are not supported in prompts»). Длинный промпт обрабатывается на GPU:
 первый промпт в 25 000 токенов — около полутора минут (в r2 — около 4 минут, на CPU —
 около часа), дальше — только новые токены. Ответ после такого промпта генерируется со
 скоростью около 2,3 токена в секунду (в r3 — 1,4): внимание шага декодирования считается
@@ -78,3 +80,7 @@ START-MIMO.cmd -ModelDir E:\MiMo-V2.6-Pro -ShardDir ""
 | the next agent turn at 26,700 tokens, the client dropping the reasoning: first token | -- | 7-34 s (r4: 97-100 s) |
 
 `tools\benchmark_mimo_cuda.py` measures your own machine (docs/mimo-cuda.md).
+
+A tool turn may hold NUL bytes (a binary file an agent read): since r6 they reach the
+model as bytes, with the reference tokenizer's ids; before, the gateway answered 400
+"NUL bytes are not supported in prompts".
