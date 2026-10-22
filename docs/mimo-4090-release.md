@@ -26,7 +26,12 @@ The history and the measurements: [README](https://github.com/CyberRSR/colibri#t
 присылает ответы модели обратно без рассуждений (`reasoning_content`), как делает
 большинство OpenAI-совместимых клиентов: движок делает «снимок» конца каждого промпта, и
 следующий ход продолжает с него (при 26 700 токенах: 7–34 с вместо 97–100 с в r4,
-ответы байт-в-байт те же). Ответ инструмента может содержать нулевые байты (например,
+ответы байт-в-байт те же). Модель MiMo-V2.6-Pro-MOPD-heretic (та же базовая модель с
+изменёнными 70 `o_proj`) запускается `START-MIMO-HERETIC.cmd`: из её 130 шардов от базовой
+отличается только `model_pp0_ep0_shard0`, остальные читаются из папок базовой модели (с двух
+дисков сразу, с той же скоростью), так что их копии в папке heretic можно удалить; имя модели
+в API — `mimo-v2.6-pro-mopd-heretic` (`-ModelId mimo-v2.6-pro-mopd` — как у базовой).
+Одновременно работает одна из двух моделей. Ответ инструмента может содержать нулевые байты (например,
 прочитанный агентом бинарный файл): они доходят до модели как есть (r6; раньше шлюз
 отвечал 400 «NUL bytes are not supported in prompts»). Длинный промпт обрабатывается на GPU:
 первый промпт в 25 000 токенов — около полутора минут (в r2 — около 4 минут, на CPU —
@@ -56,8 +61,10 @@ START-MIMO.cmd -ModelDir E:\MiMo-V2.6-Pro -ShardDir ""
 
 | Parameter | Default | Meaning |
 |---|---|---|
+| `-Model` | `base` | `base`: MiMo-V2.6-Pro-MOPD; `heretic`: MiMo-V2.6-Pro-MOPD-heretic (below). Picks the next three |
 | `-ModelDir` | `D:\AI\Models\MiMo-V2.6-Pro-MOPD` | The checkpoint (config.json, tokenizer, shards) |
-| `-ShardDir` | `C:\AI\MiMoPro-Shards` | More shards on another drive (both drives read at once); `""`: none |
+| `-ShardDir` | `C:\AI\MiMoPro-Shards` | More folders with shards, `;`-separated (the drives are read at once); a shard is taken from the first of `-ModelDir` and these that holds it; `""`: none |
+| `-ModelId` | `mimo-v2.6-pro-mopd` | The model name the API answers to |
 | `-Context` | 1048576 | Context; the attention caches take memory only as a conversation grows (102 KB a token) |
 | `-MaxOutput` | 65536 | Most tokens a reply may have, reasoning included |
 | `-Port` | 18080 | Port on 127.0.0.1 |
@@ -65,6 +72,19 @@ START-MIMO.cmd -ModelDir E:\MiMo-V2.6-Pro -ShardDir ""
 | `-Threads` | 16 | CPU workers (the physical cores) |
 | `-DenseGB` / `-ReserveGB` | 20 / 2 | VRAM for the dense matrices / left free |
 | `-OprojInt8` | off | Faster (+6%) and **not exact**: every o_proj on the GPU as int8 |
+
+### A checkpoint that differs in a few shards (MiMo-V2.6-Pro-MOPD-heretic)
+
+`START-MIMO-HERETIC.cmd` (`-Model heretic`) starts MiMo-V2.6-Pro-MOPD-heretic, the base
+checkpoint with its 70 `o_proj` edited: of its 130 shards only `model_pp0_ep0_shard0`
+differs from the base's, byte for byte. Its folder (`D:\AI\Models\MiMo-V2.6-Pro-MOPD-heretic`)
+needs that shard and its own config and tokenizer; every other shard is read from the base's
+folders, `C:\AI\MiMoPro-Shards` and `D:\AI\Models\MiMo-V2.6-Pro-MOPD`, where the base reads
+them -- the same two drives at once, the same speed -- so the 129 copies in its folder can be
+deleted. The launcher refuses to start it without its own shard (the base's would be read),
+and any checkpoint whose index names a shard none of the folders holds. The API model is
+`mimo-v2.6-pro-mopd-heretic`; `-ModelId mimo-v2.6-pro-mopd` keeps clients set up for the base.
+Only one of the two models runs at a time (the memory is for one).
 
 ## Speed on the measured machine
 
