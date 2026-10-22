@@ -1,0 +1,2 @@
+tokenizers 0.23.3, ff15eb925890d6b7... tokenizer.json of MiMo-V2.6-Pro
+ids equal to HF: 24/24, decode gives the bytes back: 24/24

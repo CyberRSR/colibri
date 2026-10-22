@@ -1,0 +1,22 @@
+{
+ "README.md": "83cdf39ebbfbf64ac8f6bb7d41c84ffbac7a8427a2bcb954a1e0c16e2c65929b",
+ "cases.txt": "2f884681689d9432bdf656bae2b17f83deb29e5fa79c2c4b7036d77ac90d7fb6",
+ "nul_cases.py": "164c4bdcb85d7a24201fdfbebe8aa432d49f14b118b26bf0dc5d5801050c6842",
+ "release-build/BUILD-INFO.txt": "c422ed91e7df92595dadcacf00f85bc19a579fe006f80208a07460be89fcaec9",
+ "release-build/benchmark/engine.txt": "fecc2886948fae0ff204ff1b22e45d0b41eab09147537b76976beff16f90bd36",
+ "release-build/benchmark/gpu.csv": "ec98177c700fffd86cc5172e5ecf92b28839996854f73f7180de7b764cd89355",
+ "release-build/benchmark/reply-0.txt": "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be",
+ "release-build/benchmark/reply-1.txt": "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be",
+ "release-build/benchmark/reply-2.txt": "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be",
+ "release-build/benchmark/reply-3.txt": "0305abcddf3160f6d54f739703f5c711ecb335d22a76e9dac2397e22221a06be",
+ "release-build/benchmark/result.json": "46f88cf066e91a621c53a27ef4b9264c53539ef678ef291cce10ebe771e50934",
+ "release-build/benchmark/samples.json": "da42fdf5d46abc5c7226f1673bd9f49ef60e0fbfbf9970e6e7b980317cf9e971",
+ "release-build/check17/cpu-engine.txt": "e9facb3c56f398e5d3a3f722d42b04bf599f97f8224d321c549718562906819b",
+ "release-build/check17/cpu-reply.txt": "63ed99846816797ba35192500956feedcfba7df134b42cad4a1b41595364c669",
+ "release-build/check17/cuda-engine.txt": "ac15486e4e37f925d432c840db6b4362a68a39151b2b0072fb4326013438fce4",
+ "release-build/check17/cuda-reply.txt": "63ed99846816797ba35192500956feedcfba7df134b42cad4a1b41595364c669",
+ "release-build/check17/logits.sha256": "a211dbe4f164679d10078ec43ec9203d8a7f1eb4c0a2d88877b56b82ea6d4a69",
+ "release-build/check17/result.json": "4903de1f510610c064ff1c5e99b7ac8eaedaf57d2837103c13de7a47597bcf45",
+ "tok_nul_check.c": "1c431ecb7301f8697eb318de2cc9777af18d73b394614f8c8cf88d5ee83d3a3f",
+ "tokenizer-check.txt": "6eb139ccb0b70c08cbf07dce987cd75446465147f7643d05835e266a73ab184f"
+}
