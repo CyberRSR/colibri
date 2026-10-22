@@ -89,6 +89,7 @@ own series on this machine, which drifts by about 3% from day to day):
 | a prompt's attention kept on the GPU from the qkv to o_proj (flash attention), one tiled kernel for its matrices, experts read straight into staging, the CPU's row work beside the device: 24,957 tokens 247.7 -> 92.1 s, 4310 69.3 -> 47.1 s | `4b8bd1c8` | 2.621 |
 | a decode step's full attention by keys over every worker, eight exps a call, the same sums in the same order: 128 tokens after a 24,957-token prompt 90.7 -> 54.6 s, after 4310 tokens 48.5 -> 45.5 s | `8008234f` | 2.638 |
 | a photo of every turn's prompt, resumed by the next turn when the client sends the reply back without its reasoning, the same bytes as the conversation computed whole: an agent turn at 26,700 tokens 97-100 s -> 7-34 s | `0accfa07` | 2.669 |
+| a NUL byte in a prompt (a tool turn holding a binary file an agent read) goes to the model as the byte it is, with the reference tokenizer's ids, instead of the gateway's 400 (no speed change) | `97917a18` | -- |
 
 Where the time goes now: each token needs 8 of 384 experts in each of 69 layers,
 about 11 GB of weights read from RAM or the disks, so decoding is bound by memory
@@ -137,6 +138,8 @@ API, совместимый с OpenAI и Anthropic: `http://127.0.0.1:18080/v1`,
 рассуждений (`reasoning_content`), как делают OpenAI-совместимые агенты: каждый ход
 продолжает «снимок» конца предыдущего промпта. Ход агента при контексте 26 700 токенов:
 97–100 с (r4) → **7–34 с**, ответы байт-в-байт те же, что при полном пересчёте.
+Ответы инструментов с нулевыми байтами (например, содержимое бинарного файла) доходят
+до модели как есть, а не дают ошибку 400 (r6).
 
 </details>
 
