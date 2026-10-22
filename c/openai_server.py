@@ -5332,6 +5332,11 @@ class Engine:
         # does (Clef), so the record carries the caller's values, not the gateway's
         # defaults (systemone_decision_record). None: the default form.
         self.decide_record = self.caps.get("decide_record")
+        # nul=1: the engine tokenizes a prompt by its byte count, so a NUL (a tool turn
+        # holding a binary file an agent read) reaches its tokenizer as a byte and gets
+        # the reference tokenizer's ids. Another engine may read the prompt as a C
+        # string and cut it there, so generate() refuses NUL to it instead.
+        self.nul_prompts = self.caps.get("nul") == "1"
         self.dispatcher = threading.Thread(target=self._dispatch_stdout,
                                            name="colibri-stdout", daemon=True)
         self.dispatcher.start()
@@ -5725,7 +5730,7 @@ class Engine:
         if isinstance(cache_slot, bool) or not isinstance(cache_slot, int) or not 0 <= cache_slot < self.kv_slots:
             raise APIError(400, "Invalid cache slot.", "cache_slot")
         payload = prompt.encode("utf-8")
-        if b"\0" in payload:
+        if b"\0" in payload and not self.nul_prompts:
             raise APIError(400, "NUL bytes are not supported in prompts.", "messages")
         gpayload = grammar.encode("utf-8") if grammar else b""
         if b"\0" in gpayload:

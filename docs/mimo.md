@@ -99,6 +99,14 @@ first. `coli chat` starts with thinking off, because at about 1 tok/s the templa
 default reasoning is minutes of tokens before the answer; `coli chat --think` turns it
 on (the web has its own reasoning toggle).
 
+A turn may hold NUL bytes -- a tool result that is a binary file an agent read. The
+engine tokenizes the prompt by its byte count and says so on its handshake (`CAPS ...
+nul=1`, [serve_protocol.md](serve_protocol.md)), so the gateway sends such a prompt
+as it is, and each NUL gets the reference tokenizer's id (the tokenizer matches
+`tokenizers` on Pro's `tokenizer.json` for NUL and the other control bytes, around
+special tokens, inside words and numbers). Engines that do not say `nul=1` keep
+answering 400 for it.
+
 ## System One mode and prompt reuse
 
 [System One mode](systemone.md) works on MiMo as on the other engines. `POST /v1/systemone` scores a
