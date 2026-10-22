@@ -5114,12 +5114,19 @@ static int mimo_mux_pick(Model *m, Tok *tokenizer, MimoMuxReq *r, const int *eos
     *tk_out = token; return 1;
 }
 
+/* CAPS: the gateway offers pictures only when the tower actually loaded. nul=1: a
+ * prompt is tokenized by its byte count (mimo_serve_start's tok_encode), so a NUL --
+ * what a tool turn carries when an agent reads a binary file -- reaches the tokenizer
+ * as the byte it is and gets the reference tokenizer's ids; the gateway refuses NUL
+ * to an engine that does not say so. */
+static const char *mimo_caps(void) { return g_vision ? "vision=1 nul=1" : "vision=0 nul=1"; }
+
 static void serve_mux(Model *m, Tok *tokenizer, const char *dir) {
     Cfg *c = &m->c;
     int n = g_mimo_mux_slots, V = c->vocab, input_eof = 0;
     int eos[8];
     int n_eos = coli_load_stop_ids(dir, eos, 8, NULL);
-    coli_serve_write_ready_caps(stdout, rss_gb(), g_vision ? "vision=1" : "vision=0");
+    coli_serve_write_ready_caps(stdout, rss_gb(), mimo_caps());
     serve_emap(m);
     MimoMuxReq *rq = xcalloc((size_t)n, sizeof *rq, "requests");
     MimoRow *rows = xmalloc((size_t)n * sizeof *rows, "rows");
@@ -5215,8 +5222,7 @@ static void serve_loop(Model *m, Tok *tokenizer, const char *dir) {
     coli_serve_stdio_init();
     int eos[8];
     int n_eos = coli_load_stop_ids(dir, eos, 8, NULL);
-    /* CAPS: the gateway offers pictures only when the tower actually loaded */
-    coli_serve_write_ready_caps(stdout, rss_gb(), g_vision ? "vision=1" : "vision=0");
+    coli_serve_write_ready_caps(stdout, rss_gb(), mimo_caps());
     serve_emap(m);
     float *logits = xmalloc((size_t)c->vocab * sizeof(float), "logits");
     int *ids = xmalloc(((size_t)m->ctx + 1) * sizeof(int), "prompt ids");

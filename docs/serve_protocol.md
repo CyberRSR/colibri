@@ -47,6 +47,13 @@ decides natively says `decide=1` alone (qwen36 with Clef's head). `decide_record
 asks for the record in its raw form, the caller's own values (docs/systemone.md,
 "Decision engines").
 
+`nul=1` says the engine tokenizes a `SUBMIT` payload by its byte count, so a NUL byte
+in the prompt is a byte like any other -- what a tool turn carries when an agent reads
+a binary file -- and gets the reference tokenizer's ids. The gateway sends a prompt
+holding NUL only to an engine that says so; another engine may read the payload as a
+C string and cut it there, so the gateway answers 400 ("NUL bytes are not supported
+in prompts") instead. MiMo says `nul=1`.
+
 An engine that cannot load its model says why on this channel, instead of
 `READY`, and exits:
 
@@ -157,7 +164,7 @@ turn: `HWINFO`, `PERF`, `ENTROPY`, `GPUS`, `TIERS`, `EMAP`, `HITS` (formats belo
 |---|---|---|
 | `TIERS` | `TIERS <vram> <ram> <disk> <vram_gb> <ram_gb>` | expert count per tier + resident bytes |
 | `HWINFO` | `HWINFO <cores> <ram_total> <ram_avail> <ngpu> <vram_total> <cpu>\|<gpu>` | host snapshot (GBs are floats) |
-| `CAPS` | `CAPS key=value ...` | handshake only, between `READY` and `STAT`: what the engine loaded (`vision=0\|1`) |
+| `CAPS` | `CAPS key=value ...` | handshake only, between `READY` and `STAT`: what the engine loaded (`vision=0\|1`) and takes (`nul=1`: prompts may hold NUL bytes) |
 | `LOAD_FAIL` | `LOAD_FAIL kind=<kind> <detail>` | handshake only, instead of `READY`: why the model did not load (`nomem`, `io`, `format`, `unsupported`); the engine exits after it |
 | `EMAP` | `EMAP <rows> <cols> <hex>` | one byte per expert, row-major over `rows×cols` (sparse layers +MTP × experts): `byte = (tier<<6) \| heat` — 2-bit tier (0 disk / 1 RAM / 2 VRAM), 6-bit log₂-bucketed usage heat |
 | `HITS` | `HITS <rows> <cols> <hex>` | 1 bit per expert, experts routed since the previous `HITS` |

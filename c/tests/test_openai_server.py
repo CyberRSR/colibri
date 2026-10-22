@@ -7594,6 +7594,42 @@ class EngineCapsTest(unittest.TestCase):
                 finally:
                     engine.close()
 
+    def test_a_nul_byte_goes_through_only_to_an_engine_that_says_nul(self):
+        # A tool turn holding a binary file an agent read. CAPS nul=1: the engine
+        # tokenizes by the byte count, so the bytes go out as they are; an engine that
+        # says nothing may read a C string, and the request is refused before it.
+        prompt = "<|im_start|>tool\nMZ\x90\x00\x03\x00\x00\x00Demo version\x00<|im_end|>"
+        payload = prompt.encode("utf-8")
+        expected = f"SUBMIT 1 0 {len(payload)} 4 0.25 0.9\n".encode() + payload + b"\n"
+        for line, accepts in ((b"CAPS vision=0 nul=1\n", True), (b"CAPS vision=0\n", False),
+                              (b"", False)):
+            with self.subTest(line=line):
+                def respond(process, frame):
+                    self.assertEqual(frame, expected)
+                    process.stdout.feed(b"ACCEPT 1 9\nDATA 1 2\nok\n"
+                                        b"DONE 1 STAT 1 2.500 50.0 1.25 9 0\n")
+
+                process = FakeProcess(respond)
+                process.stdout = BlockingStream(READY + line + b"STAT 0 0 0 0\n")
+                with patch("openai_server.ARCH", "glm53"), \
+                     patch("openai_server.subprocess.Popen", return_value=process):
+                    engine = Engine("glm53", "model")
+                try:
+                    self.assertIs(engine.nul_prompts, accepts)
+                    chunks = []
+                    if accepts:
+                        stats = engine.generate(prompt, 4, 0.25, 0.9, chunks.append)
+                        self.assertEqual(chunks, ["ok"])
+                        self.assertEqual(stats["prompt_tokens"], 9)
+                    else:
+                        with self.assertRaises(APIError) as caught:
+                            engine.generate(prompt, 4, 0.25, 0.9, chunks.append)
+                        self.assertEqual(caught.exception.status, 400)
+                        self.assertEqual(caught.exception.param, "messages")
+                    self.assertEqual(process.writes, [expected] if accepts else [])
+                finally:
+                    engine.close()
+
 
 class EngineLoadFailTest(unittest.TestCase):
     """An engine that cannot load says `LOAD_FAIL kind=<kind> <detail>` and exits

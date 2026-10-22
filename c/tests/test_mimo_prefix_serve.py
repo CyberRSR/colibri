@@ -570,5 +570,32 @@ class MimoTurnPhotoCudaTest(TurnRuns, unittest.TestCase):
         self.assertNotEqual(logits[1], cold_logits[0])
 
 
+@unittest.skipUnless(fixture.available(),
+                     "mimo is not built or the tiny MiMo fixture is absent "
+                     "(make mimo mimo-tiny-generate)")
+class MimoNulPromptTest(unittest.TestCase):
+    """A tool turn may hold a binary file an agent read, NUL bytes and all. The engine
+    tokenizes a prompt by its byte count and says nul=1 on its CAPS line, which is what
+    lets the gateway send such a prompt at all: here, with one token a byte, every NUL
+    is a position of its own and nothing after one is lost."""
+
+    def test_nul_bytes_are_positions_of_their_own(self):
+        c = Client(log_prefix=False)
+        self.addCleanup(c.p.stdout.close)
+        self.addCleanup(c.p.stderr.close)
+        self.addCleanup(c.close)
+        caps = c.p.stdout.readline().decode("latin-1").split()
+        self.assertEqual(caps[:1], ["CAPS"])
+        self.assertIn("nul=1", caps[1:])
+        prompt = "tool:\x00MZ\x90\x00\x03\x00\x00 Demo version\x00 end"
+        size = len(prompt.encode())
+        got = c.submit(1, prompt)
+        self.assertEqual(got["end"][0], "DONE", got["end"])
+        self.assertEqual(got["accept"], size)
+        self.assertEqual(sorted(got["echo"]), list(range(size)))
+        reply = c.submit(2, prompt + "\nAnswer:", max_tokens=4, ext="")
+        self.assertEqual(reply["end"][0], "DONE", reply["end"])
+
+
 if __name__ == "__main__":
     unittest.main()
