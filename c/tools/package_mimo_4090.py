@@ -10,7 +10,7 @@ and the CUDA toolkit for the DLL):
 
 The archive holds the engine and its CUDA DLL, `coli` with every Python module it
 reaches (tools/pack_python.py, as the main release does), the web UI, the measured
-launcher (tools/start_mimo_cuda_4090.ps1, START-MIMO.cmd), its README and the
+launcher (tools/start_mimo_cuda_4090.ps1, START-MIMO.cmd, START-MIMO-HERETIC.cmd), its README and the
 licenses, plus BUILD-INFO.txt: the commit and every binary's SHA-256.
 """
 import argparse
@@ -28,6 +28,14 @@ START_CMD = """@echo off
 rem MiMo-V2.6-Pro on an RTX 4090: the measured profile (tools\\start_mimo_cuda_4090.ps1).
 rem Arguments go to the script, e.g.  START-MIMO.cmd -ModelDir D:\\models\\MiMo-V2.6-Pro -ShardDir ""
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\\start_mimo_cuda_4090.ps1" %*
+if errorlevel 1 pause
+"""
+
+START_HERETIC_CMD = """@echo off
+rem MiMo-V2.6-Pro-MOPD-heretic on an RTX 4090: the same profile with its own o_proj shard and the
+rem base model's other shards (tools\\start_mimo_cuda_4090.ps1 -Model heretic), API model
+rem mimo-v2.6-pro-mopd-heretic. Arguments go to the script, e.g.  START-MIMO-HERETIC.cmd -ModelId mimo-v2.6-pro-mopd
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\\start_mimo_cuda_4090.ps1" -Model heretic %*
 if errorlevel 1 pause
 """
 
@@ -61,6 +69,7 @@ def main():
     for name in ("start_mimo_cuda_4090.ps1", "benchmark_mimo_cuda.py", "check_mimo_cuda.py"):
         shutil.copy2(C / "tools" / name, stage / "tools" / name)
     (stage / "START-MIMO.cmd").write_bytes(START_CMD.replace("\n", "\r\n").encode("ascii"))
+    (stage / "START-MIMO-HERETIC.cmd").write_bytes(START_HERETIC_CMD.replace("\n", "\r\n").encode("ascii"))
     shutil.copy2(ROOT / "docs" / "mimo-4090-release.md", stage / "README-MIMO-4090.md")
     for name in ("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"):
         if (ROOT / name).is_file():
