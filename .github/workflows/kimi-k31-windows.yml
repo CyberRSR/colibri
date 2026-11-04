@@ -16,6 +16,7 @@ on:
     branches: [claude/kimi-k31-dsa]
     paths:
       - c/kimi_k3.c
+      - c/Makefile
       - c/backend_cuda_k3.cu
       - c/backend_cuda_k3.h
       - c/backend_cuda_k3_loader.c
