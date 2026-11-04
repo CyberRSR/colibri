@@ -38,9 +38,9 @@ int main(void){
         for(int nt = 1; nt <= T; nt++){
             float *one = malloc((size_t)nt * sizeof(float)), *grp = malloc((size_t)K3_MLA_G * nt * sizeof(float));
             for(int nh = 1; nh <= K3_MLA_G; nh++){
-                k3_mla_scores_g(grp, qa, qrp, nh, L, R, nt, kvl, qr, scale);
+                k3_mla_scores_g(grp, qa, qrp, nh, L, R, nt, kvl, qr, scale, NULL);
                 for(int g = 0; g < nh; g++){
-                    k3_mla_scores(one, qa + (size_t)g * kvl, qrp[g], L, R, nt, kvl, qr, scale);
+                    k3_mla_scores(one, qa + (size_t)g * kvl, qrp[g], L, R, nt, kvl, qr, scale, NULL);
                     for(int t = 0; t < nt; t++){
                         float s = 0;
                         for(int i = 0; i < kvl; i++) s = s + prod(qa[(size_t)g * kvl + i], L[(size_t)t * kvl + i]);

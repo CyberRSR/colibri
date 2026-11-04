@@ -598,6 +598,11 @@ def _kimi_geometry(config, context, _model_dir):
                                gv = C*H*vh, ctx = C*H*vh
     The planner reserves the larger of the two (a single forward pass only
     touches one layer type at a time).
+
+    Kimi K3.1 (dsa_config): every DSA layer also keeps its indexer's keys,
+    index_head_dim floats a position (kimi_k3.c's Ic):
+
+        index keys = n_dsa * context * index_head_dim * 4
     """
     layers = _required_int(config, "num_hidden_layers", "kimi_k3")
     experts = _required_int(config, "num_experts", "kimi_k3")
@@ -623,6 +628,14 @@ def _kimi_geometry(config, context, _model_dir):
         n_mla = 0
 
     state = n_mla * context * (kv_lora + qk_rope) * 4
+    dsa = config.get("dsa_config")
+    if isinstance(dsa, dict):
+        index_hd = _required_int(dsa, "index_head_dim", "kimi_k3")
+        dsa_list = dsa.get("dsa_layers")
+        if not isinstance(dsa_list, list):
+            raise ValueError("kimi_k3: missing or invalid planning key 'dsa_config.dsa_layers'")
+        n_dsa = sum(1 for v in dsa_list if isinstance(v, int) and 1 <= v <= layers)
+        state += n_dsa * context * index_hd * 4
     fixed = n_kda * kda_heads * kda_hd * kda_hd * 4
 
     kda_proj = kda_heads * kda_hd
@@ -1443,8 +1456,10 @@ FAMILIES = (
         # "kimi_linear" is Moonshot's model_type for the text model itself
         # (the real checkpoint's text_config carries it; the root "kimi_k3"
         # belongs to the vision wrapper). A text-only export -- the tiny
-        # fixture included -- is therefore kimi_linear at top level.
-        model_types=("kimi_k3", "kimi_linear"),
+        # fixture included -- is therefore kimi_linear at top level. Kimi
+        # K3.1 (moonshotai/Kimi-K3.1-Pro) is the same text model with a DSA
+        # indexer on its MLA layers; its wrapper's root model_type is kimi_k31.
+        model_types=("kimi_k3", "kimi_linear", "kimi_k31"),
         display_name="Kimi K3",
         display_scale="2.8T",
         engine_artifact="kimi_k3",

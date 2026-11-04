@@ -1,4 +1,4 @@
-# Download Kimi K3.1 Pro (moonshotai/Kimi-K3.1-Pro, Kimi K3's architecture and shard layout, about 1.56 TB) for the RTX 4090 / 192 GiB / two-NVMe machine.
+# Download Kimi K3.1 Pro (moonshotai/Kimi-K3.1-Pro: Kimi K3's shard layout plus a DSA indexer in each MLA layer, about 1.56 TB) for the RTX 4090 / 192 GiB / two-NVMe machine.
 # Every MoE layer's shard is cut between C: and D: in proportion to their measured read speeds
 # (17.5 MB unbuffered reads, 3 readers: C: 10.4 GB/s, D: 6.55 GB/s, 16.9 GB/s together), so
 # every layer's experts come from both drives at once. tools/k3_download.py does the work;

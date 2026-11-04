@@ -535,71 +535,153 @@ static void rmsnorm_(float *out, const float *x, const float *w, int D, float ep
     for(int i=0;i<D;i++) out[i]=x[i]*r*w[i];
 }
 
-/* ---------- DSA (Dictionary Sparse Attention) CPU helpers ---------- */
-/* L'indexer DSA e' COSTRUITO ma non COLLEGATO (#1333): l'unica funzione che
- * leggerebbe la cache Ic per scegliere le posizioni top-K, dsa_score_single qui
- * sotto, non ha nessun chiamante -- una grep su tutto il repo trova solo la sua
- * definizione.
+/* ---------- DSA: Kimi K3.1's lightning indexer (CPU) ----------
+ * Kimi K3.1 is Kimi K3 with a DeepSeek-V3.2 lightning indexer on each gated MLA layer
+ * (dsa_config; TokenSpeed's KimiK31Indexer, lightseekorg/tokenspeed#3015). For the query
+ * row at position t and an earlier row s <= t the layer scores
  *
- * Finche' resta cosi' l'attenzione e' densa e il sottosistema e' lavoro pagato e
- * mai letto: CINQUE tensori dal disco per ogni layer DSA (w_k, w_q, w_p, kn_w,
- * kn_b -- e w_q, w_p, kn_b non sono toccati nemmeno dal codice morto), la cache
- * Ic da [max_t * index_hd] float per layer, e per ogni token un matmul piu'
- * rmsnorm piu' rope.
+ *     I(t,s) = d^-0.5 H^-0.5 sum_h w_h(t) relu(q_h(t) . k(s))
+ *     q(t) = wq_b(c_q(t))          [H][d]   c_q: the RMSNorm'd q latent (qa after q_a_layernorm)
+ *     k(s) = LayerNorm(wk(x(s)))   [d]      weight and bias, eps 1e-6; no RoPE, no rotation
+ *     w(t) = weights_proj(x(t))    [H]      x: the attention input (the normed hidden)
  *
- * Spento di default, non cancellato: quel che manca e' collegare
- * dsa_score_single, e chi lo fara' ha bisogno di questi pesi. KIMI_DSA_INDEXER=1
- * li ricarica. Avvertenza per chi ci mettera' mano: collegarlo CAMBIA le uscite
- * -- l'attenzione diventa sparsa dove oggi e' densa -- quindi va fatto contro
- * l'oracolo token-exact, non a occhio. */
-static int k3_dsa_indexer_on(void){
-    static int cached = -1;
-    if(cached < 0){ const char *e = getenv("KIMI_DSA_INDEXER"); cached = e && *e=='1'; }
-    return cached;
+ * and the row attends only the index_topk rows of the highest I; a row with no more than
+ * index_topk positions attends all of them, so up to index_topk positions K3.1's attention is
+ * dense MLA's to the bit. The positive scale d^-0.5 H^-0.5 changes no ranking and is left out.
+ * The keys are kept f32 in the layer's Ic cache [max_t][d] (beside Lc/Rc: photos, parking and
+ * the segment sessions carry it). A row's selection is the same whichever path computes its
+ * attention: k3_dsa_pick's list (the positions in ascending order, ties to the lower one) is
+ * what the CPU's loop gathers and what the GPU's core gets as a mask. */
+static int g_k3_dsa_on;                    /* load_cfg: the checkpoint has dsa_config, K3_DSA != 0 */
+static int k3_dsa_indexer_on(void){ return g_k3_dsa_on; }
+static unsigned long long g_k3_dsa_rows, g_k3_dsa_pos;   /* rows selected for, positions scored */
+static double g_k3_dsa_t;                  /* seconds: the indexer's projections, scores and picks */
+
+/* LayerNorm of one key: mean and variance in double, in order; y may be x */
+static void k3_dsa_ln(float *y, const float *x, const float *w, const float *b, int n){
+    double s=0; for(int i=0;i<n;i++) s+=x[i];
+    const double mu=s/n; double v=0;
+    for(int i=0;i<n;i++){ const double d=(double)x[i]-mu; v+=d*d; }
+    const float r=(float)(1.0/sqrt(v/n+1e-6)), muf=(float)mu;
+    for(int i=0;i<n;i++) y[i]=(x[i]-muf)*r*w[i]+b[i];
 }
 
-static void dsa_rope(float *v, int pos, int qk_rope, float base_theta){
-    int half = qk_rope/2;
-    if(qk_rope > 256){ fprintf(stderr,"qk_rope=%d exceeds rope buffer (256)\n",qk_rope); exit(1); }
-    float in[256]; memcpy(in,v,qk_rope*sizeof(float));
-    for(int j=0;j<half;j++){
-        float inv=powf(base_theta,-2.0f*j/qk_rope), ang=pos*inv;
-        float cs=cosf(ang), sn=sinf(ang);
-        float a=in[2*j], b=in[2*j+1];
-        v[j]      = a*cs - b*sn;
-        v[half+j] = b*cs + a*sn;
-    }
-}
-
-typedef struct { float sc; int idx; } DsaEntry;
-static int dsa_entry_cmp_desc(const void *a,const void *b){
-    float d=((const DsaEntry*)b)->sc-((const DsaEntry*)a)->sc;
-    return d>0?1:d<0?-1:0;
-}
-
-/* dsa_score: multi-head cosine distance + ReLU + weight + top-K select.
- * qi: [nh * index_hd] — per-head indexer query (post-RoPE, post-projection)
- * Ic: [nk * index_hd] — indexer cache rows
- * w32: [nh] — weight scalars from P projection
- * nk: number of cache rows in context
- * sel: output buffer of maxsel ints (sorted desc by score)
- * Returns actual count of selected indices. Caller supplies token-local DsaEntry array. */
-static int dsa_score_single(int *sel, int maxsel, const float *qi, const float *Ic, int index_hd,
-                            const float *w32, int nh, int nk, DsaEntry *entries){
-    if(nk <= 0 || maxsel <= 0) return 0;
-    for(int t=0;t<nk;t++){
-        float s = 0;
-        for(int h=0;h<nh;h++){
-            float d=0;
-            for(int i=0;i<index_hd;i++) d += qi[(int64_t)h*index_hd+i] * Ic[(int64_t)t*index_hd+i];
-            s += w32[h]*(d>0?d:0); /* ReLU per-head */
+/* sc[t-t0] = sum_h w[h] max(0, q[h] . K[t]) for t in [t0,t1); q [nh][hd], K [*][hd]. 8
+ * positions a lane each (8x8 blocks of K transposed in registers), every head's products
+ * added in d's order; a NaN score becomes -inf (never picked over a number). */
+#if defined(__AVX2__)
+#if defined(__FMA__)
+#define K3_DSA_FMA(a,b,c) _mm256_fmadd_ps(a,b,c)
+#else
+#define K3_DSA_FMA(a,b,c) _mm256_add_ps(_mm256_mul_ps(a,b),c)
+#endif
+static inline void k3_tr8(__m256 r[8]);
+#endif
+static void k3_dsa_scores(float *sc, const float *q, const float *w, const float *K, int t0, int t1,
+                          int nh, int hd){
+    int t=t0;
+#if defined(__AVX2__)
+    if(hd>=8&&!(hd&7)&&hd<=512){
+        /* 16 positions a pass (two blocks of 8, a lane each), 4 heads at a time: per column d two
+         * key loads and four query broadcasts feed eight fused products */
+        __m256 kt[2*512];   /* the pass's keys transposed: kt[2d+b] = column d of block b */
+        const __m256 z=_mm256_setzero_ps();
+        for(;t+16<=t1;t+=16){
+            for(int b=0;b<2;b++)
+                for(int d0=0;d0<hd;d0+=8){
+                    __m256 r[8];
+                    for(int j=0;j<8;j++) r[j]=_mm256_loadu_ps(K+(int64_t)(t+8*b+j)*hd+d0);
+                    k3_tr8(r);
+                    for(int j=0;j<8;j++) kt[2*(d0+j)+b]=r[j];
+                }
+            __m256 s0=z, s1=z;
+            int h=0;
+            for(;h+4<=nh;h+=4){
+                const float *q0=q+(int64_t)h*hd, *q1=q0+hd, *q2=q1+hd, *q3=q2+hd;
+                __m256 a0=z,a1=z,a2=z,a3=z,b0=z,b1=z,b2=z,b3=z;
+                for(int d=0;d<hd;d++){
+                    const __m256 ka=kt[2*d], kb=kt[2*d+1];
+                    __m256 x=_mm256_broadcast_ss(q0+d); a0=K3_DSA_FMA(x,ka,a0); b0=K3_DSA_FMA(x,kb,b0);
+                    x=_mm256_broadcast_ss(q1+d);        a1=K3_DSA_FMA(x,ka,a1); b1=K3_DSA_FMA(x,kb,b1);
+                    x=_mm256_broadcast_ss(q2+d);        a2=K3_DSA_FMA(x,ka,a2); b2=K3_DSA_FMA(x,kb,b2);
+                    x=_mm256_broadcast_ss(q3+d);        a3=K3_DSA_FMA(x,ka,a3); b3=K3_DSA_FMA(x,kb,b3);
+                }
+                const __m256 w0=_mm256_set1_ps(w[h]), w1=_mm256_set1_ps(w[h+1]),
+                             w2=_mm256_set1_ps(w[h+2]), w3=_mm256_set1_ps(w[h+3]);
+                s0=K3_DSA_FMA(w0,_mm256_max_ps(a0,z),s0); s1=K3_DSA_FMA(w0,_mm256_max_ps(b0,z),s1);
+                s0=K3_DSA_FMA(w1,_mm256_max_ps(a1,z),s0); s1=K3_DSA_FMA(w1,_mm256_max_ps(b1,z),s1);
+                s0=K3_DSA_FMA(w2,_mm256_max_ps(a2,z),s0); s1=K3_DSA_FMA(w2,_mm256_max_ps(b2,z),s1);
+                s0=K3_DSA_FMA(w3,_mm256_max_ps(a3,z),s0); s1=K3_DSA_FMA(w3,_mm256_max_ps(b3,z),s1);
+            }
+            for(;h<nh;h++){
+                const float *qh=q+(int64_t)h*hd; __m256 a=z, bq=z;
+                for(int d=0;d<hd;d++){
+                    const __m256 x=_mm256_broadcast_ss(qh+d);
+                    a=K3_DSA_FMA(x,kt[2*d],a); bq=K3_DSA_FMA(x,kt[2*d+1],bq);
+                }
+                const __m256 wh=_mm256_set1_ps(w[h]);
+                s0=K3_DSA_FMA(wh,_mm256_max_ps(a,z),s0); s1=K3_DSA_FMA(wh,_mm256_max_ps(bq,z),s1);
+            }
+            _mm256_storeu_ps(sc+(t-t0),s0); _mm256_storeu_ps(sc+(t-t0)+8,s1);
         }
-        entries[t]=(DsaEntry){s/sqrtf((float)nh), t};
     }
-    int K = nk < maxsel ? nk : maxsel;
-    qsort(entries, nk, sizeof(DsaEntry), dsa_entry_cmp_desc);
-    for(int k=0;k<K;k++) sel[k]=entries[k].idx;
-    return K;
+#endif
+    for(;t<t1;t++){
+        const float *kr=K+(int64_t)t*hd; float s=0;
+        for(int h=0;h<nh;h++){
+            const float *qh=q+(int64_t)h*hd; float a=0;
+            for(int d=0;d<hd;d++) a+=qh[d]*kr[d];
+            s+=w[h]*(a>0?a:0);
+        }
+        sc[t-t0]=s;
+    }
+    for(int i=0;i<t1-t0;i++) if(sc[i]!=sc[i]) sc[i]=-INFINITY;
+}
+
+/* The k-th largest of a[0..n) (k from 1), a reordered: quickselect, Hoare's partition around
+ * the median of three (equal values split evenly, so a flat row stays linear) */
+static float k3_dsa_kth(float *a, int n, int k){
+    int lo=0, hi=n-1; const int want=k-1;
+    while(lo<hi){
+        const int mid=lo+(hi-lo)/2;
+        float x=a[lo], y=a[mid], zz=a[hi];
+        const float p = x>y ? (y>zz ? y : (x>zz ? zz : x)) : (x>zz ? x : (y>zz ? zz : y));
+        int i=lo, j=hi;
+        while(i<=j){
+            while(a[i]>p) i++;
+            while(a[j]<p) j--;
+            if(i<=j){ const float t=a[i]; a[i]=a[j]; a[j]=t; i++; j--; }
+        }
+        if(want<=j) hi=j; else if(want>=i) lo=i; else return a[want];
+    }
+    return a[want];
+}
+/* sel = the K positions of the highest scores in ascending order, ties to the lower position
+ * (all nt of them when nt <= K); tmp: nt floats of room. Returns how many. */
+static int k3_dsa_pick(int *sel, const float *sc, float *tmp, int nt, int K){
+    if(nt<=K){ for(int t=0;t<nt;t++) sel[t]=t; return nt; }
+    memcpy(tmp,sc,(size_t)nt*sizeof(float));
+    const float v=k3_dsa_kth(tmp,nt,K);
+    int gt=0; for(int t=0;t<nt;t++) gt+=sc[t]>v;
+    int eq=K-gt, n=0;
+    for(int t=0;t<nt;t++) if(sc[t]>v||(sc[t]==v&&eq>0)){ if(!(sc[t]>v)) eq--; sel[n++]=t; }
+    return n;
+}
+/* One query row's selection over the nt positions of its layer's keys Ic: q [nh][hd], w [nh];
+ * sc and tmp nt floats each. par: the positions over the OpenMP team (a decode step's single
+ * row), else on the caller's thread (a prompt step's rows go over the team instead). */
+#define K3_DSA_BLK 2048
+static int k3_dsa_row(int *sel, const float *q, const float *w, const float *Ic, int nt, int nh, int hd,
+                      int K, float *sc, float *tmp, int par){
+    if(par&&nt>K3_DSA_BLK){
+        const int nb=(nt+K3_DSA_BLK-1)/K3_DSA_BLK;
+        #pragma omp parallel for schedule(static)
+        for(int b=0;b<nb;b++){
+            const int t0=b*K3_DSA_BLK, t1=t0+K3_DSA_BLK<nt?t0+K3_DSA_BLK:nt;
+            k3_dsa_scores(sc+t0,q,w,Ic,t0,t1,nh,hd);
+        }
+    } else k3_dsa_scores(sc,q,w,Ic,0,nt,nh,hd);
+    return k3_dsa_pick(sel,sc,tmp,nt,K);
 }
 
 /* ---------- W: load-time quantization + matvec ---------- */
@@ -1419,31 +1501,57 @@ static void load_cfg(Cfg *c, const char *snap){
     if(!kl||kl->t!=J_ARR){ fprintf(stderr,"config.json: missing kda_layers\n"); exit(1); }
     for(int i=0;i<kl->len;i++){ int v=(int)kl->kids[i]->num;      /* 1-indexed */
         if(v>=1&&v<=c->n_layers) c->is_kda[v-1]=1; }
-    /* DSA indexer (optional — if absent in config, DSA is disabled) */
-    { jval *jn=json_get(tc,"index_hd");   c->index_hd   = jn&&jn->t==J_NUM ? (int)jn->num : 0; }
-    { jval *jn=json_get(tc,"index_nh");   c->index_nh   = jn&&jn->t==J_NUM ? (int)jn->num : 0; }
-    { jval *jn=json_get(tc,"index_topk"); c->index_topk = jn&&jn->t==J_NUM ? (int)jn->num : 0; }
-    if(c->index_hd > 0){
-        /* Default: all MLA layers are "full" DSA layers (compute own Ic + top-K) */
-        for(int i=0;i<c->n_layers;i++) if(!c->is_kda[i]) c->idx_type[i]=1;
-        jval *il=json_get(tc,"index_layers");
-        if(il && il->t==J_ARR){
-            /* Override: explicit list of 1-indexed full DSA layers */
-            memset(c->idx_type, 0, sizeof(c->idx_type));
-            for(int i=0;i<il->len;i++){ int v=(int)il->kids[i]->num;
-                if(v>=1&&v<=c->n_layers) c->idx_type[v-1]=1; }
+    /* DSA (Kimi K3.1): text_config.dsa_config, a lightning indexer on every gated MLA layer
+     * (DeepSeek-V3.2's sparse attention: each query row attends only the index_topk earlier
+     * rows its layer's indexer scores highest). Absent (Kimi K3): dense MLA. Every key the
+     * released checkpoint declares is checked, as TokenSpeed's parser does: a value this
+     * engine does not implement (a RoPE part in the index keys, an RMSNorm key norm, FP8
+     * indexer weights, a top-k shared between layers) stops the load instead of computing
+     * something else. K3_DSA=0 runs the MLA layers dense (the indexer neither loaded nor
+     * run): exact up to index_topk positions, an approximation past them. */
+    { jval *dc=json_get(tc,"dsa_config");
+      if(dc&&dc->t==J_OBJ){
+        static const char *known[]={"dsa_layers","index_topk","index_head_dim","index_num_heads",
+                                    "index_rope_dim","index_k_norm_type","index_topk_freq",
+                                    "index_skip_topk_offset","indexer_use_fp8"};
+        for(int i=0;i<dc->len;i++){
+            int ok=0; for(size_t k=0;k<sizeof known/sizeof *known;k++) if(!strcmp(dc->keys[i],known[k])) ok=1;
+            if(!ok){ fprintf(stderr,"config.json: dsa_config.%s is not implemented by this engine\n",dc->keys[i]); exit(1); }
         }
-    }
-    /* the DSA indexer ropes the first qk_rope_head_dim floats of each of its index_hd-long
-     * rows (dsa_rope) */
-    if(c->index_hd > 0 && c->index_hd < c->qk_rope){
-        fprintf(stderr,"config.json: index_hd=%d is shorter than qk_rope_head_dim=%d, which the "
-                       "indexer ropes in each of its rows\n",c->index_hd,c->qk_rope); exit(1); }
+        jval *rd=json_get(dc,"index_rope_dim"), *nt=json_get(dc,"index_k_norm_type"),
+             *fq=json_get(dc,"index_topk_freq"), *f8=json_get(dc,"indexer_use_fp8"),
+             *dl=json_get(dc,"dsa_layers");
+        if(rd&&(rd->t!=J_NUM||rd->num!=0)){
+            fprintf(stderr,"config.json: dsa_config.index_rope_dim must be 0 (index keys without RoPE)\n"); exit(1); }
+        if(nt&&(nt->t!=J_STR||strcmp(nt->str,"layernorm"))){
+            fprintf(stderr,"config.json: dsa_config.index_k_norm_type must be \"layernorm\"\n"); exit(1); }
+        if(fq&&(fq->t!=J_NUM||fq->num!=1)){
+            fprintf(stderr,"config.json: dsa_config.index_topk_freq must be 1 (each layer its own top-k)\n"); exit(1); }
+        if(f8&&!(f8->t==J_BOOL&&!f8->boolean)&&f8->t!=J_NULL){
+            fprintf(stderr,"config.json: dsa_config.indexer_use_fp8 must be false (BF16 indexer weights)\n"); exit(1); }
+        c->index_hd  =(int)req_num(dc,"index_head_dim");
+        c->index_nh  =(int)req_num(dc,"index_num_heads");
+        c->index_topk=(int)req_num(dc,"index_topk");
+        if(c->index_hd<1||c->index_hd>1024||c->index_nh<1||c->index_nh>256||c->index_topk<1){
+            fprintf(stderr,"config.json: dsa_config dimensions out of range\n"); exit(1); }
+        if(!dl||dl->t!=J_ARR){ fprintf(stderr,"config.json: dsa_config.dsa_layers missing\n"); exit(1); }
+        for(int i=0;i<dl->len;i++){ int v=(int)dl->kids[i]->num;      /* 1-indexed */
+            if(dl->kids[i]->t!=J_NUM||v<1||v>c->n_layers||c->is_kda[v-1]){
+                fprintf(stderr,"config.json: dsa_config.dsa_layers names %d, not a gated MLA layer\n",v); exit(1); }
+            c->idx_type[v-1]=1; }
+        const char *e=getenv("K3_DSA");
+        if(e&&*e=='0'){
+            fprintf(stderr,"[K3-DSA] K3_DSA=0: the MLA layers dense, the indexer off (exact up to %d positions, "
+                           "approximate past them)\n",c->index_topk);
+            c->index_hd=c->index_nh=c->index_topk=0; memset(c->idx_type,0,sizeof c->idx_type);
+        }
+      } }
     jval *b=json_get(root,"bos_token_id"); if(!b) b=json_get(tc,"bos_token_id");
     c->bos = b&&b->t==J_NUM ? (int)b->num : -1;
     jval *e=json_get(root,"eos_token_id"); if(!e) e=json_get(tc,"eos_token_id");
     if(e&&e->t==J_NUM) c->eos[c->n_eos++]=(int)e->num;
     else if(e&&e->t==J_ARR) for(int i=0;i<e->len&&c->n_eos<8;i++) c->eos[c->n_eos++]=(int)e->kids[i]->num;
+    g_k3_dsa_on=c->index_hd>0;
     free(buf); (void)arena;
 }
 
@@ -1729,13 +1837,15 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
             w_load(m,&a->g,NM("model.layers.%d.self_attn.g_proj.weight",i),c->n_heads*c->v_head,c->hidden,mbits);
             a->qa_ln =f32_load(m,NM("model.layers.%d.self_attn.q_a_layernorm.weight",i),c->q_lora);
             a->kva_ln=f32_load(m,NM("model.layers.%d.self_attn.kv_a_layernorm.weight",i),c->kv_lora);
-            /* DSA indexer weights – only for "full" layers (idx_type=1) */
+            /* K3.1's DSA indexer (dsa_config.dsa_layers): BF16 in the checkpoint, kept at the MLA
+             * layers' bits (K3_DSA_BITS: its own) */
             if(c->index_hd > 0 && c->idx_type[i] && k3_dsa_indexer_on()){
-                w_load(m,&a->wk,NM("model.layers.%d.self_attn.w_k.weight",i),(int64_t)c->index_hd,c->hidden,mbits);
-                w_load(m,&a->wq,NM("model.layers.%d.self_attn.w_q.weight",i),(int64_t)c->index_hd,c->q_lora,mbits);
-                w_load(m,&a->wp,NM("model.layers.%d.self_attn.w_p.weight",i),(int64_t)c->index_hd,c->hidden,mbits);
-                a->knw=f32_load(m,NM("model.layers.%d.self_attn.kn_w",i),(int64_t)c->index_hd);
-                a->knb=f32_load(m,NM("model.layers.%d.self_attn.kn_b",i),(int64_t)c->index_hd);
+                const char *db=getenv("K3_DSA_BITS"); const int dbits=db&&*db?atoi(db):mbits;
+                w_load(m,&a->wq,NM("model.layers.%d.self_attn.indexer.wq_b.weight",i),(int64_t)c->index_nh*c->index_hd,c->q_lora,dbits);
+                w_load(m,&a->wk,NM("model.layers.%d.self_attn.indexer.wk.weight",i),(int64_t)c->index_hd,c->hidden,dbits);
+                w_load(m,&a->wp,NM("model.layers.%d.self_attn.indexer.weights_proj.weight",i),(int64_t)c->index_nh,c->hidden,dbits);
+                a->knw=f32_load(m,NM("model.layers.%d.self_attn.indexer.k_norm.weight",i),(int64_t)c->index_hd);
+                a->knb=f32_load(m,NM("model.layers.%d.self_attn.indexer.k_norm.bias",i),(int64_t)c->index_hd);
             }
         }
         if(l->sparse){
@@ -1889,7 +1999,9 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
                     (getenv("K3_MAXT") ? atoi(getenv("K3_MAXT")) : 8192);
         if(max_t < 1) max_t = 8192;
         int nkv = 0; for(int i=0;i<c->n_layers;i++) if(!m->L[i].kda) nkv++;
-        double kv_gb = (double)nkv*(double)max_t*(double)(c->kv_lora+c->qk_rope)*4.0/1e9;
+        int ndsa = 0; for(int i=0;i<c->n_layers;i++) if(c->index_hd>0&&c->idx_type[i]) ndsa++;
+        double kv_gb = ((double)nkv*(double)(c->kv_lora+c->qk_rope) +
+                        (double)ndsa*(double)c->index_hd)*(double)max_t*4.0/1e9;   /* + K3.1's index keys */
         /* 2.5 GB page cache -- measured on Linux 2026-07-06: strangling it drops
          * buffered pread from ~800 to ~180 MB/s and the last GB of LRU costs
          * more in lost bandwidth than it returns. k3_act_gb(): the activations and logits.
@@ -2454,8 +2566,9 @@ static void k3_rowdot8_i8(const W *w, int r0, const float *x, float *y){
  * one a lane, when both widths are multiples of 8 (every product of the old loop then
  * went through GCC's vector multiply, none through its scalar fma tail); the last block's
  * spare lanes repeat the last position and are not stored. Otherwise the old loop. */
+/* sel: the cached rows of the nt scores (K3.1's selection, ascending), NULL: rows 0..nt-1 */
 static void k3_mla_scores(float *sc, const float *qabs, const float *qrp, const float *Lc_,
-                          const float *Rc_, int nt, int kvl, int qr, float scale){
+                          const float *Rc_, int nt, int kvl, int qr, float scale, const int *sel){
     int t=0;
 #if defined(__AVX2__)
     if(kvl>=8&&!(kvl&7)&&(qr==0||(qr>=8&&!(qr&7)))){
@@ -2464,6 +2577,7 @@ static void k3_mla_scores(float *sc, const float *qabs, const float *qrp, const 
             const float *la[8], *lb[8], *pa[8], *pb[8];
             for(int j=0;j<8;j++){
                 int ta=t+j<nt?t+j:nt-1, tb=t+8+j<nt?t+8+j:nt-1;
+                if(sel){ ta=sel[ta]; tb=sel[tb]; }
                 la[j]=Lc_+(int64_t)ta*kvl; lb[j]=Lc_+(int64_t)tb*kvl;
                 pa[j]=Rc_+(int64_t)ta*qr;  pb[j]=Rc_+(int64_t)tb*qr;
             }
@@ -2479,7 +2593,8 @@ static void k3_mla_scores(float *sc, const float *qabs, const float *qrp, const 
     }
 #endif
     for(;t<nt;t++){
-        const float *Lt=Lc_+(int64_t)t*kvl, *Rt=Rc_+(int64_t)t*qr;
+        const int r=sel?sel[t]:t;
+        const float *Lt=Lc_+(int64_t)r*kvl, *Rt=Rc_+(int64_t)r*qr;
         float s2=0; for(int i=0;i<kvl;i++) s2+=qabs[i]*Lt[i];
         for(int i=0;i<qr;i++) s2+=qrp[i]*Rt[i];
         sc[t]=s2*scale;
@@ -2506,7 +2621,8 @@ static inline void k3_mla_dot16g(__m256 *a, __m256 *b, const float *const *q, co
 }
 #endif
 static void k3_mla_scores_g(float *sc, const float *qab, const float *const *qrps, int nh,
-                            const float *Lc_, const float *Rc_, int nt, int kvl, int qr, float scale){
+                            const float *Lc_, const float *Rc_, int nt, int kvl, int qr, float scale,
+                            const int *sel){
 #if defined(__AVX2__)
     if(kvl>=8&&!(kvl&7)&&(qr==0||(qr>=8&&!(qr&7)))){
         const float *ql[K3_MLA_G], *qp[K3_MLA_G];
@@ -2516,6 +2632,7 @@ static void k3_mla_scores_g(float *sc, const float *qab, const float *const *qrp
             const float *la[8], *lb[8], *pa[8], *pb[8];
             for(int j=0;j<8;j++){
                 int ta=t+j<nt?t+j:nt-1, tb=t+8+j<nt?t+8+j:nt-1;
+                if(sel){ ta=sel[ta]; tb=sel[tb]; }
                 la[j]=Lc_+(int64_t)ta*kvl; lb[j]=Lc_+(int64_t)tb*kvl;
                 pa[j]=Rc_+(int64_t)ta*qr;  pb[j]=Rc_+(int64_t)tb*qr;
             }
@@ -2534,7 +2651,7 @@ static void k3_mla_scores_g(float *sc, const float *qab, const float *const *qrp
     }
 #endif
     for(int g=0;g<nh;g++)
-        k3_mla_scores(sc+(int64_t)g*nt,qab+(int64_t)g*kvl,qrps[g],Lc_,Rc_,nt,kvl,qr,scale);
+        k3_mla_scores(sc+(int64_t)g*nt,qab+(int64_t)g*kvl,qrps[g],Lc_,Rc_,nt,kvl,qr,scale,sel);
 }
 #ifdef COLI_K3_CUDA
 /* A prompt step's gated MLA layer on the GPU (k3cu_mla_layer), the call-by-call path's bytes
@@ -2578,12 +2695,88 @@ static int k3_mla_gpu(Model *m, Mla *a, int li, const float *x, int pos0, int C,
     return ok;
 }
 #endif
-    static void mla_forward(Model *m, Layer *l, int li, const float *x, int pos0, int C, float *out){
+/* K3.1: the step's index keys into the layer's cache Ic (wk, then k_norm's LayerNorm), each row at
+ * its position (a multiplexed step's in its own conversation's cache) */
+static void k3_dsa_keys(Model *m, Mla *a, int li, const float *x, int pos0, int C, const K3Row *mr){
+    const Cfg *c=&m->c; const int hd=c->index_hd;
+    const double t0=now_s();
+    float *kb=falloc((int64_t)C*hd);
+    w_matmul(kb,x,&a->wk,C);
+    for(int t=0;t<C;t++){
+        const int pt=mr?mr[t].pos:pos0+t;
+        float *dst=(mr?mr[t].seq->Ic[li]:a->Ic)+(int64_t)pt*hd;
+        k3_dsa_ln(dst,kb+(int64_t)t*hd,a->knw,a->knb,hd);
+    }
+    free(kb);
+    g_k3_dsa_t+=now_s()-t0;
+}
+/* K3.1: the rows each query row of the step attends. ns[t] = -1: all of its positions (it has no
+ * more than index_topk), else how many, listed ascending in sel[t*index_topk..]. qa: the step's
+ * RMSNorm'd q latents [C][q_lora], x its attention inputs [C][hidden]; the step's keys already in
+ * Ic. Returns 0 when no row selects. */
+static int k3_dsa_select(Model *m, Mla *a, int li, const float *x, const float *qa, int pos0, int C,
+                         const K3Row *mr, int *sel, int *ns){
+    const Cfg *c=&m->c; const int hd=c->index_hd, nh=c->index_nh, K=c->index_topk;
+    int r0=C, nsel=0, maxnt=0;
+    for(int t=0;t<C;t++){
+        const int nt=(mr?mr[t].pos:pos0+t)+1;
+        ns[t]=-1;
+        if(nt>K){ if(t<r0) r0=t; nsel++; if(nt>maxnt) maxnt=nt; }
+    }
+    if(!nsel) return 0;
+    const double t0=now_s();
+    const int R=C-r0;   /* rows r0.. (a prompt step's are all past index_topk from r0 on) */
+    float *qi=falloc((int64_t)R*nh*hd), *wi=falloc((int64_t)R*nh);
+    w_matmul(qi,qa+(int64_t)r0*c->q_lora,&a->wq,R);
+    w_matmul(wi,x+(int64_t)r0*c->hidden,&a->wp,R);
+    unsigned long long npos=0;
+    if(nsel<omp_get_max_threads()){   /* a decode step: each row's positions over the team */
+        float *sc=falloc(maxnt), *tmp=falloc(maxnt);
+        for(int t=r0;t<C;t++){
+            const int nt=(mr?mr[t].pos:pos0+t)+1;
+            if(nt<=K) continue;
+            ns[t]=k3_dsa_row(sel+(int64_t)t*K,qi+(int64_t)(t-r0)*nh*hd,wi+(int64_t)(t-r0)*nh,
+                             mr?mr[t].seq->Ic[li]:a->Ic,nt,nh,hd,K,sc,tmp,1);
+            npos+=(unsigned long long)nt;
+        }
+        free(sc); free(tmp);
+    } else {                          /* a prompt step: its rows over the team */
+        #pragma omp parallel reduction(+:npos)
+        {
+            float *sc=falloc(maxnt), *tmp=falloc(maxnt);
+            #pragma omp for schedule(dynamic,1)
+            for(int t=r0;t<C;t++){
+                const int nt=(mr?mr[t].pos:pos0+t)+1;
+                if(nt<=K) continue;
+                ns[t]=k3_dsa_row(sel+(int64_t)t*K,qi+(int64_t)(t-r0)*nh*hd,wi+(int64_t)(t-r0)*nh,
+                                 mr?mr[t].seq->Ic[li]:a->Ic,nt,nh,hd,K,sc,tmp,0);
+                npos+=(unsigned long long)nt;
+            }
+            free(sc); free(tmp);
+        }
+    }
+    free(qi); free(wi);
+    g_k3_dsa_rows+=(unsigned long long)nsel; g_k3_dsa_pos+=npos;
+    g_k3_dsa_t+=now_s()-t0;
+    return 1;
+}
+static void mla_forward(Model *m, Layer *l, int li, const float *x, int pos0, int C, float *out){
     Cfg *c=&m->c; Mla *a=&l->m;
+    const K3Row *mr = m->mux_rows;   /* a multiplexed step: each row's own caches and position */
+    /* K3.1: does a row of the step have more positions than it attends (index_topk)? */
+    const int dsa=c->index_hd>0&&c->idx_type[li]&&k3_dsa_indexer_on();
+    int dsa_need=0;
+    if(dsa){
+        if(mr){ for(int t=0;t<C;t++) if(mr[t].pos+1>c->index_topk) dsa_need=1; }
+        else dsa_need=pos0+C>c->index_topk;
+    }
 #ifdef COLI_K3_CUDA
-    /* a prompt step of one sequence (the GPU core's case below) on the GPU, the layer whole */
-    if(!m->mux_rows&&g_k3g_on&&C>=g_k3g_min_rows&&!(c->index_hd>0&&c->idx_type[li]&&k3_dsa_indexer_on())&&
-       k3_mla_gpu(m,a,li,x,pos0,C,out)) return;
+    /* a prompt step of one sequence (the GPU core's case below) on the GPU, the layer whole; a
+     * K3.1 layer's when every row attends all its positions (its keys then on the CPU) */
+    if(!mr&&g_k3g_on&&C>=g_k3g_min_rows&&!dsa_need&&k3_mla_gpu(m,a,li,x,pos0,C,out)){
+        if(dsa) k3_dsa_keys(m,a,li,x,pos0,C,NULL);
+        return;
+    }
 #endif
     int H=c->n_heads, qh=c->qk_head, vh=c->v_head, kvl=c->kv_lora, qr=c->qk_rope;
     float *qa=k3_balloc((int64_t)C*c->q_lora), *qv=k3_balloc((int64_t)C*H*qh);
@@ -2604,7 +2797,6 @@ static int k3_mla_gpu(Model *m, Mla *a, int li, const float *x, int pos0, int C,
      * and at row 0 instead of row pos_base — so on Metal the host cache was never populated
      * and attention read garbage, collapsing decode after a few tokens. This write is a
      * trivial rmsnorm+copy per row (negligible vs MoE), so CPU is the correct home for it. */
-    const K3Row *mr = m->mux_rows;   /* a multiplexed step: each row's own caches and position */
     for (int t = 0; t < C; t++) {
         int pt = mr ? mr[t].pos : pos0 + t;
         float *Lrow = (mr ? mr[t].seq->Lc[li] : m->Lc[li]) + (int64_t)pt * kvl,
@@ -2613,21 +2805,13 @@ static int k3_mla_gpu(Model *m, Mla *a, int li, const float *x, int pos0, int C,
         rmsnorm_(Lrow, cv, a->kva_ln, kvl, c->eps);
         memcpy(Rrow, cv + kvl, qr * sizeof(float));
     }
-    /* DSA indexer: prefill — write K portion for full layers */
-    if(c->index_hd > 0 && c->idx_type[li] && k3_dsa_indexer_on()){
-        /* the chunk's keys in one call ([C, index_hd] from [C, hidden], rows contiguous
-         * in Ic; every kernel computes a row as the one-row call does), then per row */
-        float *ikb = mr ? falloc((int64_t)C * c->index_hd) : a->Ic + (int64_t)pos0 * c->index_hd;
-        w_matmul(ikb, x, &a->wk, C);
-        for(int t=0;t<C;t++){
-            int pt = mr ? mr[t].pos : pos0 + t;
-            float *ikd = mr ? mr[t].seq->Ic[li] + (int64_t)pt * c->index_hd : a->Ic + (int64_t)pt * c->index_hd;
-            if (mr) memcpy(ikd, ikb + (int64_t)t * c->index_hd, (size_t)c->index_hd * sizeof(float));
-            rmsnorm_(ikd, ikd, a->knw, c->index_hd, c->eps);
-            if(c->qk_rope > 0)
-                dsa_rope(ikd, pt, c->qk_rope, c->theta);   /* in-place on first qk_rope dims */
-        }
-        if (mr) free(ikb);
+    /* K3.1: the step's index keys, then each row's selection (its own key among them) */
+    int *dsel=NULL, *dns=NULL;
+    if(dsa) k3_dsa_keys(m,a,li,x,pos0,C,mr);
+    if(dsa_need){
+        dsel=malloc((size_t)C*c->index_topk*sizeof(int)); dns=malloc((size_t)C*sizeof(int));
+        if(!dsel||!dns){ fprintf(stderr,"OOM DSA selection\n"); exit(1); }
+        if(!k3_dsa_select(m,a,li,x,qa,pos0,C,mr,dsel,dns)){ free(dsel); free(dns); dsel=dns=NULL; }
     }
     w_matmul(gv,x,&a->g,C);
 #ifdef COLI_VULKAN
@@ -2635,15 +2819,35 @@ static int k3_mla_gpu(Model *m, Mla *a, int li, const float *x, int pos0, int C,
 #endif
     int on_gpu=0;
 #ifdef COLI_K3_CUDA
-    /* a prompt step's attention core on the GPU, the loop below's bytes (k3cu_mla) */
+    /* a prompt step's attention core on the GPU, the loop below's bytes (k3cu_mla); a K3.1 step
+     * whose rows select, with the selection as a mask (k3cu_mla_mask: the rows a row does not
+     * attend weigh exactly 0, so its bytes are the loop's over the selected rows) */
     if(!mr&&g_k3g_on&&C>=g_k3g_min_rows&&a->kvb.fmt==1&&a->kvb.q8&&kvl%8==0&&(qr==0||qr%8==0)){
         double t0=now_s();   /* the whole step: the call takes its rows in chunks, each with the positions up to its own */
-        on_gpu=k3cu_mla(m->Lc[li],m->Rc[li],pos0+C,pos0,C,qv,gv,a->kvb.q8,a->kvb.s,H,c->qk_nope,qr,vh,kvl,c->attn_scale,ctx);
+        if(dns){
+            const int N=pos0+C, mw=(N+31)/32, K=c->index_topk;
+            uint32_t *mask=calloc((size_t)C*mw,sizeof(uint32_t));
+            if(mask){
+                for(int t=0;t<C;t++){
+                    uint32_t *mrow=mask+(size_t)t*mw;
+                    if(dns[t]<0){ const int nt=pos0+t+1;
+                        for(int w=0;w<nt/32;w++) mrow[w]=0xffffffffu;
+                        if(nt%32) mrow[nt/32]=(1u<<(nt%32))-1u; }
+                    else for(int j=0;j<dns[t];j++){ const int p=dsel[(int64_t)t*K+j]; mrow[p>>5]|=1u<<(p&31); }
+                }
+                on_gpu=k3cu_mla_mask(m->Lc[li],m->Rc[li],N,pos0,C,qv,gv,a->kvb.q8,a->kvb.s,H,c->qk_nope,qr,vh,kvl,
+                                     c->attn_scale,mask,mw,ctx);
+                free(mask);
+            }
+        } else
+            on_gpu=k3cu_mla(m->Lc[li],m->Rc[li],pos0+C,pos0,C,qv,gv,a->kvb.q8,a->kvb.s,H,c->qk_nope,qr,vh,kvl,c->attn_scale,ctx);
         if(on_gpu) m->t_mla_gpu+=now_s()-t0;
     }
 #endif
     for(int tt=0;tt<C&&!on_gpu;tt++){
-        int nt=(mr?mr[tt].pos:pos0+tt)+1;
+        /* K3.1: a row past index_topk scores and sums only its selected rows, in their order */
+        const int *sl=dns&&dns[tt]>=0?dsel+(int64_t)tt*c->index_topk:NULL;
+        const int nt=sl?dns[tt]:(mr?mr[tt].pos:pos0+tt)+1;
         const float *Lc_=mr?mr[tt].seq->Lc[li]:m->Lc[li], *Rc_=mr?mr[tt].seq->Rc[li]:m->Rc[li];
         const float *qvt=qv+(int64_t)tt*H*qh, *gvt=gv+(int64_t)tt*H*vh;
         float *ctxt=ctx+(int64_t)tt*H*vh;
@@ -2662,14 +2866,14 @@ static int k3_mla_gpu(Model *m, Mla *a, int li, const float *x, int pos0, int C,
             for(int d=0;d<c->qk_nope;d++) w_addrow(&a->kvb,rbase+d,qp[d],qabs);
             qrps[g]=qp+c->qk_nope;
           }
-          k3_mla_scores_g(scs,qab,qrps,nh,Lc_,Rc_,nt,kvl,qr,c->attn_scale);
+          k3_mla_scores_g(scs,qab,qrps,nh,Lc_,Rc_,nt,kvl,qr,c->attn_scale,sl);
           for(int g=0;g<nh;g++){
             const int h=h0+g, rbase=h*(c->qk_nope+vh);
             float *sc=scs+(int64_t)g*nt;
             softmax_(sc,nt);
             float clat[4096]; memset(clat,0,kvl*sizeof(float));
             for(int t=0;t<nt;t++){
-                const float *Lt=Lc_+(int64_t)t*kvl; float s2=sc[t];
+                const float *Lt=Lc_+(int64_t)(sl?sl[t]:t)*kvl; float s2=sc[t];
                 for(int i=0;i<kvl;i++) clat[i]+=s2*Lt[i];
             }
             float *cx=ctxt+(int64_t)h*vh;
@@ -2688,6 +2892,7 @@ static int k3_mla_gpu(Model *m, Mla *a, int li, const float *x, int pos0, int C,
           free(qab); free(scs);
         }
     }
+    free(dsel); free(dns);
     w_matmul(out,ctx,&a->o,C);
     k3_bfree(qa);k3_bfree(qv);k3_bfree(ckv);k3_bfree(gv);k3_bfree(ctx);
 }
@@ -5278,7 +5483,12 @@ static void kv_alloc(Model *m, int max_t){
      * inkling's head-major K/V a grow is a straight prefix copy — no re-layout.
      * The 69 KDA layers are untouched here: their recurrent state does not
      * scale with max_t and survives on its own. */
-    if(m->Lc && max_t<=m->max_t) return;
+    if(m->Lc && max_t<=m->max_t){
+        /* a conversation swapped in (k3_seq_swap) whose caches came before K3.1's keys did */
+        for(int i=0;i<c->n_layers;i++) if(c->index_hd>0&&c->idx_type[i]&&k3_dsa_indexer_on()&&!m->L[i].m.Ic)
+            m->L[i].m.Ic=falloc((int64_t)m->max_t*c->index_hd);
+        return;
+    }
 
     float **oldL=m->Lc, **oldR=m->Rc;
     int keep=(m->Lc && m->kvp.len>0 && m->kvp.len<=max_t) ? m->kvp.len : 0;
@@ -5299,11 +5509,16 @@ static void kv_alloc(Model *m, int max_t){
 
     /* the record describes those same positions, so it survives with them */
     if(!kv_prefix_grow(&m->kvp,max_t,keep)) kv_prefix_clear(&m->kvp);
-    /* DSA indexer cache — only for full layers (idx_type=1) */
+    /* K3.1's index keys, grown like Lc/Rc: the kept positions copied, the old rows freed */
     for(int i=0;i<c->n_layers;i++){
         Mla *a=&m->L[i].m;
         if(c->index_hd > 0 && c->idx_type[i] && k3_dsa_indexer_on()){
+            float *old=a->Ic;
             a->Ic = falloc((int64_t)max_t * c->index_hd);
+            if(old){
+                if(keep) memcpy(a->Ic,old,(size_t)keep*c->index_hd*sizeof(float));
+                free(old);
+            }
         }
     }
 }
@@ -5656,7 +5871,7 @@ static void model_state_reset(Model *m){
             if(m->Lc && m->Lc[i]) free(m->Lc[i]);
             if(m->Rc && m->Rc[i]) free(m->Rc[i]);
             Mla *a=&m->L[i].m;
-            if(c->index_hd > 0 && c->idx_type[i] && a->Ic) free(a->Ic);
+            if(c->index_hd > 0 && c->idx_type[i] && a->Ic){ free(a->Ic); a->Ic=NULL; }
         }
         if(m->Lc) free(m->Lc);
         if(m->Rc) free(m->Rc);
@@ -6707,6 +6922,9 @@ int main(int argc, char **argv){
             m.ebytes/1e9);
     fprintf(stderr,"[K3] the prompt's KDA on the CPU: f32 projections %.1fs, conv %.1fs, heads %.1fs; on the GPU %.1fs; "
             "%.0f page faults\n",m.t_kda_f32,m.t_kda_conv,m.t_kda_heads,m.t_kda_gpu,k3_page_faults()-pf0);
+    if(k3_dsa_indexer_on())
+        fprintf(stderr,"[K3-DSA] the prompt: index keys and selections %.1fs; %llu rows selected %d of their positions, "
+                "%.0f M positions scored\n",g_k3_dsa_t,g_k3_dsa_rows,m.c.index_topk,g_k3_dsa_pos/1e6);
 #ifdef COLI_CUDA
     k3_cuda_report("prompt");
 #endif

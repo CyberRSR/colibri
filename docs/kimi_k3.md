@@ -229,6 +229,8 @@ Judge quantization choices on real-text logits, not synthetic-vector norms.
 | `K3_WAIT_LAYERS` | 0 | measurement: a decode token's wait for reads and its demand reads, by layer (last lines) |
 | `K3_REUSE` | -- | measurement: every MoE layer's LRU stack distances and predicted share, written to this file at exit |
 | `K3_TOPP` | 0 | keep routed experts to cumulative weight p (0 = off) |
+| `K3_DSA` | 1 | Kimi K3.1: 0 runs the MLA layers dense, the indexer neither loaded nor run (exact up to `index_topk` positions, another attention past them; see [Kimi K3.1](#kimi-k31)) |
+| `K3_DSA_BITS` | `K3_MLA_BITS` | Kimi K3.1: load-time bits of the indexer's three matrices |
 | `K3_CHUNK` | 32 | prefill chunk size, at most 16384 (1 = token-at-a-time; forced 1 under `K3_TRACE`); past 512 rows the RAM budget reserves 1.4 MB of activations a row |
 | `K3_THINK` | 1 | chat mode: open the structural think channel (0 = response-only) |
 | `K3_DIRS` | — | extra shard directories (multi-drive split, no duplication; `tools/k3_download.py` cuts every layer over them) |
@@ -564,6 +566,73 @@ the RAM).
 | `K3_GPU_MLA` | 1 | a prompt step's gated MLA layers whole on the card, `k3cu_mla_layer` (0: call by call around the core) |
 | `K3_GPU_KDA_ROWS` | 512 | the rows of a KDA layer's piece on the card |
 | `K3_READAHEAD_GB` | 20 with the card, else 0 | the read-ahead pool, counted in the RAM budget |
+
+## Kimi K3.1
+
+[moonshotai/Kimi-K3.1-Pro](https://huggingface.co/moonshotai/Kimi-K3.1-Pro) is Kimi K3
+post-trained, and not only that: each of its 24 gated MLA layers carries a DeepSeek-V3.2
+style **lightning indexer** (`text_config.dsa_config`; the wrapper's `model_type` is
+`kimi_k31`, its class `KimiK31ForConditionalGeneration`). The checkpoint ships no modeling
+code; the semantics here follow the one implementation published with it,
+[TokenSpeed's `KimiK31Indexer`](https://github.com/lightseekorg/tokenspeed/pull/3015)
+(`python/tokenspeed/runtime/models/kimi_k31.py`), and its config parser's checks:
+
+| | Kimi K3 | Kimi K3.1 |
+|---|---|---|
+| MLA layer | gated NoPE MLA over every earlier row | the same projections, over the `index_topk` (2,048) rows its indexer picks; a row with no more positions attends all of them |
+| new tensors a layer | -- | `self_attn.indexer.wq_b` [32*128, 1536], `.wk` [128, 7168], `.weights_proj` [32, 7168], `.k_norm.{weight,bias}` [128], BF16 |
+| config | -- | `dsa_config`: `dsa_layers` (every MLA layer), `index_topk` 2048, `index_head_dim` 128, `index_num_heads` 32, `index_rope_dim` 0, `index_k_norm_type` layernorm, `index_topk_freq` 1 |
+| everything else | | Kimi K3's: KDA, AttnRes, LatentMoE, MXFP4 experts, the tokenizer and the chat format |
+
+For the query row at position t and an earlier row s,
+
+    I(t,s) = d^-0.5 H^-0.5 * sum_h w_h(t) relu(q_h(t) . k(s))
+    q(t) = wq_b(c_q(t))           c_q: the RMSNorm'd q latent (qa after q_a_layernorm)
+    k(s) = LayerNorm(wk(x(s)))    eps 1e-6, no RoPE, no Hadamard rotation
+    w(t) = weights_proj(x(t))     x: the attention input
+
+and the row attends the `index_topk` rows of the highest I (all heads share the pick).
+
+**In the engine.** `load_cfg` reads `dsa_config` and refuses any value the code does not
+implement (an unknown key, a RoPE part, an RMSNorm key norm, FP8 indexer weights, a pick
+shared between layers). Every MLA step writes its rows' keys into the layer's `Ic` cache
+(f32, `index_head_dim` floats a position, beside `Lc`/`Rc`: photos, parking, the
+multiplexed slots and the segment sessions carry it). A row past `index_topk` positions
+gets its pick on the CPU (`k3_dsa_scores`: 16 positions a pass, 8x8 blocks of keys
+transposed in registers; `k3_dsa_pick`: quickselect, ties to the lower position, the list
+ascending); then its attention runs over the picked rows only -- on the CPU's loop (the
+scores and the latent sum over the list) or, for a prompt step, on the GPU's core with the
+pick as a bit mask (`k3cu_mla_mask` in `coli_cuda_k3.dll`: a masked position's weight is
+exactly 0, which changes neither the softmax's sum nor the latent's, so the GPU's bytes are
+the CPU loop's over the picked rows). A step all of whose rows have at most `index_topk`
+positions is K3's to the bit, the GPU's whole-layer path included (the keys then on the
+CPU). `K3_DSA=0` runs a K3.1 checkpoint dense.
+
+**What it costs.** Up to 2,048 positions: one 128 x 7168 matrix a row and a layer (the
+keys), nothing else. Past them, for each row and layer: the projections (32 x 128 by 1536,
+32 by 7168), 4,096 multiply-adds a position for the scores, a quickselect, and then the
+attention over 2,048 rows instead of all of them -- at long contexts much less than K3's
+dense attention reads. On the 4-core test machine of this change (Xeon, 2.1 GHz) the scores
+ran at about 100 GMAC/s for a prompt step's rows and 50-78 for a decode row
+(`tests/test_k3_dsa bench`); the keys add 12 KB a position to the 55 KB of the MLA caches.
+The prompt's selections are reported (`[K3-DSA] the prompt: ...`) and the GPU's masked steps
+(`[K3-CUDA] the gated MLA's attention: ... K3.1's selections`).
+
+**Checked** (`make kimi-k31-tiny-check`): `tools/make_kimi_k3_tiny.py --dsa` writes the
+tiny fixture with an indexer on every MLA layer (its other weights K3's tiny ones byte for
+byte, `index_topk` 16). `tests/test_kimi_k31_dsa.py` runs the engine against
+`tools/k3_ref.py`'s independent numpy indexer and sparse MLA on injected inputs (every
+layer, rel-L2 below 3e-4; the dense reference differs by 10-100% past position 16, so the
+comparison bites), checks that prompt steps of any size give the same logits, that
+`K3_DSA=0` gives K3's, and that a config the engine does not implement is refused. The
+photos, parking, dashboard and multiplexed-slot checks pass on it as on K3's fixture.
+`tests/test_k3_dsa` checks the scores, the pick and the LayerNorm against their arithmetic.
+The GPU's masked core compiles (nvcc 13.4, sm_89) but was not run on a card in this change.
+
+Download and run on the 4090 machine: `tools/download_kimi_k31_pro_4090.ps1` (folders
+`C:\AI\Kimi-K3.1-Pro`, `D:\AI\Models\Kimi-K3.1-Pro`) and
+`tools/start_kimi_k31_pro_4090.ps1` (API model `kimi-k3.1-pro`; it refuses a `kimi_k3.exe`
+that predates `dsa_config`).
 
 ## Current limitations
 

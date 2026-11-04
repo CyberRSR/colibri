@@ -1,7 +1,9 @@
 Kimi K3.1 Pro on the RTX 4090 beside MiMo-V2.6-Pro (release mimo-pro-4090-r7), 2026-11-04
 Release kimi-k31-pro-4090-r1: kimi-k3-4090-r1 with the Kimi launchers, the downloader (tools/k3_download.py:
 default repo moonshotai/Kimi-K3.1-Pro, k3_layout.json's repo checked) and the setup catalog (kimi-k3.1-pro)
-for moonshotai/Kimi-K3.1-Pro, which has Kimi K3's architecture and tensors. Every binary below is kimi-k3-4090-r1's.
+for moonshotai/Kimi-K3.1-Pro. K3.1 adds a DSA indexer to every MLA layer: kimi_k3.exe and coli_cuda_k3.dll
+below are kimi-k3-4090-r1's and do NOT run it; ..\build-windows.ps1 builds the K3.1 engine from branch
+claude/kimi-k31-dsa, puts it here and writes BUILD-INFO-K31.txt (the commit and the new binaries' SHA-256).
 
 coli_cuda_k3.dll: commit 506379bc (main): the prompt's tile kernels decode their weights once a block (k3_dense_s4, k3_dense_o8), the same bytes: a 5,862-token prompt 111.9 -> 109.7 s
 kimi_k3.exe: commit 254338ab06091de447c792569580a2b585378088 (main; kimi_k3.c unchanged since): the card's matrices in the CPU's arithmetic, a drive that falls behind no longer hangs a prompt

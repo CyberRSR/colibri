@@ -27,6 +27,8 @@ static int (*p_shared)(float *, const float *, int, int, int, const uint8_t *, c
 static int (*p_kda)(const K3cuKda *, const float *, float *);   /* optional: an older DLL lacks it */
 static int (*p_mla_layer)(const K3cuMlaLayer *, const float *, float *);   /* optional too */
 static int (*p_matmul_dev)(int, float *, const float *, const void *, const float *, int, int, int, int);   /* and this */
+static int (*p_mla_mask)(const float *, const float *, int, int, int, const float *, const float *, const int8_t *,
+                         const float *, int, int, int, int, int, float, const uint32_t *, int, float *);   /* K3.1: and this */
 static void (*p_report)(void), (*p_shutdown)(void);
 
 int k3cu_init(int device) {
@@ -54,6 +56,7 @@ int k3cu_init(int device) {
     { FARPROC fn = GetProcAddress(h, "k3cu_kda"); if (fn) memcpy(&p_kda, &fn, sizeof fn); }   /* NULL: KDA on the CPU */
     { FARPROC fn = GetProcAddress(h, "k3cu_mla_layer"); if (fn) memcpy(&p_mla_layer, &fn, sizeof fn); }   /* NULL: call by call */
     { FARPROC fn = GetProcAddress(h, "k3cu_matmul_dev"); if (fn) memcpy(&p_matmul_dev, &fn, sizeof fn); }   /* NULL: coli_cuda.dll's kernels */
+    { FARPROC fn = GetProcAddress(h, "k3cu_mla_mask"); if (fn) memcpy(&p_mla_mask, &fn, sizeof fn); }   /* NULL: K3.1's sparse rows on the CPU */
     module = h;
     return p_init(device);
 }
@@ -80,6 +83,11 @@ int k3cu_matmul_dev(int fmt, float *y, const float *x, const void *w, const floa
 int k3cu_mla(const float *Lc, const float *Rc, int N, int pos0, int C, const float *qv, const float *gv,
              const int8_t *kvb, const float *kvbs, int H, int qn, int qr, int vh, int kvl, float scale, float *ctx) {
     return module ? p_mla(Lc, Rc, N, pos0, C, qv, gv, kvb, kvbs, H, qn, qr, vh, kvl, scale, ctx) : 0;
+}
+int k3cu_mla_mask(const float *Lc, const float *Rc, int N, int pos0, int C, const float *qv, const float *gv,
+                  const int8_t *kvb, const float *kvbs, int H, int qn, int qr, int vh, int kvl, float scale,
+                  const uint32_t *mask, int mw, float *ctx) {
+    return module && p_mla_mask ? p_mla_mask(Lc, Rc, N, pos0, C, qv, gv, kvb, kvbs, H, qn, qr, vh, kvl, scale, mask, mw, ctx) : 0;
 }
 int k3cu_router(float *sco, const float *x, const uint16_t *w, int C, int D, int E) {
     return module ? p_router(sco, x, w, C, D, E) : 0;

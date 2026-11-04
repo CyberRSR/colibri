@@ -141,6 +141,16 @@ CATALOG = (
         post_install=(("k3_tokenizer", "tokenizer.json"),),
         doc="docs/kimi_k3.md"),
     CatalogModel(
+        # Kimi K3 trained further, plus a DSA lightning indexer on every MLA layer
+        # (dsa_config): kimi_k3 attends each query row's index_topk selected rows
+        # past index_topk positions, an engine newer than the 2.1.0 release has.
+        id="kimi-k3.1-pro", family="kimi", name="Kimi K3.1 Pro",
+        repo="moonshotai/Kimi-K3.1-Pro", disk_gb=1561.0,
+        ram_min_gb=32, ram_good_gb=64, dense_gb=20.2, rank=10, size_class="large",
+        summary="2.8T, Kimi K3 post-trained, sparse (DSA) attention, native MXFP4 experts",
+        post_install=(("k3_tokenizer", "tokenizer.json"),),
+        prebuilt_since="2.2.0", doc="docs/kimi_k3.md#kimi-k31"),
+    CatalogModel(
         id="qwen-image-2.1", family="qwen_image", name="Qwen-Image-2.1",
         repo="Qwen/Qwen-Image-2.1", disk_gb=33.1,
         # docs/qwen-image.md: 9.0 GB peak for one 768x512 image with the text

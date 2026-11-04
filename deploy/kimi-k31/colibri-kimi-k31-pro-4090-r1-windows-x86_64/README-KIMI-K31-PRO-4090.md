@@ -1,10 +1,22 @@
 # Kimi K3.1 Pro on one RTX 4090 (192 GB RAM, two NVMe drives)
 
 [moonshotai/Kimi-K3.1-Pro](https://huggingface.co/moonshotai/Kimi-K3.1-Pro) is Kimi K3
-trained further: the same architecture, the same tensors and the same one-layer-a-shard
-checkpoint, only other weights. This install is release kimi-k3-4090-r1 with its Kimi
-launchers pointed at the new repository; the engine (`kimi_k3.exe`, `coli_cuda_k3.dll`)
-is the same build, byte for byte (`BUILD-INFO.txt`), and reads K3.1 Pro as it reads K3.
+post-trained -- and not only re-weighted: each of its 24 gated MLA layers carries a
+DeepSeek-V3.2 style **DSA lightning indexer** (`dsa_config`; 32 heads of 128, new tensors
+`self_attn.indexer.*`, about 7.4 M parameters a layer), and past 2,048 positions a query
+row attends only the 2,048 earlier rows its layer's indexer scores highest. Everything else
+(KDA, AttnRes, LatentMoE, the MXFP4 experts, the shard layout, the tokenizer, the chat
+format) is K3's. Sources: the model card and TokenSpeed's implementation,
+[lightseekorg/tokenspeed#3015](https://github.com/lightseekorg/tokenspeed/pull/3015).
+
+**The engine must be rebuilt.** Release kimi-k3-4090-r1's `kimi_k3.exe` does not read
+`dsa_config`: it would run every MLA layer dense, which is K3.1's attention up to 2,048
+positions and another one past them. The K3.1 engine (branch `claude/kimi-k31-dsa`:
+`c/kimi_k3.c`, `c/backend_cuda_k3.cu`) is built and put into this folder by
+`..\build-windows.ps1` (MinGW-w64 GCC, the CUDA toolkit, Visual Studio 2022's C++ tools; it
+also runs the tiny models' checks and the GPU's bit-for-bit test of the masked attention),
+and `START-KIMI-K31-PRO.cmd` refuses a `kimi_k3.exe` that predates `dsa_config`. What the
+engine does and how it was checked: `docs/kimi_k3.md`, section "Kimi K3.1".
 
 | | Kimi K3 (kimi-k3-4090-r1) | Kimi K3.1 Pro (this install) |
 |---|---|---|
@@ -27,10 +39,14 @@ by side; delete K3's folders first if the drives cannot hold both). `-Repo` and
 `-Revision` pick another repository or pin a commit. The tokenizer is built from the
 repository's `tiktoken.model` as for K3 (`tools\k3_tokenizer.py`, run by the download).
 
-Everything below is the K3 install's account, measured on Kimi K3. With the same
-tensors the sizes, the drives' shares, the RAM and the speeds are the same for K3.1 Pro
-(the expert cache's hit rate depends on the router's new weights and may move a little);
-the text is the new model's.
+Everything below is the K3 install's account, measured on Kimi K3. For K3.1 Pro the
+experts, the drives' shares and the prompt's expert reads are the same; up to 2,048
+positions the attention costs the same too (plus one 128 x 7168 matrix a row and a layer
+for the index keys). Past 2,048 positions each row and layer adds the indexer's scores
+(4,096 multiply-adds a position, on the CPU) and attends 2,048 rows instead of all of them;
+the index keys take 12 KB a position beside the MLA caches' 55 KB (`-Context 131072`: 8.8
+GB). The expert cache's hit rate depends on the router's new weights and may move a little.
+None of this has been measured on the real model yet.
 
 ---
 
