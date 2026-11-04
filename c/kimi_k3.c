@@ -2741,19 +2741,23 @@ static int k3_dsa_select(Model *m, Mla *a, int li, const float *x, const float *
         }
         free(sc); free(tmp);
     } else {                          /* a prompt step: its rows over the team */
-        #pragma omp parallel reduction(+:npos)
-        {
-            float *sc=falloc(maxnt), *tmp=falloc(maxnt);
-            #pragma omp for schedule(dynamic,1)
-            for(int t=r0;t<C;t++){
-                const int nt=(mr?mr[t].pos:pos0+t)+1;
-                if(nt<=K) continue;
-                ns[t]=k3_dsa_row(sel+(int64_t)t*K,qi+(int64_t)(t-r0)*nh*hd,wi+(int64_t)(t-r0)*nh,
-                                 mr?mr[t].seq->Ic[li]:a->Ic,nt,nh,hd,K,sc,tmp,0);
-                npos+=(unsigned long long)nt;
-            }
-            free(sc); free(tmp);
+        /* one parallel for and a buffer a thread (omp_spin.c, the Windows builds' team, serves
+         * GOMP_parallel and a loop's nowait end, not a work-sharing loop's barrier) */
+        const int nth=omp_get_max_threads();
+        float **bs=malloc((size_t)nth*2*sizeof(float*));
+        if(!bs){ fprintf(stderr,"OOM DSA buffers\n"); exit(1); }
+        for(int i=0;i<2*nth;i++) bs[i]=falloc(maxnt);
+        #pragma omp parallel for schedule(dynamic,1)
+        for(int t=r0;t<C;t++){
+            const int nt=(mr?mr[t].pos:pos0+t)+1;
+            if(nt<=K) continue;
+            const int me=omp_get_thread_num();
+            ns[t]=k3_dsa_row(sel+(int64_t)t*K,qi+(int64_t)(t-r0)*nh*hd,wi+(int64_t)(t-r0)*nh,
+                             mr?mr[t].seq->Ic[li]:a->Ic,nt,nh,hd,K,bs[2*me],bs[2*me+1],0);
         }
+        for(int i=0;i<2*nth;i++) free(bs[i]);
+        free(bs);
+        for(int t=r0;t<C;t++){ const int nt=(mr?mr[t].pos:pos0+t)+1; if(nt>K) npos+=(unsigned long long)nt; }
     }
     free(qi); free(wi);
     g_k3_dsa_rows+=(unsigned long long)nsel; g_k3_dsa_pos+=npos;
