@@ -1,17 +1,19 @@
 # Qwen3.8-Flash-Next-FP8 on the RTX 4090 / 192 GiB RAM / two-NVMe machine.
-# The checkpoint as tools/download_qwen38_4090.ps1 lays it out: the model folder on C: and every
-# layer's other experts and PLE parts on D: (Q38_DIRS). Every routed expert is read into RAM at the
-# start (Q38_PRELOAD: 123 GB, about 20 s from both drives), so no step waits on a disk read; the
+# The checkpoint in one folder on D: (tools/download_qwen38_4090.ps1 laid it out over C: and D:;
+# both parts were then moved into the D: folder to free C:, and the engine reads the cut shards'
+# parts from one folder as from two; -ModelDir/-ShardDir for a split layout). Every routed expert is
+# read into RAM at the start (Q38_PRELOAD: 123 GB, 33 s from D: alone, 23 s from both drives), so
+# no step waits on a disk read; the
 # layers run on the GPU as one chain (COLI_CUDA_CHAIN), a decode step's routed experts hottest in
 # this conversation in VRAM (the tier, about 2,000-2,800 of 25,088) and the rest on the CPU, a
 # prompt's (64 tokens or more) all on the GPU, copied up from RAM layer by layer with the same bits
 # (Q38_PROMPT_GPU: 3,763 tokens in 10 s instead of 74); the MTP head drafts tokens that one forward
 # checks (the reply is the one plain decoding gives).
 param(
-    # The engine's model folder (config, tokenizer, the resident weights, 61% of the experts)
-    [string]$ModelDir = 'C:\AI\Qwen3.8-Flash-Next-FP8',
-    # The other drive's folders, ';'-separated (Q38_DIRS); "" for a model in one folder
-    [string]$ShardDir = 'D:\AI\Models\Qwen3.8-Flash-Next-FP8',
+    # The engine's model folder (config, tokenizer, the weights)
+    [string]$ModelDir = 'D:\AI\Models\Qwen3.8-Flash-Next-FP8',
+    # Other drives' folders, ';'-separated (Q38_DIRS), for a checkpoint split over drives; "" for one folder
+    [string]$ShardDir = '',
     # The model name the API answers to
     [string]$ModelId = 'qwen3.8-flash-next',
     # The whole process's RAM ceiling, GB: every expert in RAM takes 120 GB of it
