@@ -120,8 +120,7 @@ jobs:
             echo "checks on the runner's CPU (x86-64-v3 build): test_k3_dsa, test_kimi_k3_tiny, test_kimi_k31_dsa"
             echo "not run here (no GPU): tests\\test_k3_cuda_experts.exe --dsa; build-windows.ps1 runs it on the card"
             echo
-            cd "dist/$BUNDLE"
-            sha256sum kimi_k3.exe coli_cuda_k3.dll coli_cuda.dll
+            (cd "dist/$BUNDLE" && sha256sum kimi_k3.exe coli_cuda_k3.dll coli_cuda.dll)
           } > "dist/$BUNDLE/BUILD-INFO-K31.txt"
           cat "dist/$BUNDLE/BUILD-INFO-K31.txt"
           cd dist && 7z a "$BUNDLE.zip" "$BUNDLE" > /dev/null && ls -l "$BUNDLE.zip"
