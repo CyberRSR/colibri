@@ -511,9 +511,36 @@ int mla_layers(void){
          + check_mla_layer(600, 50, 128, 8, 16, 8, 16, 32, 64, 0, 0, 1);                 /* the tiny model's shapes, 3 chunks */
 }
 
-/* Kimi K3.1: k3cu_mla_mask against the CPU's loop over the picked rows */
+/* Kimi K3.1's picks: k3cu_dsa_mask against k3_dsa_row on the CPU, every mask word the same
+ * (mode 1: zero head weights, every score +0, the ties to the lower positions) */
+static int check_dsa_pick(int nh, int hd, int K, int pos0, int C, int mode){
+    const int N = pos0 + C, mw = (N + 31) / 32, r0 = K > pos0 ? K - pos0 : 0, R = C - r0;
+    float *Ic = falloc((int64_t)N * hd), *q = falloc((int64_t)(R > 0 ? R : 1) * nh * hd), *w = falloc((int64_t)(R > 0 ? R : 1) * nh);
+    for(int64_t i = 0; i < (int64_t)N * hd; i++) Ic[i] = rndf();
+    for(int64_t i = 0; i < (int64_t)R * nh * hd; i++) q[i] = rndf();
+    for(int64_t i = 0; i < (int64_t)R * nh; i++) w[i] = mode == 1 ? 0.0f : rndf();
+    uint32_t *mc = calloc((size_t)C * mw, sizeof(uint32_t)), *mg = calloc((size_t)C * mw, sizeof(uint32_t));
+    float *sc = falloc(N), *tmp = falloc(N); int *sel = malloc((size_t)K * sizeof(int));
+    for(int r = r0; r < C; r++){
+        const int n = k3_dsa_row(sel, q + (int64_t)(r - r0) * nh * hd, w + (int64_t)(r - r0) * nh, Ic, pos0 + r + 1, nh, hd, K, sc, tmp, 0);
+        for(int j = 0; j < n; j++) mc[(size_t)r * mw + (sel[j] >> 5)] |= 1u << (sel[j] & 31);
+    }
+    const int ok = k3cu_dsa_mask(Ic, N, pos0, C, q, w, nh, hd, K, mg, mw);
+    size_t diff = 0;
+    for(int r = r0; r < C; r++) for(int i = 0; i < mw; i++) diff += mc[(size_t)r * mw + i] != mg[(size_t)r * mw + i];
+    printf("K3.1 picks %d heads of %d, K %d, rows %d..%d%s: %s%zu of %zu mask words differ\n", nh, hd, K, pos0, N - 1,
+           mode == 1 ? " (all ties)" : "", ok ? "" : "FAILED to run; ", diff, (size_t)(R > 0 ? R : 0) * mw);
+    free(Ic); free(q); free(w); free(mc); free(mg); free(sc); free(tmp); free(sel);
+    return !ok || diff;
+}
+/* Kimi K3.1: k3cu_dsa_mask's picks, and k3cu_mla_mask against the CPU's loop over the picked rows */
 static int mla_dsa(void){
-    return check_mla_k(96, 128, 64, 128, 512, 3000, 200, 2048)   /* every row picks 2,048 of 3,001..3,200 */
+    return check_dsa_pick(32, 128, 2048, 3000, 200, 0)            /* K3.1's widths */
+         + check_dsa_pick(32, 128, 2048, 1900, 300, 0)            /* rows 0..147 attend all, the rest pick */
+         + check_dsa_pick(32, 128, 2048, 30000, 40, 0)            /* a long context: a mask of 939 words */
+         + check_dsa_pick(4, 16, 16, 0, 90, 1)                    /* every score +0 */
+         + check_dsa_pick(4, 16, 16, 10, 60, 0)                   /* the tiny fixture's widths */
+         + check_mla_k(96, 128, 64, 128, 512, 3000, 200, 2048)   /* every row picks 2,048 of 3,001..3,200 */
          + check_mla_k(96, 128, 64, 128, 512, 1900, 300, 2048)   /* rows 0..147 attend all, the rest pick */
          + check_mla_k(8, 16, 8, 16, 32, 10, 60, 16)             /* the tiny K3.1 fixture's shapes */
          + check_mla_k(8, 16, 8, 16, 32, 50, 600, 16);           /* three chunks, masks of 21 words */

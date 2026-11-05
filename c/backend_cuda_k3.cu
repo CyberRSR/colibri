@@ -1481,6 +1481,45 @@ extern "C" int k3cu_mla_mask(const float *Lc, const float *Rc, int N, int pos0, 
     return ml_attn(Lc, Rc, N, pos0, C, qv, gv, kvb, kvbs, H, qn, qr, vh, kvl, scale, mask, mw, ctx);
 }
 
+// ---- Kimi K3.1's lightning indexer for a prompt step (k3cu_dsa_mask, backend_cuda_k3.h) ------------
+// The kernels are in backend_cuda_k3_dsa.cuh, which tools/check_k3_dsa_kernels.cpp also runs on the
+// CPU (a thread a CUDA thread) against kimi_k3.c's k3_dsa_scores and k3_dsa_pick.
+#include "backend_cuda_k3_dsa.cuh"
+static unsigned long long n_dsa, n_dsa_rows; static double t_dsa;
+extern "C" int k3cu_dsa_mask(const float *Ic, int N, int pos0, int C, const float *q, const float *w, int nh, int hd,
+                             int K, uint32_t *mask, int mw) {
+    if (!ready || failed || !Ic || !q || !w || !mask || C < 1 || N != pos0 + C || nh < 1 || hd < 1 || hd > DS_HD || K < 1 ||
+        mw < (N + 31) / 32 || !on_device()) return 0;
+    const int r0 = K > pos0 ? K - pos0 : 0;   // the first row past K positions; q and w hold rows r0..C-1
+    if (r0 >= C) return 1;
+    double t0 = now_s();
+    if (!ml_streams()) return 0;
+    const int R = C - r0;
+    const long long ldS = ((long long)N + 3) / 4 * 4;
+    int rmax = R < 1024 ? R : 1024;
+    while (rmax > 32 && (long long)rmax * ldS * 4 > (256ll << 20)) rmax /= 2;
+    float *dK, *dq, *dw, *dS; uint32_t *dM;
+    void **mp[5] = {(void **)&dK, (void **)&dq, (void **)&dw, (void **)&dS, (void **)&dM};
+    const size_t mb[5] = {(size_t)N * hd * 4, (size_t)rmax * nh * hd * 4, (size_t)rmax * nh * 4, (size_t)rmax * ldS * 4,
+                          (size_t)rmax * mw * 4};
+    if (!ar_carve(mp, mb, 5)) return 0;
+    cudaStream_t st = s_mla;
+    if (!checked(cudaMemcpyAsync(dK, Ic, (size_t)N * hd * 4, cudaMemcpyHostToDevice, st), "index keys")) return 0;
+    for (int c0 = 0; c0 < R; c0 += rmax) {
+        const int rows = R - c0 < rmax ? R - c0 : rmax, first = pos0 + r0 + c0, Nc = first + rows;
+        if (!checked(cudaMemcpyAsync(dq, q + (size_t)c0 * nh * hd, (size_t)rows * nh * hd * 4, cudaMemcpyHostToDevice, st), "index queries") ||
+            !checked(cudaMemcpyAsync(dw, w + (size_t)c0 * nh, (size_t)rows * nh * 4, cudaMemcpyHostToDevice, st), "index weights")) return 0;
+        k3_dsa_scores<<<dim3((unsigned)((Nc + DS_T - 1) / DS_T), (unsigned)((rows + DS_R - 1) / DS_R)), 256, 0, st>>>(
+            dK, dq, dw, rows, first, nh, hd, dS, (int)ldS);
+        k3_dsa_pick<<<(unsigned)rows, 256, 0, st>>>(dS, (int)ldS, first, K, dM, mw);
+        if (!checked(cudaGetLastError(), "index kernels") ||
+            !checked(cudaMemcpyAsync(mask + (size_t)(r0 + c0) * mw, dM, (size_t)rows * mw * 4, cudaMemcpyDeviceToHost, st), "index mask") ||
+            !checked(cudaStreamSynchronize(st), "index")) return 0;
+    }
+    n_dsa++; n_dsa_rows += (unsigned long long)R; t_dsa += now_s() - t0;
+    return 1;
+}
+
 // sco [C][E] = the rows x [C][D] against the bf16 router w [E][D], k3_router_scores's bytes
 static float *rt_x, *rt_s; static uint16_t *rt_w; static size_t rt_xc, rt_sc, rt_wc;
 static unsigned long long n_rt; static double t_rt;
@@ -1887,6 +1926,7 @@ extern "C" void k3cu_report(void) {
     if (n_mla) fprintf(stderr, "[K3-CUDA] the gated MLA's attention: %llu layer steps (%llu of them K3.1's selections), %llu rows, %.1fs\n",
                        n_mla, n_mlm, n_mla_rows, t_mla);
     if (n_mll) fprintf(stderr, "[K3-CUDA] the gated MLA layers: %llu layer steps, %llu rows, %.1fs\n", n_mll, n_mll_rows, t_mll);
+    if (n_dsa) fprintf(stderr, "[K3-CUDA] K3.1's indexer: %llu layer steps, %llu rows picked, %.1fs\n", n_dsa, n_dsa_rows, t_dsa);
     if (n_rt) fprintf(stderr, "[K3-CUDA] the routers: %llu steps, %.1fs\n", n_rt, t_rt);
     if (n_sh) fprintf(stderr, "[K3-CUDA] the shared experts: %llu steps, %.1fs\n", n_sh, t_sh);
     if (n_kda) fprintf(stderr, "[K3-CUDA] the KDA layers: %llu layer steps, %llu rows, %.1fs\n", n_kda, n_kda_rows, t_kda);

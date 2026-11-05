@@ -19,6 +19,8 @@ on:
       - c/Makefile
       - c/backend_cuda_k3.cu
       - c/backend_cuda_k3.h
+      - c/backend_cuda_k3_dsa.cuh
+      - c/tools/check_k3_dsa_kernels.cpp
       - c/backend_cuda_k3_loader.c
       - c/tests/test_k3_dsa.c
       - c/tests/test_kimi_k31_dsa.py
@@ -92,6 +94,7 @@ jobs:
           cd c
           make kimi_k3.exe tests/test_k3_dsa.exe CUDA_DLL=1 VK=0 ARCH=x86-64-v3
           ./tests/test_k3_dsa.exe
+          make tools/check_k3_dsa_kernels.exe && ./tools/check_k3_dsa_kernels.exe
           python tools/make_kimi_k3_tiny.py --output ./kimi_k3_tiny --force
           python tools/make_kimi_k3_tiny.py --output ./kimi_k31_tiny --force --dsa
           python tests/test_kimi_k3_tiny.py --binary ./kimi_k3.exe --fixture ./kimi_k3_tiny

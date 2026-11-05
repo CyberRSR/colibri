@@ -231,6 +231,7 @@ Judge quantization choices on real-text logits, not synthetic-vector norms.
 | `K3_TOPP` | 0 | keep routed experts to cumulative weight p (0 = off) |
 | `K3_DSA` | 1 | Kimi K3.1: 0 runs the MLA layers dense, the indexer neither loaded nor run (exact up to `index_topk` positions, another attention past them; see [Kimi K3.1](#kimi-k31)) |
 | `K3_DSA_BITS` | `K3_MLA_BITS` | Kimi K3.1: load-time bits of the indexer's three matrices |
+| `K3_DSA_GPU` | 1 | Kimi K3.1, a CUDA build: a prompt step's scores and picks on the GPU (`k3cu_dsa_mask`); 0 = on the CPU (the same bytes) |
 | `K3_CHUNK` | 32 | prefill chunk size, at most 16384 (1 = token-at-a-time; forced 1 under `K3_TRACE`); past 512 rows the RAM budget reserves 1.4 MB of activations a row |
 | `K3_THINK` | 1 | chat mode: open the structural think channel (0 = response-only) |
 | `K3_DIRS` | — | extra shard directories (multi-drive split, no duplication; `tools/k3_download.py` cuts every layer over them) |
@@ -598,9 +599,11 @@ implement (an unknown key, a RoPE part, an RMSNorm key norm, FP8 indexer weights
 shared between layers). Every MLA step writes its rows' keys into the layer's `Ic` cache
 (f32, `index_head_dim` floats a position, beside `Lc`/`Rc`: photos, parking, the
 multiplexed slots and the segment sessions carry it). A row past `index_topk` positions
-gets its pick on the CPU (`k3_dsa_scores`: 16 positions a pass, 8x8 blocks of keys
-transposed in registers; `k3_dsa_pick`: quickselect, ties to the lower position, the list
-ascending); then its attention runs over the picked rows only -- on the CPU's loop (the
+gets its pick -- in a decode step on the CPU (`k3_dsa_scores`: 16 positions a pass, 8x8
+blocks of keys transposed in registers; `k3_dsa_pick`: quickselect, ties to the lower
+position, the list ascending), in a prompt step of a CUDA build on the GPU (`k3cu_dsa_mask`,
+`backend_cuda_k3_dsa.cuh`: the same chain of fused multiply-adds a score, a radix select a
+row, so the same bits as the CPU's pick); then its attention runs over the picked rows only -- on the CPU's loop (the
 scores and the latent sum over the list) or, for a prompt step, on the GPU's core with the
 pick as a bit mask (`k3cu_mla_mask` in `coli_cuda_k3.dll`: a masked position's weight is
 exactly 0, which changes neither the softmax's sum nor the latent's, so the GPU's bytes are
@@ -609,7 +612,10 @@ positions is K3's to the bit, the GPU's whole-layer path included (the keys then
 CPU). `K3_DSA=0` runs a K3.1 checkpoint dense.
 
 **What it costs.** Up to 2,048 positions: one 128 x 7168 matrix a row and a layer (the
-keys), nothing else. Past them, for each row and layer: the projections (32 x 128 by 1536,
+keys), nothing else. Past them a prompt's scores grow with the square of its length (a
+32,768-token prompt: 44 T multiply-adds over the 24 layers): on the CPU alone that kept the
+first K3.1 build's prompts on the CPU for minutes with the drives and the card idle, hence
+the GPU's pick. Past them, for each row and layer: the projections (32 x 128 by 1536,
 32 by 7168), 4,096 multiply-adds a position for the scores, a quickselect, and then the
 attention over 2,048 rows instead of all of them -- at long contexts much less than K3's
 dense attention reads. On the 4-core test machine of this change (Xeon, 2.1 GHz) the scores
@@ -626,8 +632,16 @@ layer, rel-L2 below 3e-4; the dense reference differs by 10-100% past position 1
 comparison bites), checks that prompt steps of any size give the same logits, that
 `K3_DSA=0` gives K3's, and that a config the engine does not implement is refused. The
 photos, parking, dashboard and multiplexed-slot checks pass on it as on K3's fixture.
-`tests/test_k3_dsa` checks the scores, the pick and the LayerNorm against their arithmetic.
-The GPU's masked core compiles (nvcc 13.4, sm_89) but was not run on a card in this change.
+`tests/test_k3_dsa` checks the scores (bit for bit against the fused chain), the pick and the
+LayerNorm; `tools/check_k3_dsa_kernels.cpp` runs the GPU's indexer kernels on the CPU (a thread
+a CUDA thread) against the same chain and a stable sort, ties and NaN included.
+`tests/test_k3_cuda_experts --dsa` checks `k3cu_dsa_mask` and `k3cu_mla_mask` on a card against
+the CPU, bit for bit; it was not run on one in this change.
+
+**Context.** The keys and the MLA caches take 67 KB a position, counted against the RAM before
+the expert cache gets the rest: `-Context 1048576` reserves 71 GB, leaving the 4090 machine's
+cache about 33 experts a layer instead of about 85 at the profile's 131,072, so decode reads
+the drives more. Ask for the context the conversations need.
 
 Download and run on the 4090 machine: `tools/download_kimi_k31_pro_4090.ps1` (folders
 `C:\AI\Kimi-K3.1-Pro`, `D:\AI\Models\Kimi-K3.1-Pro`) and

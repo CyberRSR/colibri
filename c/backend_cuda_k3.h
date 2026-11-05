@@ -70,6 +70,13 @@ K3CU_API int k3cu_mla(const float *Lc, const float *Rc, int N, int pos0, int C, 
 K3CU_API int k3cu_mla_mask(const float *Lc, const float *Rc, int N, int pos0, int C, const float *qv, const float *gv,
                            const int8_t *kvb, const float *kvbs, int H, int qn, int qr, int vh, int kvl, float scale,
                            const uint32_t *mask, int mw, float *ctx);
+/* Kimi K3.1's lightning indexer for a prompt step: the mask [C][mw] k3cu_mla_mask takes, for the
+ * rows past K positions (rows r0 = max(0, K-pos0) .. C-1; the rows before are left as they are):
+ * the K positions of the highest scores, ties to the lower position, kimi_k3.c's k3_dsa_scores and
+ * k3_dsa_pick to the bit. Ic [N][hd] the layer's index keys (N = pos0 + C, hd <= 128), q [C-r0][nh][hd]
+ * and w [C-r0][nh] the selecting rows' index queries and head weights. 0 when it cannot (the CPU's). */
+K3CU_API int k3cu_dsa_mask(const float *Ic, int N, int pos0, int C, const float *q, const float *w, int nh, int hd,
+                           int K, uint32_t *mask, int mw);
 /* sco [C][E] = x [C][D] against the bf16 router w [E][D], k3_router_scores's bytes (its 32
  * lanes and halving tree); 0 when it cannot. */
 K3CU_API int k3cu_router(float *sco, const float *x, const uint16_t *w, int C, int D, int E);

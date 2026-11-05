@@ -555,6 +555,7 @@ static void rmsnorm_(float *out, const float *x, const float *w, int D, float ep
 static int g_k3_dsa_on;                    /* load_cfg: the checkpoint has dsa_config, K3_DSA != 0 */
 static int k3_dsa_indexer_on(void){ return g_k3_dsa_on; }
 static unsigned long long g_k3_dsa_rows, g_k3_dsa_pos;   /* rows selected for, positions scored */
+static unsigned long long g_k3_dsa_gpu_rows;             /* of them on the GPU (k3cu_dsa_mask) */
 static double g_k3_dsa_t;                  /* seconds: the indexer's projections, scores and picks */
 
 /* LayerNorm of one key: mean and variance in double, in order; y may be x */
@@ -566,21 +567,21 @@ static void k3_dsa_ln(float *y, const float *x, const float *w, const float *b, 
     for(int i=0;i<n;i++) y[i]=(x[i]-muf)*r*w[i]+b[i];
 }
 
-/* sc[t-t0] = sum_h w[h] max(0, q[h] . K[t]) for t in [t0,t1); q [nh][hd], K [*][hd]. 8
- * positions a lane each (8x8 blocks of K transposed in registers), every head's products
- * added in d's order; a NaN score becomes -inf (never picked over a number). */
-#if defined(__AVX2__)
-#if defined(__FMA__)
+/* sc[t-t0] = sum_h w[h] max(0, q[h] . K[t]) for t in [t0,t1); q [nh][hd], K [*][hd]. Every
+ * score is one chain of fused multiply-adds, the same on every path and on the GPU
+ * (k3cu_dsa_mask): a = fma(q[h][d], K[t][d], a) for d = 0.. from +0, then s = fma(w[h],
+ * a > 0 ? a : +0, s) for h = 0.. from +0. The AVX2 path does it 8 positions a lane each (8x8
+ * blocks of K transposed in registers); a NaN score becomes -inf (never picked over a
+ * number), -0 becomes +0. */
+#if defined(__AVX2__) && defined(__FMA__)
+#define K3_DSA_AVX 1
 #define K3_DSA_FMA(a,b,c) _mm256_fmadd_ps(a,b,c)
-#else
-#define K3_DSA_FMA(a,b,c) _mm256_add_ps(_mm256_mul_ps(a,b),c)
-#endif
 static inline void k3_tr8(__m256 r[8]);
 #endif
 static void k3_dsa_scores(float *sc, const float *q, const float *w, const float *K, int t0, int t1,
                           int nh, int hd){
     int t=t0;
-#if defined(__AVX2__)
+#if defined(K3_DSA_AVX)
     if(hd>=8&&!(hd&7)&&hd<=512){
         /* 16 positions a pass (two blocks of 8, a lane each), 4 heads at a time: per column d two
          * key loads and four query broadcasts feed eight fused products */
@@ -630,12 +631,12 @@ static void k3_dsa_scores(float *sc, const float *q, const float *w, const float
         const float *kr=K+(int64_t)t*hd; float s=0;
         for(int h=0;h<nh;h++){
             const float *qh=q+(int64_t)h*hd; float a=0;
-            for(int d=0;d<hd;d++) a+=qh[d]*kr[d];
-            s+=w[h]*(a>0?a:0);
+            for(int d=0;d<hd;d++) a=fmaf(qh[d],kr[d],a);
+            s=fmaf(w[h],a>0?a:0.0f,s);
         }
         sc[t-t0]=s;
     }
-    for(int i=0;i<t1-t0;i++) if(sc[i]!=sc[i]) sc[i]=-INFINITY;
+    for(int i=0;i<t1-t0;i++){ if(sc[i]!=sc[i]) sc[i]=-INFINITY; else if(sc[i]==0) sc[i]=0.0f; }
 }
 
 /* The k-th largest of a[0..n) (k from 1), a reordered: quickselect, Hoare's partition around
@@ -2764,6 +2765,44 @@ static int k3_dsa_select(Model *m, Mla *a, int li, const float *x, const float *
     g_k3_dsa_t+=now_s()-t0;
     return 1;
 }
+#ifdef COLI_K3_CUDA
+/* K3.1, a prompt step on the GPU: the index queries and head weights from the CPU's matrices (the
+ * card's where it holds them), the scores and the picks on the card (k3cu_dsa_mask: k3_dsa_scores'
+ * and k3_dsa_pick's bytes) into the mask the attention core takes, rows up to index_topk all
+ * theirs. NULL when it cannot: the CPU picks. K3_DSA_GPU=0: always the CPU. */
+static int g_k3_dsa_gpu=-1;
+static uint32_t *k3_dsa_mask_gpu(Model *m, Mla *a, const float *x, const float *qa, int pos0, int C, int *mw_out){
+    const Cfg *c=&m->c; const int hd=c->index_hd, nh=c->index_nh, K=c->index_topk;
+    if(g_k3_dsa_gpu<0){ const char *e=getenv("K3_DSA_GPU"); g_k3_dsa_gpu=!e||!*e||atoi(e)!=0; }
+    const int N=pos0+C, mw=(N+31)/32, r0=K>pos0?K-pos0:0;
+    if(!g_k3_dsa_gpu||hd>128||r0>=C) return NULL;
+    const double t0=now_s();
+    const int R=C-r0;
+    uint32_t *mask=calloc((size_t)C*mw,sizeof(uint32_t));
+    float *qi=falloc((int64_t)R*nh*hd), *wi=falloc((int64_t)R*nh);
+    if(!mask){ free(qi); free(wi); return NULL; }
+    w_matmul(qi,qa+(int64_t)r0*c->q_lora,&a->wq,R);
+    w_matmul(wi,x+(int64_t)r0*c->hidden,&a->wp,R);
+    const int ok=k3cu_dsa_mask(a->Ic,N,pos0,C,qi,wi,nh,hd,K,mask,mw);
+    free(qi); free(wi);
+    if(!ok){
+        fprintf(stderr,"[K3-DSA] the GPU's indexer did not run (an older coli_cuda_k3.dll, or the device): "
+                       "the CPU picks from here\n");
+        g_k3_dsa_gpu=0; free(mask); return NULL;
+    }
+    unsigned long long npos=0;
+    for(int t=0;t<r0;t++){
+        uint32_t *mrow=mask+(size_t)t*mw; const int nt=pos0+t+1;
+        for(int w=0;w<nt/32;w++) mrow[w]=0xffffffffu;
+        if(nt%32) mrow[nt/32]=(1u<<(nt%32))-1u;
+    }
+    for(int t=r0;t<C;t++) npos+=(unsigned long long)(pos0+t+1);
+    g_k3_dsa_rows+=(unsigned long long)R; g_k3_dsa_pos+=npos; g_k3_dsa_gpu_rows+=(unsigned long long)R;
+    g_k3_dsa_t+=now_s()-t0;
+    *mw_out=mw;
+    return mask;
+}
+#endif
 static void mla_forward(Model *m, Layer *l, int li, const float *x, int pos0, int C, float *out){
     Cfg *c=&m->c; Mla *a=&l->m;
     const K3Row *mr = m->mux_rows;   /* a multiplexed step: each row's own caches and position */
@@ -2811,11 +2850,17 @@ static void mla_forward(Model *m, Layer *l, int li, const float *x, int pos0, in
     }
     /* K3.1: the step's index keys, then each row's selection (its own key among them) */
     int *dsel=NULL, *dns=NULL;
+    uint32_t *dmask=NULL; int dmw=0;   /* the GPU's picks (a prompt step), as the core's mask */
     if(dsa) k3_dsa_keys(m,a,li,x,pos0,C,mr);
     if(dsa_need){
-        dsel=malloc((size_t)C*c->index_topk*sizeof(int)); dns=malloc((size_t)C*sizeof(int));
-        if(!dsel||!dns){ fprintf(stderr,"OOM DSA selection\n"); exit(1); }
-        if(!k3_dsa_select(m,a,li,x,qa,pos0,C,mr,dsel,dns)){ free(dsel); free(dns); dsel=dns=NULL; }
+#ifdef COLI_K3_CUDA
+        if(!mr&&g_k3g_on&&C>=g_k3g_min_rows) dmask=k3_dsa_mask_gpu(m,a,x,qa,pos0,C,&dmw);
+#endif
+        if(!dmask){
+            dsel=malloc((size_t)C*c->index_topk*sizeof(int)); dns=malloc((size_t)C*sizeof(int));
+            if(!dsel||!dns){ fprintf(stderr,"OOM DSA selection\n"); exit(1); }
+            if(!k3_dsa_select(m,a,li,x,qa,pos0,C,mr,dsel,dns)){ free(dsel); free(dns); dsel=dns=NULL; }
+        }
     }
     w_matmul(gv,x,&a->g,C);
 #ifdef COLI_VULKAN
@@ -2828,7 +2873,10 @@ static void mla_forward(Model *m, Layer *l, int li, const float *x, int pos0, in
      * attend weigh exactly 0, so its bytes are the loop's over the selected rows) */
     if(!mr&&g_k3g_on&&C>=g_k3g_min_rows&&a->kvb.fmt==1&&a->kvb.q8&&kvl%8==0&&(qr==0||qr%8==0)){
         double t0=now_s();   /* the whole step: the call takes its rows in chunks, each with the positions up to its own */
-        if(dns){
+        if(dmask){
+            on_gpu=k3cu_mla_mask(m->Lc[li],m->Rc[li],pos0+C,pos0,C,qv,gv,a->kvb.q8,a->kvb.s,H,c->qk_nope,qr,vh,kvl,
+                                 c->attn_scale,dmask,dmw,ctx);
+        } else if(dns){
             const int N=pos0+C, mw=(N+31)/32, K=c->index_topk;
             uint32_t *mask=calloc((size_t)C*mw,sizeof(uint32_t));
             if(mask){
@@ -2848,6 +2896,19 @@ static void mla_forward(Model *m, Layer *l, int li, const float *x, int pos0, in
         if(on_gpu) m->t_mla_gpu+=now_s()-t0;
     }
 #endif
+    if(!on_gpu&&dmask){   /* the GPU picked but its core did not run: the picks as the CPU loop's lists */
+        const int K=c->index_topk;
+        dsel=malloc((size_t)C*K*sizeof(int)); dns=malloc((size_t)C*sizeof(int));
+        if(!dsel||!dns){ fprintf(stderr,"OOM DSA selection\n"); exit(1); }
+        for(int t=0;t<C;t++){
+            const int nt=pos0+t+1;
+            dns[t]=-1;
+            if(nt<=K) continue;
+            const uint32_t *mrow=dmask+(size_t)t*dmw; int n=0;
+            for(int p=0;p<nt&&n<K;p++) if(mrow[p>>5]>>(p&31)&1u) dsel[(int64_t)t*K+n++]=p;
+            dns[t]=n;
+        }
+    }
     for(int tt=0;tt<C&&!on_gpu;tt++){
         /* K3.1: a row past index_topk scores and sums only its selected rows, in their order */
         const int *sl=dns&&dns[tt]>=0?dsel+(int64_t)tt*c->index_topk:NULL;
@@ -2896,7 +2957,7 @@ static void mla_forward(Model *m, Layer *l, int li, const float *x, int pos0, in
           free(qab); free(scs);
         }
     }
-    free(dsel); free(dns);
+    free(dsel); free(dns); free(dmask);
     w_matmul(out,ctx,&a->o,C);
     k3_bfree(qa);k3_bfree(qv);k3_bfree(ckv);k3_bfree(gv);k3_bfree(ctx);
 }
@@ -6443,11 +6504,20 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
     /* `i` is the ABSOLUTE position: attention and the MLA Lc/Rc slots are
      * position-indexed, so the loop starts at `reuse`, not at 0. */
     int prefill_cancelled=0;
+    const double dsa0=g_k3_dsa_t, mla0=m->t_mla;
     for(int i=reuse;i<np;i+=chunk){
         int C=np-i<chunk?np-i:chunk;
         free(lo); lo=step_chunk_ex(m,ids+i,i,C,poll?k3_serve_poll_cancel:NULL,poll,
                                    &prefill_cancelled);
         if(prefill_cancelled) break;
+        if(np-reuse>chunk)   /* a prompt of several steps: where it is (a step can take minutes) */
+            fprintf(stderr,"[K3] prompt %d/%d (%.0fs)\n",i+C,np,now_s()-clk->t0);
+    }
+    if(!prefill_cancelled&&np>reuse){
+        fprintf(stderr,"[K3] prompt of %d tokens (%d reused) in %.1fs: attention %.1fs (MLA %.1f",np,reuse,
+                now_s()-clk->t0,m->t_attn-clk->a0,m->t_mla-mla0);
+        if(k3_dsa_indexer_on()) fprintf(stderr,", K3.1's index keys and picks %.1f",g_k3_dsa_t-dsa0);
+        fprintf(stderr,"), MoE %.1fs (waiting for reads %.1f)\n",m->t_moe-clk->e0,m->t_eload-clk->d0);
     }
     if(prefill_cancelled){
         free(lo); k3_cancel_unpublished_state(m); free(ids);
@@ -6927,8 +6997,9 @@ int main(int argc, char **argv){
     fprintf(stderr,"[K3] the prompt's KDA on the CPU: f32 projections %.1fs, conv %.1fs, heads %.1fs; on the GPU %.1fs; "
             "%.0f page faults\n",m.t_kda_f32,m.t_kda_conv,m.t_kda_heads,m.t_kda_gpu,k3_page_faults()-pf0);
     if(k3_dsa_indexer_on())
-        fprintf(stderr,"[K3-DSA] the prompt: index keys and selections %.1fs; %llu rows selected %d of their positions, "
-                "%.0f M positions scored\n",g_k3_dsa_t,g_k3_dsa_rows,m.c.index_topk,g_k3_dsa_pos/1e6);
+        fprintf(stderr,"[K3-DSA] the prompt: index keys and selections %.1fs; %llu rows selected %d of their positions "
+                "(%llu on the GPU), %.0f M positions scored\n",g_k3_dsa_t,g_k3_dsa_rows,m.c.index_topk,g_k3_dsa_gpu_rows,
+                g_k3_dsa_pos/1e6);
 #ifdef COLI_CUDA
     k3_cuda_report("prompt");
 #endif

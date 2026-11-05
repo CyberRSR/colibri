@@ -841,8 +841,12 @@ kimi-k3-tiny-check: kimi-k3-tiny-generate kimi_k3$(EXE)
 kimi-k31-tiny-generate:
 	$(PYTHON) tools/make_kimi_k3_tiny.py --output ./kimi_k31_tiny --force --dsa
 
-kimi-k31-tiny-check: kimi-k31-tiny-generate kimi-k3-tiny-generate kimi_k3$(EXE) tests/test_k3_dsa$(EXE)
-	$(PYTHON) tools/run_tests.py tests/test_k3_dsa$(EXE)
+# the GPU's indexer kernels (backend_cuda_k3_dsa.cuh) run on the CPU, a thread a CUDA thread
+tools/check_k3_dsa_kernels$(EXE): tools/check_k3_dsa_kernels.cpp backend_cuda_k3_dsa.cuh
+	$(CXX) -O2 -std=c++20 -pthread $< -o $@
+
+kimi-k31-tiny-check: kimi-k31-tiny-generate kimi-k3-tiny-generate kimi_k3$(EXE) tests/test_k3_dsa$(EXE) tools/check_k3_dsa_kernels$(EXE)
+	$(PYTHON) tools/run_tests.py tests/test_k3_dsa$(EXE) tools/check_k3_dsa_kernels$(EXE)
 	$(PYTHON) tests/test_kimi_k31_dsa.py \
 		--binary ./kimi_k3$(EXE) \
 		--fixture ./kimi_k31_tiny --k3-fixture ./kimi_k3_tiny

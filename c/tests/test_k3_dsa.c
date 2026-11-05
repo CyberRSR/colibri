@@ -78,6 +78,19 @@ int main(int argc, char **argv){
         for(int i = 0; i < T * hd; i++) K[i] = rnd();
         for(int i = 0; i < nh * hd; i++) q[i] = rnd();
         for(int i = 0; i < nh; i++) w[i] = rnd();
+        /* the bytes: one chain of fmaf a score (what the GPU's k3_dsa_scores computes too) */
+        k3_dsa_scores(sc, q, w, K, 0, T, nh, hd);
+        for(int t = 0; t < T; t++){
+            float s = 0.0f;
+            for(int h = 0; h < nh; h++){
+                float a = 0.0f;
+                for(int i = 0; i < hd; i++) a = fmaf(q[h * hd + i], K[t * hd + i], a);
+                s = fmaf(w[h], a > 0 ? a : 0.0f, s);
+            }
+            if(s == 0) s = 0.0f;
+            checked++;
+            if(memcmp(&s, sc + t, 4)){ if(bad++ < 10) printf("scores %dx%d t %d: %a, the fmaf chain %a\n", nh, hd, t, sc[t], s); }
+        }
         for(int t0 = 0; t0 < 3; t0++){
             k3_dsa_scores(sc, q, w, K, t0, T, nh, hd);
             for(int t = t0; t < T; t++){
