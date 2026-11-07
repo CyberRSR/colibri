@@ -129,6 +129,25 @@ mingw32-make kimi_k3 CUDA_DLL=1 ARCH=native VK=0   # kimi_k3.exe with the DLLs' 
 .\tools\start_kimi_k31_pro_4090.ps1                 # the API on http://127.0.0.1:18080/v1, model kimi-k3.1-pro
 ```
 
+`mingw32-make` above means a MinGW-w64 built against **msvcrt** (winlibs'
+`winlibs-x86_64-posix-seh-gcc-<v>-mingw-w64msvcrt-<v>`): the card's kernels match MinGW's
+`exp_f` and `tanhf` bit for bit, so an engine built against the UCRT -- MSYS2's `ucrt64` gcc --
+keeps a prompt step's routed experts, its KDA and MLA layers and its index picks on the CPU,
+which is minutes for a step of 8,192 rows. The engine says at startup which one it is:
+`[K3-CUDA] experts: a prompt step's routed experts ... on GPU 0 beside the CPU` when the card
+has them, `[K3-CUDA] experts: off (<reason>)` when it does not.
+`..\build-windows.ps1` asks gcc which runtime it targets and stops on a UCRT one (`-AllowUcrt`
+builds that engine on purpose); BUILD-INFO-K31.txt names the runtime of the `kimi_k3.exe`
+shipped here.
+
+Every prompt step of a served request then says where its seconds went, so a slow prompt names
+its stage instead of being one number:
+
+```
+[K3] prompt 8192/18493 (412s): attention 148.6s (MLA 92.4, K3.1's index keys and picks 4.1), MoE 261.3s (router and reads issued 21.0, latent 18.4, shared 33.2, routed experts computed 152.7, waiting for reads 26.9, their inputs 5.2, their sums 3.9)
+[K3]   its experts: cache hit 9.6% (7900 of 82412 asked), read ahead 4128 experts, 3906 taken by a step
+```
+
 The profile ([tools/start_kimi_k31_pro_4090.ps1](tools/start_kimi_k31_pro_4090.ps1)) reads the
 model from both folders (`K3_DIRS`), two readers per drive with the next layer's
 prefetch, puts up to 20 GiB of dense matrices on the GPU and releases their host copies

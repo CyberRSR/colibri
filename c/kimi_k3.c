@@ -4103,11 +4103,24 @@ static struct {
 } g_k3g={ .mx=PTHREAD_MUTEX_INITIALIZER, .go=PTHREAD_COND_INITIALIZER, .ev=PTHREAD_COND_INITIALIZER };
 static void k3g_init(Model *m){
     const char *e=getenv("K3_GPU_EXPERTS");
-    if((e&&!atoi(e))||m->gx||!g_k3_idot||!EXP_F_X87) return;   /* MXFP4's, int8 inputs, MinGW's exp_f and tanhf */
+    /* Named rather than silent: this gate holds the routed experts, the gated MLA and KDA
+     * layers and the index picks, all of which fall back to the CPU (a prompt ten times
+     * slower) and a refused load used to leave no trace in the log. The C library is one of
+     * the reasons because the card's tables hold MinGW's exp_f and tanhf bits; a UCRT build
+     * computes the same numbers with different ones, so it cannot share them with the card. */
+    const char *off=(e&&!atoi(e))?"K3_GPU_EXPERTS=0":m->gx?"the Vulkan tier holds the experts":
+                    !g_k3_idot?"K3_IDOT=0: the card takes int8 activation inputs":
+                    !EXP_F_X87?"the engine was built against a C library whose expf and tanhf "
+                               "are not MinGW's (build it with an msvcrt MinGW)":NULL;
+    int dev=getenv("COLI_GPU")?atoi(getenv("COLI_GPU")):0;
+    if(!off&&!k3cu_init(dev)) off="the device refused coli_cuda_k3.dll";
+    if(off){
+        fprintf(stderr,"[K3-CUDA] experts: off (%s) -- a prompt step's routed experts, its gated MLA and KDA "
+                "layers and its index picks stay on the CPU\n",off);
+        return;
+    }
     if(getenv("K3_GPU_MIN_ROWS")){ g_k3g_min_rows=atoi(getenv("K3_GPU_MIN_ROWS")); if(g_k3g_min_rows<1) g_k3g_min_rows=1; }
     if(getenv("K3_GPU_CPU_WAVE")){ g_k3g_cpu_wave=atoi(getenv("K3_GPU_CPU_WAVE")); if(g_k3g_cpu_wave<0) g_k3g_cpu_wave=0; }
-    int dev=getenv("COLI_GPU")?atoi(getenv("COLI_GPU")):0;
-    if(!k3cu_init(dev)) return;
     g_k3g_on=1;
     fprintf(stderr,"[K3-CUDA] experts: a prompt step's routed experts (steps of %d rows or more) on GPU %d beside the CPU, "
             "the CPU's bytes (K3_GPU_EXPERTS=0: the CPU's alone)\n",g_k3g_min_rows,dev);
@@ -4493,6 +4506,7 @@ static void pin_seed(Model *m, int64_t hist){
     Cfg *c=&m->c;
     if(getenv("AUTOPIN") && atoi(getenv("AUTOPIN"))==0) return;
     if(hist<5000) return;
+    const double t0=now_s();
     double conf=(double)hist/200000.0; if(conf>1) conf=1;
     int pinned_total=0;
     for(int li=0; li<c->n_layers; li++){
@@ -4519,9 +4533,11 @@ static void pin_seed(Model *m, int64_t hist){
             lc->n++; cache_index(m,li,d); pinned_total++;
         }
     }
-    if(pinned_total)
-        fprintf(stderr,"[PIN] %d experts pinned from history (%lld selections, %.0f%% confidence)\n",
-                pinned_total,(long long)hist,100.0*conf);
+    if(pinned_total)   /* the reads are serial and the API waits: the line says what it cost */
+        fprintf(stderr,"[PIN] %d experts pinned from history (%lld selections, %.0f%% confidence) -- %.1fs, "
+                "%.1f GB read one after the other\n",
+                pinned_total,(long long)hist,100.0*conf,now_s()-t0,
+                (double)pinned_total*(double)m->e_slot/1e9);
 }
 
 #if defined(COLI_VULKAN) || defined(COLI_CUDA)
@@ -6381,6 +6397,31 @@ static void serve_hits(Model *m){
 
 /* When a request's prefill began, and the counters then: DONE and PROF report its share. */
 typedef struct { double t0, a0, e0, d0, h0; uint64_t hit0, miss0; } K3ReqClock;
+/* A served prompt's stages. "MoE 3291s" alone says only that the experts spent it: this says
+ * whether the CPU computed them, waited on a drive or summed them, and whether the reads the
+ * prefetcher made were the ones asked for. A step of thousands of rows runs for minutes, so
+ * the same two lines print for one step as for the whole prompt. */
+typedef struct { double attn,mla,dsa,moe,route,lat,shared,wave,eload,qx,wsum;
+                 uint64_t hit,miss,ra,ru; } K3StageClock;
+static void k3_stage_clock(Model *m, K3StageClock *c){
+    c->attn=m->t_attn; c->mla=m->t_mla; c->dsa=g_k3_dsa_t; c->moe=m->t_moe; c->route=m->t_route;
+    c->lat=m->t_lat; c->shared=m->t_shared; c->wave=m->t_wave; c->eload=m->t_eload;
+    c->qx=m->t_qx; c->wsum=m->t_wsum; c->hit=m->hits; c->miss=m->miss;
+    c->ra=g_k3ra_issued; c->ru=g_k3ra_used;
+}
+/* What the counters did between a and b, the whole of it on two lines. */
+static void k3_stage_span_log(const char *what, const K3StageClock *a, const K3StageClock *b){
+    uint64_t hit=b->hit-a->hit, miss=b->miss-a->miss, tot=hit+miss;
+    fprintf(stderr,"%s: attention %.1fs (MLA %.1f",what,b->attn-a->attn,b->mla-a->mla);
+    if(k3_dsa_indexer_on()) fprintf(stderr,", K3.1's index keys and picks %.1f",b->dsa-a->dsa);
+    fprintf(stderr,"), MoE %.1fs (router and reads issued %.1f, latent %.1f, shared %.1f, routed experts "
+            "computed %.1f, waiting for reads %.1f, their inputs %.1f, their sums %.1f)\n",
+            b->moe-a->moe,b->route-a->route,b->lat-a->lat,b->shared-a->shared,b->wave-a->wave,
+            b->eload-a->eload,b->qx-a->qx,b->wsum-a->wsum);
+    fprintf(stderr,"[K3]   its experts: cache hit %.1f%% (%llu of %llu asked), read ahead %llu experts, "
+            "%llu taken by a step\n",tot?100.0*hit/tot:0.0,(unsigned long long)hit,(unsigned long long)tot,
+            (unsigned long long)(b->ra-a->ra),(unsigned long long)(b->ru-a->ru));
+}
 /* What a request's decoding needs from its start: the chat framing it was given. */
 typedef struct { int chat, thinking, sp[4]; } K3ReqChat;
 
@@ -6504,20 +6545,25 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
     /* `i` is the ABSOLUTE position: attention and the MLA Lc/Rc slots are
      * position-indexed, so the loop starts at `reuse`, not at 0. */
     int prefill_cancelled=0;
-    const double dsa0=g_k3_dsa_t, mla0=m->t_mla;
+    K3StageClock p0,prev; k3_stage_clock(m,&p0); prev=p0;
     for(int i=reuse;i<np;i+=chunk){
         int C=np-i<chunk?np-i:chunk;
         free(lo); lo=step_chunk_ex(m,ids+i,i,C,poll?k3_serve_poll_cancel:NULL,poll,
                                    &prefill_cancelled);
         if(prefill_cancelled) break;
-        if(np-reuse>chunk)   /* a prompt of several steps: where it is (a step can take minutes) */
-            fprintf(stderr,"[K3] prompt %d/%d (%.0fs)\n",i+C,np,now_s()-clk->t0);
+        if(np-reuse>chunk){   /* a prompt of several steps: where it is (a step can take minutes) */
+            K3StageClock done; k3_stage_clock(m,&done);
+            char what[96];
+            snprintf(what,sizeof what,"[K3] prompt %d/%d (%.0fs)",i+C,np,now_s()-clk->t0);
+            k3_stage_span_log(what,&prev,&done);
+            prev=done;
+        }
     }
     if(!prefill_cancelled&&np>reuse){
-        fprintf(stderr,"[K3] prompt of %d tokens (%d reused) in %.1fs: attention %.1fs (MLA %.1f",np,reuse,
-                now_s()-clk->t0,m->t_attn-clk->a0,m->t_mla-mla0);
-        if(k3_dsa_indexer_on()) fprintf(stderr,", K3.1's index keys and picks %.1f",g_k3_dsa_t-dsa0);
-        fprintf(stderr,"), MoE %.1fs (waiting for reads %.1f)\n",m->t_moe-clk->e0,m->t_eload-clk->d0);
+        K3StageClock end; k3_stage_clock(m,&end);
+        char what[128];
+        snprintf(what,sizeof what,"[K3] prompt of %d tokens (%d reused) in %.1fs",np,reuse,now_s()-clk->t0);
+        k3_stage_span_log(what,&p0,&end);
     }
     if(prefill_cancelled){
         free(lo); k3_cancel_unpublished_state(m); free(ids);

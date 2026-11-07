@@ -635,6 +635,22 @@ the loader names every optional kernel a DLL lacks, and the launcher's banner sa
 picks will run. After a prompt, `[K3-DSA] the prompt: ... (N on the GPU)` says it outright:
 `0` there means the CPU did them.
 
+**And the C runtime the engine was built against.** `coli_cuda_k3.dll`'s kernels reproduce
+*MinGW's* `exp_f` and `tanhf` bit for bit, so an engine linked against the UCRT -- MSYS2's
+`ucrt64` gcc, which is what `mingw-w64-ucrt-x86_64-gcc` installs -- computes those two
+differently and is refused the card entirely: not the prompt's routed experts, nor the masked
+MLA layers, nor the indexer's picks, and neither `K3_GPU_EXPERTS=1` nor the `coli_cuda.dll`
+dense tier changes that. The whole prompt then runs on the CPU's threads, which is minutes per
+8,192 rows. The engine says so at startup, with the reason:
+
+    [K3-CUDA] experts: off (the engine was built against a C library whose expf and tanhf are
+    not MinGW's (build it with an msvcrt MinGW)) -- a prompt step's routed experts, its gated
+    MLA and KDA layers and its index picks stay on the CPU
+
+`deploy\kimi-k31\build-windows.ps1` asks gcc which C runtime it targets and stops on the UCRT
+(`-AllowUcrt` builds that engine on purpose), the install's workflow builds with an msvcrt
+MinGW-w64, and BUILD-INFO-K31.txt names the runtime the shipped `kimi_k3.exe` was built on.
+
 **Checked** (`make kimi-k31-tiny-check`): `tools/make_kimi_k3_tiny.py --dsa` writes the
 tiny fixture with an indexer on every MLA layer (its other weights K3's tiny ones byte for
 byte, `index_topk` 16). `tests/test_kimi_k31_dsa.py` runs the engine against

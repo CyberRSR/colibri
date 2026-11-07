@@ -10,7 +10,10 @@
 # (tests\test_k3_cuda_experts.exe). Then the binaries go into the install, their SHA-256 into
 # BUILD-INFO-K31.txt, and with -Zip the install into a zip beside this script.
 #
-# Needs on PATH: gcc and mingw32-make (MinGW-w64, e.g. MSYS2's ucrt64 or winlibs), python 3.10+,
+# Needs on PATH: gcc and mingw32-make (MinGW-w64 built against msvcrt -- winlibs
+# x86_64-...-mingw-w64msvcrt-...: a UCRT gcc, MSYS2's ucrt64 included, gives the engine a
+# C library whose expf and tanhf are not the card's, and it then keeps a prompt step's experts
+# on the CPU; the script says so and stops unless -AllowUcrt), python 3.10+,
 # git (for the commit in BUILD-INFO-K31.txt; optional). The CUDA toolkit (12.x or 13.x; CUDA_PATH
 # is set by its installer) and Visual Studio 2022 or its Build Tools with "Desktop development
 # with C++" are found by c\build_k3_cuda.bat itself. Run from any directory:
@@ -25,6 +28,9 @@ param(
     # Rebuild coli_cuda.dll too
     [switch]$CudaDll,
     [switch]$SkipTests,
+    # Build with a UCRT gcc anyway: the engine then keeps a prompt step's experts, its gated
+    # MLA and KDA layers and its index picks on the CPU (see the C runtime check below)
+    [switch]$AllowUcrt,
     # Leave the install as it is (build and test only)
     [switch]$NoCopy,
     [switch]$Zip
@@ -43,8 +49,22 @@ function Run([string]$what, [scriptblock]$block) {
     & $block
     if ($LASTEXITCODE -ne 0) { throw "$what failed (exit $LASTEXITCODE)" }
 }
+# The C runtime gcc links against, from the macros it predefines. A UCRT one gives the engine
+# its own expf and tanhf, which are not the bits coli_cuda_k3.dll's tables hold, so the engine
+# refuses to hand it anything: the routed experts, the gated MLA and KDA layers and the index
+# picks all stay on the CPU. Nothing else about the build changes.
+function Get-GccCrt([string]$gcc) {
+    $probe = Join-Path ([IO.Path]::GetTempPath()) ('k3crt' + [IO.Path]::GetRandomFileName() + '.c')
+    Set-Content -LiteralPath $probe -Value '' -Encoding ASCII
+    try {
+        $defines = & $gcc -dM -E $probe 2>$null
+        if ($LASTEXITCODE -ne 0) { return 'unknown' }
+        if (@($defines | Select-String -Pattern '^#define _UCRT(\s|$)' -Quiet)) { return 'ucrt' }
+        return 'msvcrt'
+    } finally { Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue }
+}
 
-$gcc = Find-Tool @('gcc') 'install MinGW-w64 GCC (MSYS2: pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make, then add C:\msys64\ucrt64\bin to PATH)'
+$gcc = Find-Tool @('gcc') 'install MinGW-w64 GCC (an msvcrt one: winlibs-x86_64-posix-seh-gcc-<v>-mingw-w64msvcrt-<v>.zip; MSYS2 ucrt64 works but keeps the prompt on the CPU, see below)'
 $make = Find-Tool @('mingw32-make', 'make') 'install mingw32-make with MinGW-w64 GCC'
 $python = Find-Tool @('python', 'py') 'install Python 3 (python.org)'
 $c = Join-Path $Repo 'c'
@@ -52,10 +72,19 @@ if (!(Test-Path -LiteralPath (Join-Path $c 'kimi_k3.c'))) { throw "no c\kimi_k3.
 if (!(Select-String -LiteralPath (Join-Path $c 'kimi_k3.c') -Pattern 'dsa_config' -SimpleMatch -Quiet)) {
     throw "$Repo is not a checkout with Kimi K3.1's engine (no dsa_config in c\kimi_k3.c): check out branch claude/kimi-k31-dsa"
 }
-Write-Host "gcc: $gcc"
+$crt = Get-GccCrt $gcc
+Write-Host "gcc: $gcc ($crt)"
 Write-Host "make: $make"
 Write-Host "python: $python"
 Write-Host "CUDA arch: $CudaArch$(if ($env:CUDA_PATH) { ", CUDA_PATH $env:CUDA_PATH" })"
+if ($crt -eq 'ucrt') {
+    $msg = "this gcc targets the UCRT: kimi_k3.exe will keep a prompt step's routed experts, its gated " +
+           'MLA and KDA layers and its index picks on the CPU, which costs minutes per 8192-row step ' +
+           '(the engine says "experts: off" when it starts). Build with an msvcrt MinGW-w64 -- winlibs ' +
+           'x86_64-...-mingw-w64msvcrt-... -- or pass -AllowUcrt to accept that engine.'
+    if (!$AllowUcrt) { throw $msg }
+    Write-Warning $msg
+}
 
 Push-Location $c
 try {
@@ -105,9 +134,13 @@ if ($CudaDll) { $files += 'coli_cuda.dll' }
 foreach ($f in $files) { Copy-Item -LiteralPath (Join-Path $c $f) -Destination (Join-Path $Bundle $f) -Force }
 $commit = ''
 if (Get-Command git -ErrorAction SilentlyContinue) { $commit = (& git -C $Repo rev-parse HEAD 2>$null) }
+# ARCH=native is this board's instruction set: an AVX-512 build refuses to run on a CPU
+# without it, and nothing says so but the line below.
+$cpu = ((Get-ItemProperty -LiteralPath 'HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0' -Name ProcessorNameString -ErrorAction SilentlyContinue).ProcessorNameString -replace "`0", '').Trim()
 $lines = @("Kimi K3.1 Pro's engine, built $(Get-Date -Format 'yyyy-MM-dd HH:mm') on $env:COMPUTERNAME",
            "commit: $(if ($commit) { $commit } else { 'unknown' })",
-           "kimi_k3.exe: mingw32-make -C c kimi_k3 CUDA_DLL=1 ARCH=native VK=0 ($((& $gcc --version)[0]))",
+           "kimi_k3.exe: mingw32-make -C c kimi_k3 CUDA_DLL=1 ARCH=native VK=0 on the $crt C runtime ($((& $gcc --version)[0]))",
+           $(if ($cpu) { "ARCH=native is $cpu: rebuild with ARCH=znver4 / x86-64-v3 before moving the binaries to another box" } else { 'ARCH=native is this machine''s CPU: rebuild before moving the binaries to another box' }),
            "coli_cuda_k3.dll: c\build_k3_cuda.bat, CUDA_ARCH=$CudaArch",
            $(if ($CudaDll) { "coli_cuda.dll: c\build_cuda.bat" } else { "coli_cuda.dll: release kimi-k3-4090-r1's (unchanged by K3.1)" }),
            $(if ($SkipTests) { 'checks: skipped (-SkipTests)' } else { 'checks: test_k3_dsa, test_kimi_k3_tiny, test_kimi_k31_dsa, tests\test_k3_cuda_experts.exe (--dsa and all) passed' }),
@@ -122,6 +155,11 @@ Write-Host "Copied $($files -join ', ') into $Bundle; BUILD-INFO-K31.txt written
 if ($Zip) {
     $zipPath = Join-Path $PSScriptRoot ((Split-Path -Leaf $Bundle) + '.zip')
     if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath }
-    Compress-Archive -LiteralPath $Bundle -DestinationPath $zipPath
+    # bsdtar, not Compress-Archive: PowerShell 5.1 writes its entry names with a backslash,
+    # and outside Windows that unpacks as files named "web\index.html" instead of a tree.
+    $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+    if (!(Test-Path -LiteralPath $tar)) { throw "no $tar to pack the install with" }
+    & $tar -a -cf $zipPath -C (Split-Path -Parent $Bundle) (Split-Path -Leaf $Bundle)
+    if ($LASTEXITCODE -ne 0) { throw "packing the install failed (exit $LASTEXITCODE)" }
     Write-Host "Zip: $zipPath ($([math]::Round((Get-Item $zipPath).Length / 1MB, 1)) MB)" -ForegroundColor Green
 }
