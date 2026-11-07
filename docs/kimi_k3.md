@@ -624,6 +624,17 @@ ran at about 100 GMAC/s for a prompt step's rows and 50-78 for a decode row
 The prompt's selections are reported (`[K3-DSA] the prompt: ...`) and the GPU's masked steps
 (`[K3-CUDA] the gated MLA's attention: ... K3.1's selections`).
 
+**Both binaries, or none of the card.** The GPU's pick is in `coli_cuda_k3.dll`, not in
+`kimi_k3.exe`, and the loader binds `k3cu_dsa_mask` as an *optional* export: a DLL older than
+`dsa_config` loads without a word and every MLA layer then scores its prompt on the CPU. The
+bytes are the same, the time is not -- that is what a CPU at 100 % with idle drives and an idle
+card for minutes looks like, and the engine's one line about it is easy to miss in a loading
+log. So `tools/start_kimi_k31_pro_4090.ps1` checks the DLL for the export and refuses to start
+instead of running quietly at a fraction of its speed (`-AllowCpuIndexer` starts it anyway),
+the loader names every optional kernel a DLL lacks, and the launcher's banner says where the
+picks will run. After a prompt, `[K3-DSA] the prompt: ... (N on the GPU)` says it outright:
+`0` there means the CPU did them.
+
 **Checked** (`make kimi-k31-tiny-check`): `tools/make_kimi_k3_tiny.py --dsa` writes the
 tiny fixture with an indexer on every MLA layer (its other weights K3's tiny ones byte for
 byte, `index_topk` 16). `tests/test_kimi_k31_dsa.py` runs the engine against
@@ -645,8 +656,10 @@ the drives more. Ask for the context the conversations need.
 
 Download and run on the 4090 machine: `tools/download_kimi_k31_pro_4090.ps1` (folders
 `C:\AI\Kimi-K3.1-Pro`, `D:\AI\Models\Kimi-K3.1-Pro`) and
-`tools/start_kimi_k31_pro_4090.ps1` (API model `kimi-k3.1-pro`; it refuses a `kimi_k3.exe`
-that predates `dsa_config`).
+`tools/start_kimi_k31_pro_4090.ps1` (API model `kimi-k3.1-pro`; it refuses a `kimi_k3.exe` that
+predates `dsa_config` and a `coli_cuda_k3.dll` that lacks `k3cu_dsa_mask`). Both come from one
+build: `deploy/kimi-k31/build-windows.ps1` compiles the engine and the DLL together and runs
+`tests/test_k3_cuda_experts.exe --dsa` against the card before copying them into the install.
 
 ## Current limitations
 

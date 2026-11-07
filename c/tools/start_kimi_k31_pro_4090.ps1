@@ -52,7 +52,10 @@ param(
     # No GPU: the dense matrices stay on the CPU (a CPU build, or to compare)
     [switch]$Cpu,
     # A prompt step's routed experts and other dense matrices on the CPU alone (K3_GPU_EXPERTS=0)
-    [switch]$CpuExperts
+    [switch]$CpuExperts,
+    # Start even when coli_cuda_k3.dll cannot do K3.1's indexer: the picks then run on the CPU,
+    # which is correct to the bit but keeps a long prompt's drives and card idle for minutes
+    [switch]$AllowCpuIndexer
 )
 $ErrorActionPreference = 'Stop'
 $EngineDir = Split-Path -Parent $PSScriptRoot
@@ -72,6 +75,23 @@ if (!$engineText.Contains('dsa_config')) {
 Remove-Variable engineText
 if (!$Cpu -and !$CpuExperts -and !(Test-Path -LiteralPath (Join-Path $EngineDir 'coli_cuda_k3.dll') -PathType Leaf)) {
     Write-Warning "No coli_cuda_k3.dll in $EngineDir (c\build_k3_cuda.bat): a prompt's experts stay on the CPU"
+}
+# K3.1's prompt picks need the card's indexer: a coli_cuda_k3.dll older than dsa_config binds
+# without a word (k3cu_dsa_mask is an optional export) and the engine then scores every MLA layer
+# on the CPU, which is the same to the bit but holds a long prompt for minutes with the drives and
+# the card idle. The engine says so once, in a line nobody reads; say it where the user looks.
+# -Cpu and -CpuExperts already chose the CPU's arithmetic, so there the banner says it and stops.
+$indexerOnGpu = $false
+if (!$Cpu -and !$CpuExperts) {
+    $dll = Join-Path $EngineDir 'coli_cuda_k3.dll'
+    if (Test-Path -LiteralPath $dll -PathType Leaf) {
+        $dllText = [System.IO.File]::ReadAllText($dll, [System.Text.Encoding]::ASCII)
+        $indexerOnGpu = $dllText.Contains('k3cu_dsa_mask')
+        Remove-Variable dllText
+    }
+    if (!$indexerOnGpu -and !$AllowCpuIndexer) {
+        throw "coli_cuda_k3.dll in $EngineDir $(if (Test-Path -LiteralPath $dll) { 'predates Kimi K3.1 (no k3cu_dsa_mask)' } else { 'is missing' }): a prompt's index scores would run on the CPU, minutes for a long prompt with the card idle. Build both binaries with deploy\kimi-k31\build-windows.ps1, or pass -AllowCpuIndexer to run them anyway."
+    }
 }
 foreach ($file in @('config.json', 'tokenizer.json')) {
     if (!(Test-Path -LiteralPath (Join-Path $ModelDir $file) -PathType Leaf)) {
@@ -117,6 +137,7 @@ foreach ($key in @('K3_LAYERS', 'K3_TRACE', 'K3_LOGITS', 'K3_X0', 'K3_MMAP', 'K3
 }
 Write-Host "Kimi K3.1 Pro: $ModelDir$(if ($shardDirs.Count) { '; experts also from ' + ($shardDirs -join '; ') })"
 Write-Host "RAM $RamGB GB, CPU $Threads, readers $IoPerDrive per drive, prefetch $Prefetch, $(if ($env:K3_CUDA_DENSE -eq '1') { "dense matrices on the GPU up to $DenseGB GiB" } else { 'dense matrices on the CPU' })$(if ($env:K3_GPU_EXPERTS -eq '1') { ', a prompt step''s experts on the GPU too' })"
+Write-Host "K3.1's index scores and picks: $(if ($indexerOnGpu) { 'on the GPU (k3cu_dsa_mask)' } elseif ($Cpu -or $CpuExperts) { 'on the CPU, as asked' } else { 'ON THE CPU: a long prompt waits here, see coli_cuda_k3.dll' })"
 Write-Host "Context $Context tokens, replies up to $MaxOutput tokens, prompt steps of $Chunk (read-ahead $($env:K3_READAHEAD_GB) GB), $Photos turn photos"
 Write-Host "API: http://127.0.0.1:$Port/v1, model $ModelId"
 & python (Join-Path $EngineDir 'coli') serve --model $ModelDir --ram $RamGB --ctx $Context `

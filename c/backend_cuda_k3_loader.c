@@ -54,11 +54,11 @@ int k3cu_init(int device) {
     BIND(init); BIND(free_bytes); BIND(host_alloc); BIND(host_free); BIND(exact_eval);
     BIND(moe_begin); BIND(moe_expert); BIND(moe_poll); BIND(moe_wait); BIND(moe_end); BIND(matmul); BIND(mla); BIND(router); BIND(shared); BIND(report); BIND(shutdown);
 #undef BIND
-    { FARPROC fn = GetProcAddress(h, "k3cu_kda"); if (fn) memcpy(&p_kda, &fn, sizeof fn); }   /* NULL: KDA on the CPU */
-    { FARPROC fn = GetProcAddress(h, "k3cu_mla_layer"); if (fn) memcpy(&p_mla_layer, &fn, sizeof fn); }   /* NULL: call by call */
-    { FARPROC fn = GetProcAddress(h, "k3cu_matmul_dev"); if (fn) memcpy(&p_matmul_dev, &fn, sizeof fn); }   /* NULL: coli_cuda.dll's kernels */
-    { FARPROC fn = GetProcAddress(h, "k3cu_mla_mask"); if (fn) memcpy(&p_mla_mask, &fn, sizeof fn); }   /* NULL: K3.1's sparse rows on the CPU */
-    { FARPROC fn = GetProcAddress(h, "k3cu_dsa_mask"); if (fn) memcpy(&p_dsa_mask, &fn, sizeof fn); }   /* NULL: K3.1's picks on the CPU */
+    { FARPROC fn = GetProcAddress(h, "k3cu_kda"); if (fn) memcpy(&p_kda, &fn, sizeof fn); else fprintf(stderr, "[K3-CUDA] coli_cuda_k3.dll has no k3cu_kda: KDA on the CPU\n"); }
+    { FARPROC fn = GetProcAddress(h, "k3cu_mla_layer"); if (fn) memcpy(&p_mla_layer, &fn, sizeof fn); else fprintf(stderr, "[K3-CUDA] coli_cuda_k3.dll has no k3cu_mla_layer: the gated MLA call by call\n"); }
+    { FARPROC fn = GetProcAddress(h, "k3cu_matmul_dev"); if (fn) memcpy(&p_matmul_dev, &fn, sizeof fn); else fprintf(stderr, "[K3-CUDA] coli_cuda_k3.dll has no k3cu_matmul_dev: coli_cuda.dll's kernels\n"); }
+    { FARPROC fn = GetProcAddress(h, "k3cu_mla_mask"); if (fn) memcpy(&p_mla_mask, &fn, sizeof fn); else fprintf(stderr, "[K3-CUDA] coli_cuda_k3.dll has no k3cu_mla_mask: K3.1's sparse rows on the CPU\n"); }
+    { FARPROC fn = GetProcAddress(h, "k3cu_dsa_mask"); if (fn) memcpy(&p_dsa_mask, &fn, sizeof fn); else fprintf(stderr, "[K3-CUDA] coli_cuda_k3.dll has no k3cu_dsa_mask: K3.1's picks on the CPU, a long prompt waits there\n"); }
     module = h;
     return p_init(device);
 }
