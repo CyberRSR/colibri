@@ -1,0 +1,18 @@
+Kimi K3.1 Pro's engine, built 2026-11-07 03:17 on TAICHI
+commit: 5e0704989c2ae5d22588a5d4a0fdb65b61896641 (claude/kimi-k31-dsa-gpu-indexer-fix, on 4df284b)
+kimi_k3.exe: mingw32-make -C c kimi_k3 CUDA_DLL=1 ARCH=native VK=0 (gcc.exe (MinGW-W64 x86_64-ucrt-posix-seh, built by Brecht Sanders, r3) 16.2.0)
+coli_cuda_k3.dll: c\build_k3_cuda.bat, CUDA_ARCH=sm_89 (nvcc 13.1, MSVC)
+coli_cuda.dll: release kimi-k3-4090-r1's (unchanged by K3.1)
+exports checked with objdump -p: k3cu_dsa_mask and k3cu_mla_mask present, so a prompt's index
+  scores and picks and its masked MLA attention run on the card, not on the CPU
+checks: kimi-k31-tiny-check passed with this kimi_k3.exe (test_k3_dsa, check_k3_dsa_kernels, the
+  numpy DSA reference at 1.2e-05 worst rel-L2, steps of 5/16/17/32/72, the 6 dsa_config refusals,
+  determinism, test_kimi_k3_ckpt, kimi_k3_park_harness), run on the CPU (K3_CUDA=0 K3_GPU_EXPERTS=0)
+NOT checked: tests/test_k3_cuda_experts.exe --dsa -- the card was busy with another model. Run it
+  before trusting a prompt's bytes on a card; it compares k3cu_dsa_mask and k3cu_mla_mask with the
+  CPU bit for bit.
+ARCH=native is this machine's CPU (AVX-512); rebuild before moving the binaries to another box.
+
+0d0bc75c4cd3aca493b30512c848adaf3e74b66adf4ab7f94fcd96f0bf40e6cf  kimi_k3.exe
+58a999cf704603f503fa911dce653b2da2b102b311a579b1771c6b84fd798f27  coli_cuda_k3.dll
+0ae7268206e60c340c3b9faf3675a1d727580565ebd8fc69b187a4b48d3cccbc  coli_cuda.dll
