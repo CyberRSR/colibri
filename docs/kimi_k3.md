@@ -236,6 +236,9 @@ Judge quantization choices on real-text logits, not synthetic-vector norms.
 | `K3_THINK` | 1 | chat mode: open the structural think channel (0 = response-only) |
 | `K3_DIRS` | — | extra shard directories (multi-drive split, no duplication; `tools/k3_download.py` cuts every layer over them) |
 | `K3_MAXT` | prompt+ngen | context capacity |
+| `K3_KV_GROW` | 1 | the MLA caches and the index keys grow with the conversation: a request allocates its prompt's positions plus `K3_KV_GEN` of the answer's, doubles as it writes them, and a grow the machine cannot pay for comes out of the experts touched longest ago (0 = the whole `K3_MAXT` at the first request; off under `KV_SLOTS>1`) |
+| `K3_KV_GEN` | 1024 | answer positions allocated with the prompt's, before the caches start doubling |
+| `K3_KV_MIN` | 4096 | positions the RAM plan projects the caches for while the session is still idle — what it does not project, the expert cache is allowed to hold |
 | `K3_LAYERS` | all | truncate the stack (validation) |
 | `K3_TRACE` | — | dump f32 hidden state after every layer (validation) |
 | `K3_X0` | — | inject input rows, bypass embedding (validation) |
@@ -665,10 +668,16 @@ a CUDA thread) against the same chain and a stable sort, ties and NaN included.
 `tests/test_k3_cuda_experts --dsa` checks `k3cu_dsa_mask` and `k3cu_mla_mask` on a card against
 the CPU, bit for bit; it was not run on one in this change.
 
-**Context.** The keys and the MLA caches take 67 KB a position, counted against the RAM before
-the expert cache gets the rest: `-Context 1048576` reserves 71 GB, leaving the 4090 machine's
-cache about 33 experts a layer instead of about 85 at the profile's 131,072, so decode reads
-the drives more. Ask for the context the conversations need.
+**Context.** The keys and the MLA caches take 67 KB a position. They used to be counted against
+the RAM whole before the expert cache got the rest, so `-Context 1048576` reserved 71 GB whether
+or not a conversation ever reached them, leaving the 4090 machine's cache about 33 experts a layer
+instead of about 85 at the profile's 131,072. Now the caches grow with the conversation
+(`K3_KV_GROW=1`, the default): the RAM plan projects `K3_KV_MIN` positions, the rest of an idle
+machine goes to experts, and a request takes its positions as it writes them, doubling — a grow
+the machine cannot pay for frees the coldest experts' slots and says so (`[K3][RAM]`). What the
+caches may still reach (`max_t`) is unchanged, so a long conversation ends up taking its 71 GB
+and pushing the experts out on the way; ask for the context the conversations need.
+`K3_KV_GROW=0` is the old behaviour, and a muxed serve (`KV_SLOTS>1`) keeps it.
 
 Download and run on the 4090 machine: `tools/download_kimi_k31_pro_4090.ps1` (folders
 `C:\AI\Kimi-K3.1-Pro`, `D:\AI\Models\Kimi-K3.1-Pro`) and

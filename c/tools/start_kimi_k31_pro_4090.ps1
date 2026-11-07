@@ -26,8 +26,12 @@ param(
     # 0.6 GiB free: past the free memory Windows pages the GPU's to RAM and every call slows
     [ValidateRange(0,23)][double]$DenseGB = 20,
     [ValidateRange(0.5,8)][double]$ReserveGB = 2,
-    # Context, tokens: the MLA caches and K3.1's index keys take 67 KB a token (8.8 GB at 128k),
-    # counted against RamGB
+    # Context, tokens: the MLA caches and K3.1's index keys take 67 KB a token (8.8 GB at 128k).
+    # The caches are allocated as the conversation reaches them, so an idle session costs the
+    # expert cache 4k positions' worth, not this whole ceiling; a conversation that does run to
+    # -Context takes its 8.8 GB out of the expert cache as it goes (K3_KV_GROW=0: all of it up
+    # front). RamGB stays the ceiling either way: what the caches grow into is what the experts
+    # give back, so a long conversation does not overrun the process' budget.
     [ValidateRange(512,1048576)][int]$Context = 131072,
     # The most tokens a reply may have when a request does not ask for fewer (reasoning included)
     [ValidateRange(256,1048576)][int]$MaxOutput = 32768,

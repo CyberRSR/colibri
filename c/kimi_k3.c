@@ -81,6 +81,17 @@
  *   K3_LOGITS=path       dump f32 logits per PREFILL position (teacher-forced
  *                        bit-width comparisons; use with --ngen 0)
  *   K3_MAXT=N            KV/context capacity (default prompt+ngen)
+ *   K3_KV_GROW=0|1       the MLA caches and K3.1's index keys grow with the
+ *                        conversation (default 1): a request allocates its prompt's
+ *                        rows plus K3_KV_GEN of the answer's and doubles as it
+ *                        writes them, and a grow the machine cannot pay for takes
+ *                        its bytes from the experts touched longest ago. 0 is the
+ *                        old way: the whole K3_MAXT at the first request. Kept off
+ *                        for a muxed serve (KV_SLOTS>1).
+ *   K3_KV_GEN=N          rows of the answer allocated with the prompt's (1024)
+ *   K3_KV_MIN=N          positions the RAM plan projects the caches for while the
+ *                        session is still idle (4096): what it does not project, the
+ *                        expert cache is allowed to hold
  *   COLI_K3_CKPT=N       OPT-IN recurrent-state checkpoints for serve: keep N
  *                        photos of the KDA state at turn boundaries so a
  *                        divergent prompt (agentic edit) resumes from the
@@ -260,7 +271,7 @@ typedef struct {
  * each row's from its K3Row. */
 typedef struct {
     float **kstate, **cwq, **cwk, **cwv, **Lc, **Rc, **Ic;
-    int max_t;
+    int max_t, kv_cap;
     kv_prefix kvp;
 } K3Seq;
 typedef struct { K3Seq *seq; int pos; } K3Row;
@@ -281,6 +292,7 @@ typedef struct {
     float **cwq, **cwk, **cwv;            /* conv windows [proj*conv_k], oldest first */
     /* MLA cache */
     float **Lc, **Rc; int max_t;
+    int kv_cap;                             /* positions of Lc/Rc/Ic allocated, <= max_t (kv_alloc_cap) */
     /* KV prefix reuse: what the current state was built from (kv_prefix.h).
      * K3 has no single KV to inspect — 69 KDA layers carry a RECURRENT state
      * and only the 24 MLA layers keep Lc/Rc — so an explicit record of the
@@ -557,6 +569,42 @@ static int k3_dsa_indexer_on(void){ return g_k3_dsa_on; }
 static unsigned long long g_k3_dsa_rows, g_k3_dsa_pos;   /* rows selected for, positions scored */
 static unsigned long long g_k3_dsa_gpu_rows;             /* of them on the GPU (k3cu_dsa_mask) */
 static double g_k3_dsa_t;                  /* seconds: the indexer's projections, scores and picks */
+
+/* ---- the conversation's rows, taken as it needs them (K3_KV_GROW) ----------------
+ * The RAM plan used to project the MLA caches and K3.1's index keys for the whole
+ * K3_MAXT -- 8.8 GB at the 4090 profile's 131,072 positions -- and the expert cache
+ * had to fit under it, while the prompt that opens a session fills a tenth of that
+ * projection and leaves the rest of it empty for the rest of the run. So the caches
+ * are allocated for the positions the conversation is at and double from there, and
+ * a grow the machine cannot pay for takes its bytes back from the experts touched
+ * longest ago (their slots stay; the next read fills one in again). `max_t` stays the
+ * context a request was given and `kv_cap` the rows allocated; the readers take
+ * m->Lc/Rc/Ic at the call and the rows are position-indexed, so moving them between
+ * steps is only what kv_alloc already did between turns. A muxed serve (KV_SLOTS>1)
+ * keeps the one-shot allocation: its conversations trade these arrays between every
+ * row of a step. */
+static double g_k3_kv_row_bytes;           /* one position of this model's caches, in bytes */
+static int g_k3_kv_grow=-1, g_k3_kv_gen=-1;
+#define K3_KV_ROOM 1.0e9                   /* the machine keeps this much free besides a grow */
+static int k3_kv_grow_on(void){
+    if(g_k3_kv_grow<0){ const char *e=getenv("K3_KV_GROW"); g_k3_kv_grow=e?atoi(e)!=0:1; }
+    return g_k3_kv_grow&&g_k3_mux_slots==1;
+}
+static int k3_kv_gen_rows(void){           /* the answer's rows allocated with the prompt's */
+    if(g_k3_kv_gen<0){ const char *e=getenv("K3_KV_GEN"); g_k3_kv_gen=e?atoi(e):1024; if(g_k3_kv_gen<1) g_k3_kv_gen=1; }
+    return g_k3_kv_gen;
+}
+/* what one more position of the caches costs on this model: the MLA layers' Lc and Rc
+ * plus, where the indexer is on, that layer's index keys */
+static double k3_kv_rows_bytes(Model *m){
+    Cfg *c=&m->c; int64_t per=0;
+    const int dsa=c->index_hd>0&&k3_dsa_indexer_on();
+    for(int i=0;i<c->n_layers;i++) if(!m->L[i].kda){
+        per+=(int64_t)c->kv_lora+(int64_t)c->qk_rope;
+        if(dsa&&c->idx_type[i]) per+=c->index_hd;
+    }
+    return (double)per*sizeof(float);
+}
 
 /* LayerNorm of one key: mean and variance in double, in order; y may be x */
 static void k3_dsa_ln(float *y, const float *x, const float *w, const float *b, int n){
@@ -1999,10 +2047,23 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
         int max_t = context_hint > 0 ? context_hint :
                     (getenv("K3_MAXT") ? atoi(getenv("K3_MAXT")) : 8192);
         if(max_t < 1) max_t = 8192;
+        /* A growing conversation is projected for the rows it stands at when the plan is
+         * made, not for the context it may reach: an idle session holds none of them, and
+         * every byte reserved here is a byte the experts were told they could not have
+         * (131,072 positions of caches is 8.8 GB on this model). A request longer than
+         * K3_KV_MIN takes its rows as it arrives, and the coldest experts give them back
+         * when the machine has nothing else to give (k3_kv_yield). */
+        int kv_t = max_t;
+        if(k3_kv_grow_on()){
+            int kvmin=getenv("K3_KV_MIN")?atoi(getenv("K3_KV_MIN")):4096;
+            if(kvmin<64) kvmin=64;
+            if(kvmin<max_t) kv_t=kvmin;
+        }
         int nkv = 0; for(int i=0;i<c->n_layers;i++) if(!m->L[i].kda) nkv++;
         int ndsa = 0; for(int i=0;i<c->n_layers;i++) if(c->index_hd>0&&c->idx_type[i]) ndsa++;
-        double kv_gb = ((double)nkv*(double)(c->kv_lora+c->qk_rope) +
-                        (double)ndsa*(double)c->index_hd)*(double)max_t*4.0/1e9;   /* + K3.1's index keys */
+        double kv_pos = ((double)nkv*(double)(c->kv_lora+c->qk_rope) +
+                         (double)ndsa*(double)c->index_hd)*4.0/1e9;   /* + K3.1's index keys */
+        double kv_gb = kv_pos*(double)kv_t, kv_max_gb = kv_pos*(double)max_t;
         /* 2.5 GB page cache -- measured on Linux 2026-07-06: strangling it drops
          * buffered pread from ~800 to ~180 MB/s and the last GB of LRU costs
          * more in lost bandwidth than it returns. k3_act_gb(): the activations and logits.
@@ -2011,7 +2072,7 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
         double ckpt_gb = k3_ckpt_reserve_gb(m,g_k3_ckpt_slots);
         double act_gb = k3_act_gb(), ra_gb = k3_ra_gb();
         double reserve = 2.5 + act_gb + ra_gb + kv_gb + ckpt_gb;
-        g_k3_ram_later = (kv_gb + ckpt_gb) * 1e9;   /* allocated once it serves: the tier's host pool leaves it (#2314) */
+        g_k3_ram_later = (kv_max_gb + ckpt_gb) * 1e9;   /* the ceiling, allocated once it serves: the tier's host pool leaves it (#2314) */
         double for_experts = 0.0;
 
         double slot_gb = (double)m->e_slot/1e9;
@@ -2035,7 +2096,7 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
                 "(page cache 2.5, activations %.1f, read-ahead %.1f, KV %dx%d %.1f, checkpoints %d %.1f) "
                 "-> %.1f GB for experts; "
                 "cache %d->%d/layer (%.1f MB/slot, %d layers; projected peak %.1f GB)\n",
-                budget, ram_env>0?"":" auto", resident, reserve, act_gb, ra_gb, nkv, max_t, kv_gb,
+                budget, ram_env>0?"":" auto", resident, reserve, act_gb, ra_gb, nkv, kv_t, kv_gb,
                 g_k3_ckpt_slots,ckpt_gb,
                 for_experts>0?for_experts:0.0, cap, cap_fit>0?cap_fit:1,
                 slot_gb*1000.0, nmoe,
@@ -2066,6 +2127,12 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
             }
         }
     }
+    g_k3_kv_row_bytes=k3_kv_rows_bytes(m);
+    if(k3_kv_grow_on())
+        fprintf(stderr,"[K3] KV: the caches grow with the conversation (K3_KV_GROW=0: allocated whole at the first "
+                "request). %.1f KB a position, a request starts at its prompt plus %d answer positions and doubles, "
+                "and a grow the machine cannot pay for comes out of the coldest experts' slots\n",
+                g_k3_kv_row_bytes/1024.0,k3_kv_gen_rows());
     { int ncl=c->n_layers>0?c->n_layers:1;
       m->ecache=calloc((size_t)ncl,sizeof(LCache)); }
     for(int i=0;i<c->n_layers;i++) if(m->L[i].sparse){
@@ -5412,11 +5479,178 @@ static void k3_embed(Model *m, const int *ids, int pos0, int C, float *hidden){
 #include "kimi_k3_chain.h"   /* COLI_VK_CHAIN: every layer's dense chain on the device */
 #endif
 
+/* ---- the RAM a grow takes, and the rows it takes it for -------------------------
+ * An evicted expert gives up its bytes and keeps its entry in the layer's cache: the
+ * next read of that expert finds the slot empty and allocates it again (expert_read_h0).
+ * A slot a reader is still filling, one a step is still computing, and the device's
+ * pinned staging are left where they are. */
+static void k3_kv_yield(Model *m,double bytes,const char *why){
+    if(bytes<=0.0) return;
+    double avail=k3_mem_avail()*1e9;
+    if(avail<=0.0||avail>=bytes+K3_KV_ROOM) return;   /* the machine has it: the experts keep theirs */
+    const double need=bytes+K3_KV_ROOM-avail;
+    const uint64_t slot=(uint64_t)m->e_slot;
+    int n=0,pins=0; double back=0.0;
+    for(int pass=0;pass<2&&back<need;pass++){   /* unpinned first; the seeded pins only once those run out */
+        for(;;){
+            int bli=-1,bsi=-1; uint64_t coldest=0;
+            for(int li=0;m->ecache&&li<m->c.n_layers;li++){
+                if(!m->L[li].sparse) continue;
+                LCache *lc=&m->ecache[li];
+                for(int i=0;i<lc->n;i++){
+                    Slot *s=&lc->s[i];
+                    if(!s->base||s->pin_mem||s->busy||!slot_ready(s)) continue;
+                    if(s->pinned&&pass==0) continue;
+                    if(bsi<0||s->used<coldest){ bsi=i; bli=li; coldest=s->used; }
+                }
+            }
+            if(bsi<0) break;
+            Slot *v=&m->ecache[bli].s[bsi];
+            if(v->eid>=0){ cache_unindex(m,bli,v); m->ebytes-=slot; v->eid=-1; }
+            compat_aligned_free(v->base);
+            v->base=NULL; v->buf=NULL; v->used=0;
+            if(v->pinned){ v->pinned=0; pins++; }
+            n++; back+=(double)slot;
+            if(back>=need) break;
+        }
+    }
+    if(n) fprintf(stderr,"[K3][RAM] %s wants %.2f GB with %.1f GB free: %d experts out of their slots, "
+            "%.2f GB back%s (%.2f of the %.2f GB needed)\n",
+            why,bytes/1e9,avail/1e9,n,back/1e9,pins?", their seeded pins dropped":"",back/1e9,need/1e9);
+    else fprintf(stderr,"[K3][RAM] %s wants %.2f GB, %.1f GB free and no expert left to ask: the grow "
+            "takes what the machine has\n",why,bytes/1e9,avail/1e9);
+}
+/* Every MLA cache and index key with room for `cap` positions, the positions already
+ * written copied over. Lc/Rc are [position][cols], so a grow is a straight prefix copy
+ * and the record of what fed them (kvp) survives with them; the 69 KDA layers are not
+ * here at all — their recurrent state does not scale with the context. */
+static void kv_rows_to(Model *m,int cap){
+    Cfg *c=&m->c;
+    float **oldL=m->Lc, **oldR=m->Rc;
+    int keep=(m->Lc && m->kvp.len>0 && m->kvp.len<=cap) ? m->kvp.len : 0;
+    m->Lc=calloc(c->n_layers,sizeof(float*));
+    m->Rc=calloc(c->n_layers,sizeof(float*));
+    if(!m->Lc||!m->Rc){ fprintf(stderr,"OOM KV cache\n"); exit(1); }
+    for(int i=0;i<c->n_layers;i++) if(!m->L[i].kda){
+        m->Lc[i]=falloc((int64_t)cap*c->kv_lora);
+        m->Rc[i]=falloc((int64_t)cap*c->qk_rope);
+        if(keep){
+            memcpy(m->Lc[i], oldL[i], (size_t)keep*c->kv_lora*sizeof(float));
+            memcpy(m->Rc[i], oldR[i], (size_t)keep*c->qk_rope*sizeof(float));
+        }
+    }
+    if(oldL) for(int i=0;i<c->n_layers;i++){ free(oldL[i]); free(oldR[i]); }
+    free(oldL); free(oldR);
+    if(!kv_prefix_grow(&m->kvp,cap,keep)) kv_prefix_clear(&m->kvp);
+    for(int i=0;i<c->n_layers;i++){
+        Mla *a=&m->L[i].m;
+        if(c->index_hd > 0 && c->idx_type[i] && k3_dsa_indexer_on()){
+            float *old=a->Ic;
+            a->Ic = falloc((int64_t)cap * c->index_hd);
+            if(old){
+                if(keep) memcpy(a->Ic,old,(size_t)keep*c->index_hd*sizeof(float));
+                free(old);
+            }
+        }
+    }
+    m->kv_cap=cap;
+}
+/* The caches may hold `max_t` positions and `cap` of them are allocated (K3_KV_GROW
+ * starts a conversation far below its ceiling; kv_alloc takes the whole thing). Serve
+ * calls this once per request, and it GROWS rather than restarts: freeing Lc/Rc also
+ * discards every position already computed, which is exactly the state KV prefix reuse
+ * exists to keep — a conversation whose prompt is longer every turn asks for a larger
+ * max_t every turn. */
+static void kv_alloc_cap(Model *m,int max_t,int cap){
+    Cfg *c=&m->c;
+    if(max_t<1) max_t=1;
+    if(cap>max_t) cap=max_t;
+    if(cap<m->kv_cap) cap=m->kv_cap;           /* never shrink: the rows written stand where they are */
+    if(m->Lc && max_t<=m->max_t && cap<=m->kv_cap){
+        /* a conversation swapped in (k3_seq_swap) whose caches came before K3.1's keys did */
+        for(int i=0;i<c->n_layers;i++) if(c->index_hd>0&&c->idx_type[i]&&k3_dsa_indexer_on()&&!m->L[i].m.Ic)
+            m->L[i].m.Ic=falloc((int64_t)m->kv_cap*c->index_hd);
+        return;
+    }
+    if(max_t>m->max_t) m->max_t=max_t;
+    k3_kv_yield(m,(double)(cap-m->kv_cap)*(g_k3_kv_row_bytes>0.0?g_k3_kv_row_bytes:k3_kv_rows_bytes(m)),
+                "a conversation's rows");
+    kv_rows_to(m,cap);
+}
+static void kv_alloc(Model *m,int max_t){ kv_alloc_cap(m,max_t,max_t); }
+/* A step about to write positions [pos0,pos0+C): room for them first, doubling so a long
+ * prompt grows a handful of times rather than once per chunk. Nothing else moves these
+ * arrays: every reader takes m->Lc/Rc/Ic at its own call, and the park parts are rebuilt
+ * from the current pointers at both save and restore. */
+static void k3_kv_need(Model *m,int rows){
+    if(!m->Lc||rows<=m->kv_cap) return;
+    if(rows>m->max_t) rows=m->max_t;
+    if(rows<=m->kv_cap) return;
+    int was=m->kv_cap, want=was*2>rows?was*2:rows;
+    if(want>m->max_t) want=m->max_t;
+    double add=(double)(want-was)*(g_k3_kv_row_bytes>0.0?g_k3_kv_row_bytes:k3_kv_rows_bytes(m));
+    k3_kv_yield(m,add,"the conversation's rows growing");
+    kv_rows_to(m,want);
+    fprintf(stderr,"[K3] KV: %d of the %d positions this context may reach (%.2f GB, was %d)\n",
+            want,m->max_t,(double)want*g_k3_kv_row_bytes/1e9,was);
+}
+/* A parked conversation's own caches, grown the same way: every conversation holds its
+ * Lc/Rc and its index keys, and a muxed step reads them straight from the row's seq. */
+static void kv_seq_rows_to(Model *m,K3Seq *q,int cap){
+    Cfg *c=&m->c;
+    float **oldL=q->Lc, **oldR=q->Rc;
+    int keep=(q->Lc && q->kvp.len>0 && q->kvp.len<=cap) ? q->kvp.len : 0;
+    if(!q->Ic&&!(q->Ic=calloc(c->n_layers,sizeof(float*)))){ fprintf(stderr,"[serve] out of memory\n"); exit(1); }
+    q->Lc=calloc(c->n_layers,sizeof(float*));
+    q->Rc=calloc(c->n_layers,sizeof(float*));
+    if(!q->Lc||!q->Rc){ fprintf(stderr,"OOM KV cache\n"); exit(1); }
+    for(int i=0;i<c->n_layers;i++) if(!m->L[i].kda){
+        q->Lc[i]=falloc((int64_t)cap*c->kv_lora);
+        q->Rc[i]=falloc((int64_t)cap*c->qk_rope);
+        if(keep){
+            memcpy(q->Lc[i], oldL[i], (size_t)keep*c->kv_lora*sizeof(float));
+            memcpy(q->Rc[i], oldR[i], (size_t)keep*c->qk_rope*sizeof(float));
+        }
+    }
+    if(oldL) for(int i=0;i<c->n_layers;i++){ free(oldL[i]); free(oldR[i]); }
+    free(oldL); free(oldR);
+    if(!kv_prefix_grow(&q->kvp,cap,keep)) kv_prefix_clear(&q->kvp);
+    for(int i=0;i<c->n_layers;i++){
+        if(c->index_hd > 0 && c->idx_type[i] && k3_dsa_indexer_on()){
+            float *old=q->Ic[i];
+            q->Ic[i] = falloc((int64_t)cap * c->index_hd);
+            if(old){
+                if(keep) memcpy(q->Ic[i],old,(size_t)keep*c->index_hd*sizeof(float));
+                free(old);
+            }
+        }
+    }
+    q->kv_cap=cap;
+}
+/* One row of a multiplexed step: its conversation's caches hold the position it writes.
+ * The step is what a parked conversation is read by, so this is where its rows grow. */
+static void k3_kv_need_rows(Model *m,const K3Row *rows,int S){
+    if(!k3_kv_grow_on()) return;
+    for(int t=0;t<S;t++){
+        K3Seq *q=rows[t].seq;
+        if(!q||rows[t].pos<q->kv_cap) continue;
+        int pos=rows[t].pos>=q->max_t?q->max_t-1:rows[t].pos;   /* the caller's context-full check decides the rest */
+        int rows_want=pos+1;
+        if(rows_want<=q->kv_cap) continue;
+        int was=q->kv_cap, want=was*2>rows_want?was*2:rows_want;
+        if(want>q->max_t) want=q->max_t;
+        k3_kv_yield(m,(double)(want-was)*(g_k3_kv_row_bytes>0.0?g_k3_kv_row_bytes:k3_kv_rows_bytes(m)),
+                    "a parked conversation's rows growing");
+        kv_seq_rows_to(m,q,want);
+    }
+}
+
 static float *step_chunk_ex(Model *m, const int *ids, int pos0, int C,
                             K3CancelPoll poll_cancel, void *cancel_context,
                             int *cancelled){
     Cfg *c=&m->c; int D=c->hidden;
     if(cancelled) *cancelled=0;
+    if(!m->mux_rows&&k3_kv_grow_on()) k3_kv_need(m,pos0+C);   /* the rows this step is about to write */
     int nbmax=(c->n_layers+c->res_bs-1)/c->res_bs;
     float *hidden=falloc((int64_t)C*D), *bres=falloc((int64_t)C*nbmax*D);
     float *mix=falloc(D);
@@ -5499,7 +5733,8 @@ static void k3_seq_swap(Model *m, K3Seq *q){
     K3_SEQ_SWAP(float**,m->kstate,q->kstate); K3_SEQ_SWAP(float**,m->cwq,q->cwq);
     K3_SEQ_SWAP(float**,m->cwk,q->cwk); K3_SEQ_SWAP(float**,m->cwv,q->cwv);
     K3_SEQ_SWAP(float**,m->Lc,q->Lc); K3_SEQ_SWAP(float**,m->Rc,q->Rc);
-    K3_SEQ_SWAP(int,m->max_t,q->max_t); K3_SEQ_SWAP(kv_prefix,m->kvp,q->kvp);
+    K3_SEQ_SWAP(int,m->max_t,q->max_t); K3_SEQ_SWAP(int,m->kv_cap,q->kv_cap);
+    K3_SEQ_SWAP(kv_prefix,m->kvp,q->kvp);
     if(!q->Ic&&!(q->Ic=calloc(m->c.n_layers,sizeof(float*)))){ fprintf(stderr,"[serve] out of memory\n"); exit(1); }   /* slot 0's place */
     for(int i=0;i<m->c.n_layers;i++) K3_SEQ_SWAP(float*,m->L[i].m.Ic,q->Ic[i]);
 #undef K3_SEQ_SWAP
@@ -5544,64 +5779,6 @@ static float *k3_step_rows(Model *m, const K3Row *rows, const int *ids, int S){
     for(int t=0;t<S;t++) kv_prefix_record(&rows[t].seq->kvp,ids+t,rows[t].pos,1);
     free(hidden); free(bres); free(mix);
     return logits;
-}
-
-static void kv_alloc(Model *m, int max_t){
-    Cfg *c=&m->c;
-    /* Serve calls this once per request, and it used to calloc Lc/Rc over the
-     * old pointers without freeing them: n_layers x max_t x (kv_lora +
-     * qk_rope) floats leaked every turn, hundreds of MB over a conversation on
-     * the 24 MLA layers at 4k context.
-     *
-     * GROW, DO NOT RESTART. Freeing and re-allocating also discards every
-     * position already computed, which defeats KV prefix reuse in the one case
-     * it exists for: a conversation whose prompt is longer every turn asks for
-     * a larger max_t every turn, so the state would be thrown away immediately
-     * before the point of using it. (Caught by CI on the Inkling side, where
-     * the same shape of bug sat in the same place.)
-     *
-     * Lc/Rc are laid out [position][kv_lora] and [position][qk_rope], so unlike
-     * inkling's head-major K/V a grow is a straight prefix copy — no re-layout.
-     * The 69 KDA layers are untouched here: their recurrent state does not
-     * scale with max_t and survives on its own. */
-    if(m->Lc && max_t<=m->max_t){
-        /* a conversation swapped in (k3_seq_swap) whose caches came before K3.1's keys did */
-        for(int i=0;i<c->n_layers;i++) if(c->index_hd>0&&c->idx_type[i]&&k3_dsa_indexer_on()&&!m->L[i].m.Ic)
-            m->L[i].m.Ic=falloc((int64_t)m->max_t*c->index_hd);
-        return;
-    }
-
-    float **oldL=m->Lc, **oldR=m->Rc;
-    int keep=(m->Lc && m->kvp.len>0 && m->kvp.len<=max_t) ? m->kvp.len : 0;
-
-    m->max_t=max_t;
-    m->Lc=calloc(c->n_layers,sizeof(float*));
-    m->Rc=calloc(c->n_layers,sizeof(float*));
-    for(int i=0;i<c->n_layers;i++) if(!m->L[i].kda){
-        m->Lc[i]=falloc((int64_t)max_t*c->kv_lora);
-        m->Rc[i]=falloc((int64_t)max_t*c->qk_rope);
-        if(keep){
-            memcpy(m->Lc[i], oldL[i], (size_t)keep*c->kv_lora*sizeof(float));
-            memcpy(m->Rc[i], oldR[i], (size_t)keep*c->qk_rope*sizeof(float));
-        }
-    }
-    if(oldL) for(int i=0;i<c->n_layers;i++){ free(oldL[i]); free(oldR[i]); }
-    free(oldL); free(oldR);
-
-    /* the record describes those same positions, so it survives with them */
-    if(!kv_prefix_grow(&m->kvp,max_t,keep)) kv_prefix_clear(&m->kvp);
-    /* K3.1's index keys, grown like Lc/Rc: the kept positions copied, the old rows freed */
-    for(int i=0;i<c->n_layers;i++){
-        Mla *a=&m->L[i].m;
-        if(c->index_hd > 0 && c->idx_type[i] && k3_dsa_indexer_on()){
-            float *old=a->Ic;
-            a->Ic = falloc((int64_t)max_t * c->index_hd);
-            if(old){
-                if(keep) memcpy(a->Ic,old,(size_t)keep*c->index_hd*sizeof(float));
-                free(old);
-            }
-        }
-    }
 }
 
 static void model_init(Model *m, const char *snap, int n_layers_env){
@@ -5932,18 +6109,19 @@ static void model_state_reset(Model *m){
         }
     }
 #ifdef COLI_METAL
-    if(m->Lc && m->max_t>0 && g_k3_metal){
+    if(m->Lc && m->kv_cap>0 && g_k3_metal){
         /* KV cache is CPU-managed (host memory) even under Metal — clear in place and keep the
          * buffers for reuse. coli_metal_kv_clear() wrote to an unsynced GPU copy, so the host
-         * cache stayed stale across turns; memset zeroes the memory attention actually reads. */
+         * cache stayed stale across turns; memset zeroes the memory attention actually reads.
+         * kv_cap, not max_t: the rows past it are not allocated yet (K3_KV_GROW). */
         for(int i=0;i<c->n_layers;i++) if(!m->L[i].kda){
-            if(m->Lc[i]) memset(m->Lc[i],0,(size_t)m->max_t*c->kv_lora*sizeof(float));
-            if(m->Rc[i]) memset(m->Rc[i],0,(size_t)m->max_t*c->qk_rope*sizeof(float));
+            if(m->Lc[i]) memset(m->Lc[i],0,(size_t)m->kv_cap*c->kv_lora*sizeof(float));
+            if(m->Rc[i]) memset(m->Rc[i],0,(size_t)m->kv_cap*c->qk_rope*sizeof(float));
         }
         for(int i=0;i<c->n_layers;i++){
             Mla *a=&m->L[i].m;
             if(c->index_hd > 0 && c->idx_type[i] && a->Ic)
-                memset(a->Ic,0,(size_t)m->max_t*c->index_hd*sizeof(float));
+                memset(a->Ic,0,(size_t)m->kv_cap*c->index_hd*sizeof(float));
         }
     } else
 #endif
@@ -5956,7 +6134,7 @@ static void model_state_reset(Model *m){
         }
         if(m->Lc) free(m->Lc);
         if(m->Rc) free(m->Rc);
-        m->Lc=NULL; m->Rc=NULL; m->max_t=0;
+        m->Lc=NULL; m->Rc=NULL; m->max_t=0; m->kv_cap=0;
     }
 }
 
@@ -6268,7 +6446,10 @@ static int prepare_request_state(Model *m, const int *ids, int np, int max_t){
      * checkpoint pool (a no-op unless COLI_K3_CKPT enabled it). */
     if(!reuse) reuse=k3_ckpt_restore_best(m,ids,np);
     if(!reuse && !k3_park(m,np,max_t)) model_state_reset(m);   /* a short request keeps the conversation (k3_unpark) */
-    kv_alloc(m,max_t);
+    /* The prompt's rows plus the first K3_KV_GEN of the answer's; the rest as they are
+     * written (k3_kv_need). max_t stays the context this request was given, and parking
+     * above already took it whole: park.h counts the rows a request may rewrite. */
+    kv_alloc_cap(m,max_t,k3_kv_grow_on()?np+k3_kv_gen_rows():max_t);
     return reuse;
 }
 
@@ -7507,6 +7688,7 @@ static int kimi_segment_session_run(void *session_impl,
     model->cwv = session->cwv;
     model->Lc = session->Lc; model->Rc = session->Rc;
     model->max_t = (int)session->context_tokens;
+    model->kv_cap = (int)session->context_tokens;   /* the session allocated these whole; nothing here grows another engine's buffers */
     for (uint32_t layer = engine->layer_begin; layer < engine->layer_end;
          layer++)
         if (!config->is_kda[layer]) model->L[layer].m.Ic = session->Ic[layer];
@@ -7520,7 +7702,7 @@ static int kimi_segment_session_run(void *session_impl,
          layer++)
         if (!config->is_kda[layer]) model->L[layer].m.Ic = NULL;
     model->kstate = NULL; model->cwq = NULL; model->cwk = NULL;
-    model->cwv = NULL; model->Lc = NULL; model->Rc = NULL; model->max_t = 0;
+    model->cwv = NULL; model->Lc = NULL; model->Rc = NULL; model->max_t = 0; model->kv_cap = 0;
     pthread_mutex_unlock(&engine->run_lock);
     if (result) {
         free(hidden); free(residuals);

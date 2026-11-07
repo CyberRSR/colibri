@@ -45,7 +45,9 @@ positions the attention costs the same too (plus one 128 x 7168 matrix a row and
 for the index keys). Past 2,048 positions each row and layer adds the indexer's scores
 (4,096 multiply-adds a position, on the CPU) and attends 2,048 rows instead of all of them;
 the index keys take 12 KB a position beside the MLA caches' 55 KB (`-Context 131072`: 8.8
-GB). The expert cache's hit rate depends on the router's new weights and may move a little.
+GB at the end of a full-length conversation, a few hundred MB while it starts -- the caches
+grow, see **RAM follows the conversation** below). The expert cache's hit rate depends on the
+router's new weights and may move a little.
 None of this has been measured on the real model yet.
 
 ---
@@ -156,7 +158,8 @@ prefetch, puts up to 20 GiB of dense matrices on the GPU and releases their host
 prompt step's experts, its other dense matrices, its KDA layers, its MLA attention and its routers
 on the GPU too, in the CPU's arithmetic to the bit (`K3_GPU_EXPERTS`, `coli_cuda_k3.dll`; a 20 GB
 pool reads the next layer's experts ahead), gives the process 174 GB of RAM (the expert
-cache takes what the rest leaves), a 131,072-token context (the MLA caches: 55 KB a token)
+cache takes what the rest leaves), a 131,072-token context the caches grow into as the
+conversation does (the MLA caches: 55 KB a token, plus K3.1's 12 KB of index keys)
 and 8,192-token prompt steps (each expert a step needs is read once for all of them; 1.4 MB
 of RAM a token of the step past 512: decode 0.81 -> 0.80 tokens a second against steps of
 4,096, a 5,862-token prompt 254 -> 200 s; `-Chunk` takes up to 16,384). `-CpuExperts` keeps a prompt on the CPU;
@@ -164,6 +167,34 @@ of RAM a token of the step past 512: decode 0.81 -> 0.80 tokens a second against
 `-DenseGB 21.5 -ReserveGB 1` puts 35 more on the GPU (0.78 -> 0.81 tokens a second
 measured) and leaves about 0.6 GiB of VRAM to other programs: past what is free, Windows
 moves GPU memory to RAM without an error and every call slows down.
+
+**RAM follows the conversation.** The caches used to be allocated whole at the first request:
+`-Context 131072` meant 8.8 GB of MLA caches and index keys, held from the first token of a
+35-token chat to the last of a 100k-token one, and the expert cache was sized around them. Now
+they grow with the conversation (on by default): the plan projects 4,096 positions
+(`K3_KV_MIN`), the rest of those 8.8 GB goes to experts while the session is idle, a request
+allocates its prompt's positions plus 1,024 of the answer's (`K3_KV_GEN`) and doubles as it
+writes them, and each grow says what the caches hold now:
+
+    [K3] KV: 642 of the 131072 positions this context may reach (0.04 GB, was 214)
+
+A grow the machine cannot pay for takes the bytes from the experts touched longest ago and says
+which:
+
+    [K3][RAM] the conversation's rows growing wants 1.05 GB with 0.4 GB free: 53 experts out
+    of their slots, 0.93 GB back (0.93 of the 1.65 GB needed)
+
+The context a request may reach is unchanged, so a conversation that really runs to 131k ends
+holding its 8.8 GB and gets it out of the expert cache on the way; the hit rate then drops the
+way it does with `-Context` set high. `K3_KV_GROW=0` returns the old behaviour (allocate the
+whole context at the first request), and a muxed serve (`KV_SLOTS` above 1) keeps it. What it
+changes is only where the RAM is: the answers are the bytes the whole-cache engine returns --
+checked on the tiny K3.1 fixture through the API, a three-turn session forced to grow at every
+few tokens, and again with the eviction driven hard (the coldest experts freed between the
+tokens, `K3_CHECK=1` finding every expert the engine kept where it left it). The card was busy
+with another model while this went in, so nothing here is measured on K3.1 Pro itself: what the
+growing cache returns to the expert cache -- 8.5 GB, roughly 5 experts a layer -- and what that
+is worth in tokens a second stay to be measured.
 
 **Agent turns.** The profile keeps four photos of the recurrent state (`COLI_K3_CKPT=4`,
 about 434 MB each), taken at every prompt's and every reply's end. OpenAI-compatible
