@@ -65,6 +65,13 @@
  *   K3_IO_PER_DRIVE=N    readers per storage device the shards are on (default 2)
  *   K3_IO_THREADS=N      that many readers on one queue instead (K3_LOAD_THREADS
  *                        alike); 0 = reads on the caller
+ *   K3_LOAD_PARALLEL=N   the dense weights of N layers read at the same time while
+ *                        the model loads (4 for a prepared U8/GGUF container, where
+ *                        each matrix is one straight read on this loop's one thread;
+ *                        1 for a BF16 checkpoint, which quantizes inside the loop and
+ *                        wants every core for that). Reads only: the bytes land where
+ *                        they did. Forced to 1 by K3_MMAP=1, whose views are counted
+ *                        process-wide.
  *   K3_PREFETCH=0|1      read the next MoE layer's predicted experts ahead in decode
  *                        steps of up to K3_PREFETCH_ROWS (4) rows (default 1)
  *   K3_PREFETCH_TOP=N    the experts a row's prediction reads ahead (default 12)
@@ -1026,7 +1033,15 @@ static float w_rowdot(const W *w, int r, const float *x){
     return a;
 }
 
-#define QCHUNK 1024                      /* rows per load-quantize pass */
+/* Rows per load-quantize pass, and with it the ceiling on how much of the team works on
+ * one matrix: the pass hands out ceil(O/QCHUNK) chunks and a chunk is one worker's. At
+ * 1024 a [7168,7168] matrix fed 7 of a 28-thread team, and that is the story of a slow
+ * start on an HF checkpoint: the same run reads 53.3 GB of pinned experts at 4.8 GB/s
+ * with one reader at a time (its [PIN] line, same two drives) while this loop took 44.5s
+ * for 89 layers -- 1.4 GB/s, far below what the drives were just shown to give. Rows
+ * quantize alone (int8 per row, int4 per 64-column group of one row), so how few rows a
+ * chunk carries cannot change a byte of what lands in RAM, only who carries it. */
+#define QCHUNK 128
 static int g_bits_env=0;                 /* K3_BITS explicitly set: enables the
                                           * int8-container -> int4 load downcast */
 static int g_k3_mmap=0;                  /* prepared U8/F32 tensors stay file-backed */
@@ -1805,7 +1820,34 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
     m->cwv=calloc(c->n_layers,sizeof(float*));
     char nm[512];
     #define NM(...) (snprintf(nm,sizeof(nm),__VA_ARGS__),nm)
+    /* Several readers, but only where more readers are what this loop waits for. A
+     * prepared container (a repacked U8 + .qs sidecar, or a GGUF's own blocks) loads each
+     * matrix with one straight read, on this loop's one thread, tensor after tensor. An
+     * HF BF16 checkpoint instead reads and quantizes each matrix inside w_load over every
+     * core of the team (QCHUNK), so a second layer met here would add readers to a loop
+     * that is not waiting for readers, and take the cores the conversion wants: a region
+     * met inside a region is a team of one (omp_spin.c). Nothing crosses an iteration
+     * either way: each writes its own m->L[i] and its own KDA state rows, the shard index
+     * is read-only once built, and st.h gives every shard a second, overlapped descriptor
+     * precisely so two reads of one file are in flight together -- a model cut over two
+     * volumes keeps both busy. K3_LOAD_PARALLEL says how many either way. */
+    int par=getenv("K3_LOAD_PARALLEL")?atoi(getenv("K3_LOAD_PARALLEL")):0;
+    if(!par){
+        par=1;
+        for(int i=layer_begin;i<layer_end&&par==1;i++) if(!c->is_kda[i]){
+            snprintf(nm,sizeof(nm),"%smodel.layers.%d.self_attn.q_a_proj.weight",m->pfx,i);
+            st_tensor *t=st_find(&m->S,nm);
+            if(t&&(t->dtype==3||st_is_ggml(t->dtype))) par=4;
+        }
+    }
+    if(par<1) par=1;
+    if(par>16) par=16;
+    if(g_k3_mmap) par=1;
+    int nloaded=0, ntotal=layer_end-layer_begin;
+    if(par>1) fprintf(stderr,"[K3] dense weights: %d layers read at a time\n",par);
+    #pragma omp parallel for schedule(dynamic,1) num_threads(par) if(par>1)
     for(int i=layer_begin;i<layer_end;i++){
+        char nm[512];   /* the reader above is shared by the threads; this one is not */
         Layer *l=&m->L[i];
         l->kda=c->is_kda[i];
         l->sparse=(i>=c->first_dense);
@@ -1926,7 +1968,9 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
             w_load(m,&l->d_up,NM("model.layers.%d.mlp.up_proj.weight",i),c->dense_inter,c->hidden,bits);
             w_load(m,&l->d_down,NM("model.layers.%d.mlp.down_proj.weight",i),c->hidden,c->dense_inter,bits);
         }
-        if(i%8==0) fprintf(stderr,"[K3] loaded layer %d/%d (%.1fs, RSS %.1f GB)\n",i+1,c->n_layers,now_s()-t0,rss_gb());
+        int done=__atomic_add_fetch(&nloaded,1,__ATOMIC_RELAXED);   /* layers finished, whichever thread finished them */
+        if(done%8==0||done==ntotal)
+            fprintf(stderr,"[K3] loaded layer %d/%d (%.1fs, RSS %.1f GB)\n",done,ntotal,now_s()-t0,rss_gb());
     }
     snprintf(nm,sizeof(nm),"%smodel.norm.weight",m->pfx);
     m->has_head = load_boundaries&&st_has(&m->S,nm);
@@ -5818,14 +5862,21 @@ static int sample_tok(const float *lo, int V, float temp, float top_p){
  * closes think, opens response, and finishes with <|end_of_msg|> (the eos). */
 typedef struct { Tok *T; int *ids; int n, cap;
                  int sp_open, sp_close, sp_sep, sp_eom;
-                 int cont; } ChatB;   /* cont: the final turn was left open (continuation) */
+                 int cont, over; } ChatB;   /* cont: the final turn was left open (continuation) */
+/* A prompt that does not fit its buffer is the conversation's, not the engine's, problem:
+ * `over` says so and the caller answers CONTEXT_EXCEEDED. This used to be exit(1) — the
+ * engine died mid-request, the gateway started it again (62s of weights and pins), the
+ * client resent the same conversation and it died again: a session that had simply grown
+ * past its context took the engine down with it, once a minute, forever. */
 static void cb_special(ChatB *b, int id){
-    if(b->n>=b->cap){ fprintf(stderr,"chat prompt too long\n"); exit(1); }
+    if(b->n>=b->cap){ b->over=1; return; }
     b->ids[b->n++]=id;
 }
 static void cb_text(ChatB *b, const char *s){
-    if(!*s) return;
-    b->n+=tok_encode(b->T,s,(int)strlen(s),b->ids+b->n,b->cap-b->n);
+    if(!*s||b->over) return;
+    int room=b->cap-b->n, w=tok_encode(b->T,s,(int)strlen(s),b->ids+b->n,room);
+    b->n+=w;
+    if(w>=room) b->over=1;   /* filled to the last slot: the text itself did not fit */
 }
 static void cb_open(ChatB *b, const char *tag, const char *role){
     cb_special(b,b->sp_open); cb_text(b,tag);
@@ -5841,12 +5892,13 @@ static int chat_special(Tok *T, const char *s){
         if(T->sp[i].len==l && !memcmp(T->sp[i].str,s,l)) return T->sp[i].id;
     return -1;
 }
-/* returns prompt length; sp[4] = {open, close, sep, end_of_msg} ids */
+/* returns prompt length, -2 when the tokenizer has no XTML tokens, -3 when the prompt
+ * does not fit `cap`; sp[4] = {open, close, sep, end_of_msg} ids */
 static int chat_build(Tok *T, const char *sys, const char *user, int thinking,
                       int *ids, int cap, int *sp){
     ChatB b={T,ids,0,cap,
         chat_special(T,"<|open|>"), chat_special(T,"<|close|>"),
-        chat_special(T,"<|sep|>"),  chat_special(T,"<|end_of_msg|>"), 0};
+        chat_special(T,"<|sep|>"),  chat_special(T,"<|end_of_msg|>"), 0, 0};
     if(b.sp_open<0||b.sp_close<0||b.sp_sep<0||b.sp_eom<0){
         fprintf(stderr,"chat: XTML special tokens not in tokenizer.json\n"); exit(1); }
     sp[0]=b.sp_open; sp[1]=b.sp_close; sp[2]=b.sp_sep; sp[3]=b.sp_eom;
@@ -5858,7 +5910,7 @@ static int chat_build(Tok *T, const char *sys, const char *user, int thinking,
     cb_close(&b,"message"); cb_special(&b,b.sp_eom);
     cb_open(&b,"message","assistant");
     cb_open(&b,thinking?"think":"response",NULL);
-    return b.n;
+    return b.over?-3:b.n;
 }
 
 static void chat_message(ChatB *b, const char *role, const char *text, int assistant){
@@ -5918,12 +5970,14 @@ static int k3_tool_tag(const char *t){
  *   K3CHAT1\n
  *   M <role> <utf8-bytes>\n<content> ...
  *   G <thinking>\n
- */
+ * Returns the prompt's length, -1 for a payload that does not parse, -2 for a
+ * tokenizer without the XTML tokens and -3 for a conversation that does not
+ * fit `cap` (the caller answers that one over the wire; the engine stays up). */
 static int chat_build_wire(Tok *T, const char *wire, int nwire, int *thinking,
                            int *ids, int cap, int *sp){
     ChatB b={T,ids,0,cap,
         chat_special(T,"<|open|>"), chat_special(T,"<|close|>"),
-        chat_special(T,"<|sep|>"),  chat_special(T,"<|end_of_msg|>"), 0};
+        chat_special(T,"<|sep|>"),  chat_special(T,"<|end_of_msg|>"), 0, 0};
     /* -2, not -1: the caller must be able to tell a bad payload from a snapshot
      * whose tokenizer has no XTML tokens. Serve reported both as "invalid K3
      * chat payload", which sent at least one user hunting through a request
@@ -6073,7 +6127,7 @@ static int chat_build_wire(Tok *T, const char *wire, int nwire, int *thinking,
         cb_open(&b,"message","assistant");
         cb_open(&b,*thinking?"think":"response",NULL);
     }
-    return b.n;
+    return b.over?-3:b.n;
 }
 
 /* ---------- serve mode: shared openai_server.py protocol ---------- */
@@ -6613,7 +6667,16 @@ typedef struct { int chat, thinking, sp[4]; } K3ReqChat;
  * prefill (a lone serve), NULL to leave every command for later (serve_mux). */
 static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_out, float **lo_out,
                           K3ReqClock *clk, K3ReqChat *chatinfo, K3ServePoll *poll){
-    int cap=65536, *ids=malloc((size_t)cap*sizeof(int)), np=0;
+    /* The prompt buffer holds the WHOLE framed conversation, so it takes its size from
+     * the context this serve was given (K3_MAXT) rather than from a constant: the fixed
+     * 65,536 was a tighter ceiling than the -Context the RAM plan projects and the
+     * budget below checks against, and the chat builder that ran into it ended the
+     * process (see cb_special). The slack is XTML framing — an open/close tag and a few
+     * text segments per turn — which the wire's own 16 MB payload cap bounds anyway;
+     * a conversation longer than even that is CONTEXT_EXCEEDED like any other. */
+    int max_ctx=getenv("K3_MAXT")?atoi(getenv("K3_MAXT")):8192;
+    if(max_ctx<1) max_ctx=8192;
+    int cap=max_ctx+4096, *ids=malloc((size_t)cap*sizeof(int)), np=0;
     if(!ids){ coli_serve_write_error(stdout,q->id,"out of memory"); return 0; }
     int sp[4]={-1,-1,-1,-1}, chat=0, thinking=0;
     if(m->c.bos>=0) ids[np++]=m->c.bos;
@@ -6630,12 +6693,26 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
             fprintf(stderr,"[K3] chat: XTML special tokens not in tokenizer.json — "
                            "regenerate with tools/k3_tokenizer.py\n");
             free(ids); return 0; }
-        if(n<0){ coli_serve_write_error(stdout,q->id,"invalid K3 chat payload"); free(ids); return 0; }
-        np+=n; chat=1;
+        if(n==-3){
+            /* The framing stopped with its buffer full, so the conversation is `cap`
+             * tokens or longer -- over this context by construction, cap being the
+             * context plus framing. Say so by carrying that length down to the budget
+             * check, which answers it CONTEXT_EXCEEDED like any other over-long prompt
+             * and lets the client compact. What it did before was exit(1): the gateway
+             * started the engine again (62s of weights and pins), the client resent the
+             * same conversation, and it died again -- an over-long session took the
+             * engine down with it, once a minute, forever. */
+            np=cap;
+            fprintf(stderr,"[serve] a conversation of %d tokens or more does not fit this "
+                           "%d-token context: CONTEXT_EXCEEDED, and the engine keeps "
+                           "serving (raise -Context / K3_MAXT for a longer one)\n",
+                    cap,max_ctx);
+        } else if(n<0){
+            coli_serve_write_error(stdout,q->id,"invalid K3 chat payload"); free(ids); return 0;
+        } else { np+=n; chat=1; }
     } else {
         np+=tok_encode(T,q->payload,q->plen,ids+np,cap-np);
     }
-    int max_ctx=getenv("K3_MAXT")?atoi(getenv("K3_MAXT")):8192;
     int budget=coli_serve_budget(np,q->max_tok,max_ctx,q->logprobs>0);
     if(budget<0){
         if(np<1){
@@ -7092,6 +7169,7 @@ int main(int argc, char **argv){
         if(fread(wire,1,(size_t)wn,wf)!=(size_t)wn){ fprintf(stderr,"short wire read\n"); return 1; }
         fclose(wf); wire[wn]=0;
         int thinking=0, wsp[4], n=chat_build_wire(&wt,wire,(int)wn,&thinking,wid,65536,wsp);
+        if(n==-3){ fprintf(stderr,"the wire payload needs more than the 65,536-token buffer\n"); return 1; }
         if(n<0){ fprintf(stderr,"invalid K3 chat wire payload\n"); return 1; }
         for(int i=0;i<n;i++) printf("%s%d",i?" ":"",wid[i]);
         printf("\n"); free(wire); free(wid); return 0;
@@ -7179,7 +7257,9 @@ int main(int argc, char **argv){
         if(!has_tok){ fprintf(stderr,"--chat needs tokenizer.json\n"); return 1; }
         if(!prompt){ fprintf(stderr,"--chat needs a user message\n"); return 1; }
         if(m.c.bos>=0) ids[np++]=m.c.bos;
-        np+=chat_build(&T,sysmsg,prompt,think,ids+np,65536-np,sp);
+        int n=chat_build(&T,sysmsg,prompt,think,ids+np,65536-np,sp);
+        if(n<0){ fprintf(stderr,"--chat: the framed prompt does not fit the 65,536-token buffer\n"); return 1; }
+        np+=n;
         if(getenv("K3_CHAT_IDS")){
             fprintf(stderr,"[K3] chat ids:");
             for(int i=0;i<np;i++) fprintf(stderr," %d",ids[i]);

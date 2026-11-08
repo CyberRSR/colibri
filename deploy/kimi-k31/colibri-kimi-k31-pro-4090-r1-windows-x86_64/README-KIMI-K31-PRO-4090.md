@@ -196,6 +196,22 @@ with another model while this went in, so nothing here is measured on K3.1 Pro i
 growing cache returns to the expert cache -- 8.5 GB, roughly 5 experts a layer -- and what that
 is worth in tokens a second stay to be measured.
 
+**A conversation past the context is an answer, not a restart.** One that grew longer than
+the context used to take the engine down. The framed conversation is built in a buffer
+before the engine looks at it, and that buffer was 65,536 tokens whatever `-Context` said:
+the builder that met its end printed `chat prompt too long` and called `exit(1)`. The
+gateway started the engine again -- 62 s of weights and pinned experts -- the client resent
+the same conversation, and it died again: `restart 3`, `restart 4`, once a minute forever.
+The buffer now takes its size from `-Context` (plus 4,096 for the XTML framing), and a
+conversation longer than even that is answered the way an over-long prompt is answered
+everywhere else:
+
+    [serve] a conversation of 266240 tokens or more does not fit this 262144-token context:
+            CONTEXT_EXCEEDED, and the engine keeps serving (raise -Context / K3_MAXT for a longer one)
+
+which the API returns as a 400 the client may compact. Nothing about a request stops the
+engine any more.
+
 **Agent turns.** The profile keeps four photos of the recurrent state (`COLI_K3_CKPT=4`,
 about 434 MB each), taken at every prompt's and every reply's end. OpenAI-compatible
 agents send the model's earlier replies back without their reasoning; the conversation
@@ -249,6 +265,7 @@ routed experts before their routing. The GPU's 404 dense matrices take 111 ms a 
 | the reads issued before the latent projection, the shared experts computed while none has arrived | none |
 | the prediction from the next layer's own mix, its 12 best experts (`K3_PREFETCH_MIX`, `K3_PREFETCH_TOP`) | none (a prediction only decides what is read early) |
 | the routers kept in BF16, widened in the f32 kernel's order | none: the f32 copy's bits from half the bytes |
+| the load's quantization in chunks of 128 rows instead of 1,024 (`QCHUNK`): a `[7168,7168]` matrix fed 7 workers of a 28-thread team, which is what the start waited on -- the same run's `[PIN]` line reads 53.3 GB at 4.8 GB/s with one reader at a time, while the load took 44.5 s for 89 layers | none: a row is quantized alone (int8 per row, int4 per 64-column group of one row), so the chunk's size cannot change a byte of what lands in RAM. What it changes is the 44 s start above, and that is the box's number to read, not this page's: the card was serving another model while this went in |
 
 The dense matrices on the 4090 against the CPU kernels (`tests/bench_k3_cuda_dense.c`,
 random weights, the time of a whole call with its copies; "tiled" is

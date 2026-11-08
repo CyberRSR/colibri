@@ -219,6 +219,7 @@ Judge quantization choices on real-text logits, not synthetic-vector norms.
 | `K3_PIPE` | 1 | expert reads on reader threads, beside the compute |
 | `K3_IO_PER_DRIVE` | 2 | readers per storage device the shards are on |
 | `K3_IO_THREADS` | — | that many readers on one queue instead (`K3_LOAD_THREADS`, the old loader's size, is read as this); 0 = reads on the caller |
+| `K3_LOAD_PARALLEL` | 4 prepared / 1 BF16 | the dense weights of this many layers read at once while the model loads: 4 where each matrix is one straight read (a repacked U8 or GGUF container), 1 where the load loop is busy quantizing a BF16 checkpoint on every core instead; `K3_MMAP=1` forces it |
 | `K3_PREFETCH` | 1 | read the next MoE layer's predicted experts ahead (decode steps) |
 | `K3_PREFETCH_ROWS` | 4 | the most rows a step may have for its prediction |
 | `K3_PREFETCH_LIMIT` | 64 | prefetches queued at once |
