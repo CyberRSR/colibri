@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Download Kimi K3.1 Pro (or Kimi K3) from Hugging Face and lay it out over several drives.
 
-moonshotai/Kimi-K3.1-Pro is Kimi K3 trained further: the same architecture, the same
-tensors and the same one-layer-a-shard layout, so everything below holds for both.
+moonshotai/Kimi-K3.1-Pro keeps Kimi K3's one-layer-a-shard checkpoint and adds a small
+DSA indexer to each MLA layer's shard, so everything below holds for both.
 --repo moonshotai/Kimi-K3 fetches the original. Each repository needs its own folders:
 k3_layout.json records the repo, and a folder of another one is refused.
 

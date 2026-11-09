@@ -146,8 +146,12 @@ static int check_dense(int fmt, int S, int I, int O, int gs){
 
 /* 4. A prompt step's gated MLA attention: k3cu_mla against mla_forward's loop, copied here
  *    with the functions it calls (w_addrow, k3_mla_scores_g, softmax_, k3_rowdot8_i8,
- *    sigmoidf_): every output the same bytes. */
-static int check_mla(int H, int qn, int qr, int vh, int kvl, int pos0, int C){
+ *    sigmoidf_): every output the same bytes. K > 0: Kimi K3.1's sparse rows, k3cu_mla_mask
+ *    against the loop over each row's K picked positions (k3_dsa_pick of random scores; a row
+ *    with no more than K positions attends all of them). */
+static int check_mla_k(int H, int qn, int qr, int vh, int kvl, int pos0, int C, int K);
+static int check_mla(int H, int qn, int qr, int vh, int kvl, int pos0, int C){ return check_mla_k(H, qn, qr, vh, kvl, pos0, C, 0); }
+static int check_mla_k(int H, int qn, int qr, int vh, int kvl, int pos0, int C, int K){
     const int N = pos0 + C, qh = qn + qr, O = H * (qn + vh);
     float *Lc = malloc((size_t)N * kvl * sizeof(float)), *Rc = malloc((size_t)N * (qr ? qr : 1) * sizeof(float));
     float *qv = malloc((size_t)C * H * qh * sizeof(float)), *gv = malloc((size_t)C * H * vh * sizeof(float));
@@ -162,8 +166,21 @@ static int check_mla(int H, int qn, int qr, int vh, int kvl, int pos0, int C){
     for(size_t i = 0; i < (size_t)O * kvl; i++){ int v = (int)(rnd32() >> 24) - 128; kvb.q8[i] = (int8_t)(v < -127 ? -127 : v); }
     for(int r = 0; r < O; r++) kvb.s[r] = 0.004f * (1.0f + 0.1f * rndf());
     const float scale = 1.0f / sqrtf((float)qh);
+    int *sel = K ? malloc((size_t)C * K * sizeof(int)) : NULL, *ns = K ? malloc((size_t)C * sizeof(int)) : NULL;
+    if(K){
+        float *sc = falloc(N), *tmp = falloc(N);
+        for(int tt = 0; tt < C; tt++){
+            const int nt = pos0 + tt + 1;
+            ns[tt] = -1;
+            if(nt <= K) continue;
+            for(int t = 0; t < nt; t++) sc[t] = rndf();
+            ns[tt] = k3_dsa_pick(sel + (int64_t)tt * K, sc, tmp, nt, K);
+        }
+        free(sc); free(tmp);
+    }
     for(int tt = 0; tt < C; tt++){
-        int nt = pos0 + tt + 1;
+        const int *sl = K && ns[tt] >= 0 ? sel + (int64_t)tt * K : NULL;
+        int nt = sl ? ns[tt] : pos0 + tt + 1;
         const float *qvt = qv + (int64_t)tt * H * qh, *gvt = gv + (int64_t)tt * H * vh;
         float *ctxt = cc + (int64_t)tt * H * vh;
         const int ngr = (H + K3_MLA_G - 1) / K3_MLA_G;
@@ -179,14 +196,14 @@ static int check_mla(int H, int qn, int qr, int vh, int kvl, int pos0, int C){
                 for(int d = 0; d < qn; d++) w_addrow(&kvb, rbase + d, qp[d], qabs);
                 qrps[g] = qp + qn;
             }
-            k3_mla_scores_g(scs, qab, qrps, nh, Lc, Rc, nt, kvl, qr, scale);
+            k3_mla_scores_g(scs, qab, qrps, nh, Lc, Rc, nt, kvl, qr, scale, sl);
             for(int g = 0; g < nh; g++){
                 const int h = h0 + g, rbase = h * (qn + vh);
                 float *sc = scs + (int64_t)g * nt;
                 softmax_(sc, nt);
                 float clat[4096]; memset(clat, 0, kvl * sizeof(float));
                 for(int t = 0; t < nt; t++){
-                    const float *Lt = Lc + (int64_t)t * kvl; float s2 = sc[t];
+                    const float *Lt = Lc + (int64_t)(sl ? sl[t] : t) * kvl; float s2 = sc[t];
                     for(int i = 0; i < kvl; i++) clat[i] += s2 * Lt[i];
                 }
                 float *cx = ctxt + (int64_t)h * vh;
@@ -202,13 +219,25 @@ static int check_mla(int H, int qn, int qr, int vh, int kvl, int pos0, int C){
         }
     }
     memset(cg, 0xff, (size_t)C * H * vh * sizeof(float));
-    int ok = k3cu_mla(Lc, Rc, N, pos0, C, qv, gv, kvb.q8, kvb.s, H, qn, qr, vh, kvl, scale, cg);
+    int ok;
+    if(K){
+        const int mw = (N + 31) / 32;
+        uint32_t *mask = calloc((size_t)C * mw, sizeof(uint32_t));
+        for(int tt = 0; tt < C; tt++){
+            uint32_t *mrow = mask + (size_t)tt * mw;
+            if(ns[tt] < 0) for(int t = 0; t < pos0 + tt + 1; t++) mrow[t >> 5] |= 1u << (t & 31);
+            else for(int j = 0; j < ns[tt]; j++){ const int t = sel[(int64_t)tt * K + j]; mrow[t >> 5] |= 1u << (t & 31); }
+        }
+        ok = k3cu_mla_mask(Lc, Rc, N, pos0, C, qv, gv, kvb.q8, kvb.s, H, qn, qr, vh, kvl, scale, mask, mw, cg);
+        free(mask);
+    } else
+        ok = k3cu_mla(Lc, Rc, N, pos0, C, qv, gv, kvb.q8, kvb.s, H, qn, qr, vh, kvl, scale, cg);
     size_t diff = 0, first = (size_t)-1;
     for(size_t i = 0; i < (size_t)C * H * vh; i++) if(memcmp(cc + i, cg + i, 4)){ if(first == (size_t)-1) first = i; diff++; }
     if(diff) printf("  output %zu: CPU %a, device %a\n", first, cc[first], cg[first]);
-    printf("MLA %d heads (%d+%d, v %d, latent %d), rows %d..%d: %s%zu of %zu differ\n", H, qn, qr, vh, kvl,
-           pos0, N - 1, ok ? "" : "FAILED to run; ", diff, (size_t)C * H * vh);
-    free(Lc); free(Rc); free(qv); free(gv); free(cc); free(cg); free(kvb.q8); free(kvb.s);
+    printf("MLA %d heads (%d+%d, v %d, latent %d), rows %d..%d%s: %s%zu of %zu differ\n", H, qn, qr, vh, kvl,
+           pos0, N - 1, K ? ", K3.1's picks (k3cu_mla_mask)" : "", ok ? "" : "FAILED to run; ", diff, (size_t)C * H * vh);
+    free(Lc); free(Rc); free(qv); free(gv); free(cc); free(cg); free(kvb.q8); free(kvb.s); free(sel); free(ns);
     return !ok || diff;
 }
 
@@ -482,6 +511,40 @@ int mla_layers(void){
          + check_mla_layer(600, 50, 128, 8, 16, 8, 16, 32, 64, 0, 0, 1);                 /* the tiny model's shapes, 3 chunks */
 }
 
+/* Kimi K3.1's picks: k3cu_dsa_mask against k3_dsa_row on the CPU, every mask word the same
+ * (mode 1: zero head weights, every score +0, the ties to the lower positions) */
+static int check_dsa_pick(int nh, int hd, int K, int pos0, int C, int mode){
+    const int N = pos0 + C, mw = (N + 31) / 32, r0 = K > pos0 ? K - pos0 : 0, R = C - r0;
+    float *Ic = falloc((int64_t)N * hd), *q = falloc((int64_t)(R > 0 ? R : 1) * nh * hd), *w = falloc((int64_t)(R > 0 ? R : 1) * nh);
+    for(int64_t i = 0; i < (int64_t)N * hd; i++) Ic[i] = rndf();
+    for(int64_t i = 0; i < (int64_t)R * nh * hd; i++) q[i] = rndf();
+    for(int64_t i = 0; i < (int64_t)R * nh; i++) w[i] = mode == 1 ? 0.0f : rndf();
+    uint32_t *mc = calloc((size_t)C * mw, sizeof(uint32_t)), *mg = calloc((size_t)C * mw, sizeof(uint32_t));
+    float *sc = falloc(N), *tmp = falloc(N); int *sel = malloc((size_t)K * sizeof(int));
+    for(int r = r0; r < C; r++){
+        const int n = k3_dsa_row(sel, q + (int64_t)(r - r0) * nh * hd, w + (int64_t)(r - r0) * nh, Ic, pos0 + r + 1, nh, hd, K, sc, tmp, 0);
+        for(int j = 0; j < n; j++) mc[(size_t)r * mw + (sel[j] >> 5)] |= 1u << (sel[j] & 31);
+    }
+    const int ok = k3cu_dsa_mask(Ic, N, pos0, C, q, w, nh, hd, K, mg, mw);
+    size_t diff = 0;
+    for(int r = r0; r < C; r++) for(int i = 0; i < mw; i++) diff += mc[(size_t)r * mw + i] != mg[(size_t)r * mw + i];
+    printf("K3.1 picks %d heads of %d, K %d, rows %d..%d%s: %s%zu of %zu mask words differ\n", nh, hd, K, pos0, N - 1,
+           mode == 1 ? " (all ties)" : "", ok ? "" : "FAILED to run; ", diff, (size_t)(R > 0 ? R : 0) * mw);
+    free(Ic); free(q); free(w); free(mc); free(mg); free(sc); free(tmp); free(sel);
+    return !ok || diff;
+}
+/* Kimi K3.1: k3cu_dsa_mask's picks, and k3cu_mla_mask against the CPU's loop over the picked rows */
+static int mla_dsa(void){
+    return check_dsa_pick(32, 128, 2048, 3000, 200, 0)            /* K3.1's widths */
+         + check_dsa_pick(32, 128, 2048, 1900, 300, 0)            /* rows 0..147 attend all, the rest pick */
+         + check_dsa_pick(32, 128, 2048, 30000, 40, 0)            /* a long context: a mask of 939 words */
+         + check_dsa_pick(4, 16, 16, 0, 90, 1)                    /* every score +0 */
+         + check_dsa_pick(4, 16, 16, 10, 60, 0)                   /* the tiny fixture's widths */
+         + check_mla_k(96, 128, 64, 128, 512, 3000, 200, 2048)   /* every row picks 2,048 of 3,001..3,200 */
+         + check_mla_k(96, 128, 64, 128, 512, 1900, 300, 2048)   /* rows 0..147 attend all, the rest pick */
+         + check_mla_k(8, 16, 8, 16, 32, 10, 60, 16)             /* the tiny K3.1 fixture's shapes */
+         + check_mla_k(8, 16, 8, 16, 32, 50, 600, 16);           /* three chunks, masks of 21 words */
+}
 int main(int argc, char **argv){
     int all = argc > 1 && !strcmp(argv[1], "--all-floats");
     if(!k3cu_init(0)){ printf("no CUDA device or coli_cuda_k3.dll: skipped\n"); return 0; }
@@ -493,6 +556,12 @@ int main(int argc, char **argv){
     }
     if(argc > 1 && !strcmp(argv[1], "--dev")){   /* coli_cuda.dll's matrices alone */
         int bad = dense_dev();
+        k3cu_report();
+        printf(bad ? "FAILED\n" : "ok\n");
+        return bad ? 1 : 0;
+    }
+    if(argc > 1 && !strcmp(argv[1], "--dsa")){   /* Kimi K3.1's masked attention alone */
+        int bad = mla_dsa();
         k3cu_report();
         printf(bad ? "FAILED\n" : "ok\n");
         return bad ? 1 : 0;
@@ -541,6 +610,7 @@ int main(int argc, char **argv){
     bad += check_kda(1100, 7168, 96, 128, 4, 0x1f); /* Kimi K3's, every projection on the card: 3 pieces */
     bad += check_kda(600, 7168, 96, 128, 4, 0x12);  /* k and o on the card, q, v and g the host's */
     bad += mla_layers();
+    bad += mla_dsa();
     k3cu_report();
     printf(bad ? "FAILED\n" : "ok\n");
     return bad ? 1 : 0;

@@ -1,10 +1,22 @@
 # Kimi K3.1 Pro on one RTX 4090 (192 GB RAM, two NVMe drives)
 
 [moonshotai/Kimi-K3.1-Pro](https://huggingface.co/moonshotai/Kimi-K3.1-Pro) is Kimi K3
-trained further: the same architecture, the same tensors and the same one-layer-a-shard
-checkpoint, only other weights. This install is release kimi-k3-4090-r1 with its Kimi
-launchers pointed at the new repository; the engine (`kimi_k3.exe`, `coli_cuda_k3.dll`)
-is the same build, byte for byte (`BUILD-INFO.txt`), and reads K3.1 Pro as it reads K3.
+post-trained -- and not only re-weighted: each of its 24 gated MLA layers carries a
+DeepSeek-V3.2 style **DSA lightning indexer** (`dsa_config`; 32 heads of 128, new tensors
+`self_attn.indexer.*`, about 7.4 M parameters a layer), and past 2,048 positions a query
+row attends only the 2,048 earlier rows its layer's indexer scores highest. Everything else
+(KDA, AttnRes, LatentMoE, the MXFP4 experts, the shard layout, the tokenizer, the chat
+format) is K3's. Sources: the model card and TokenSpeed's implementation,
+[lightseekorg/tokenspeed#3015](https://github.com/lightseekorg/tokenspeed/pull/3015).
+
+**The engine must be rebuilt.** Release kimi-k3-4090-r1's `kimi_k3.exe` does not read
+`dsa_config`: it would run every MLA layer dense, which is K3.1's attention up to 2,048
+positions and another one past them. The K3.1 engine (branch `claude/kimi-k31-dsa`:
+`c/kimi_k3.c`, `c/backend_cuda_k3.cu`) is built and put into this folder by
+`..\build-windows.ps1` (MinGW-w64 GCC, the CUDA toolkit, Visual Studio 2022's C++ tools; it
+also runs the tiny models' checks and the GPU's bit-for-bit test of the masked attention),
+and `START-KIMI-K31-PRO.cmd` refuses a `kimi_k3.exe` that predates `dsa_config`. What the
+engine does and how it was checked: `docs/kimi_k3.md`, section "Kimi K3.1".
 
 | | Kimi K3 (kimi-k3-4090-r1) | Kimi K3.1 Pro (this install) |
 |---|---|---|
@@ -27,10 +39,16 @@ by side; delete K3's folders first if the drives cannot hold both). `-Repo` and
 `-Revision` pick another repository or pin a commit. The tokenizer is built from the
 repository's `tiktoken.model` as for K3 (`tools\k3_tokenizer.py`, run by the download).
 
-Everything below is the K3 install's account, measured on Kimi K3. With the same
-tensors the sizes, the drives' shares, the RAM and the speeds are the same for K3.1 Pro
-(the expert cache's hit rate depends on the router's new weights and may move a little);
-the text is the new model's.
+Everything below is the K3 install's account, measured on Kimi K3. For K3.1 Pro the
+experts, the drives' shares and the prompt's expert reads are the same; up to 2,048
+positions the attention costs the same too (plus one 128 x 7168 matrix a row and a layer
+for the index keys). Past 2,048 positions each row and layer adds the indexer's scores
+(4,096 multiply-adds a position, on the CPU) and attends 2,048 rows instead of all of them;
+the index keys take 12 KB a position beside the MLA caches' 55 KB (`-Context 131072`: 8.8
+GB at the end of a full-length conversation, a few hundred MB while it starts -- the caches
+grow, see **RAM follows the conversation** below). The expert cache's hit rate depends on the
+router's new weights and may move a little.
+None of this has been measured on the real model yet.
 
 ---
 
@@ -113,6 +131,25 @@ mingw32-make kimi_k3 CUDA_DLL=1 ARCH=native VK=0   # kimi_k3.exe with the DLLs' 
 .\tools\start_kimi_k31_pro_4090.ps1                 # the API on http://127.0.0.1:18080/v1, model kimi-k3.1-pro
 ```
 
+`mingw32-make` above means a MinGW-w64 built against **msvcrt** (winlibs'
+`winlibs-x86_64-posix-seh-gcc-<v>-mingw-w64msvcrt-<v>`): the card's kernels match MinGW's
+`exp_f` and `tanhf` bit for bit, so an engine built against the UCRT -- MSYS2's `ucrt64` gcc --
+keeps a prompt step's routed experts, its KDA and MLA layers and its index picks on the CPU,
+which is minutes for a step of 8,192 rows. The engine says at startup which one it is:
+`[K3-CUDA] experts: a prompt step's routed experts ... on GPU 0 beside the CPU` when the card
+has them, `[K3-CUDA] experts: off (<reason>)` when it does not.
+`..\build-windows.ps1` asks gcc which runtime it targets and stops on a UCRT one (`-AllowUcrt`
+builds that engine on purpose); BUILD-INFO-K31.txt names the runtime of the `kimi_k3.exe`
+shipped here.
+
+Every prompt step of a served request then says where its seconds went, so a slow prompt names
+its stage instead of being one number:
+
+```
+[K3] prompt 8192/18493 (412s): attention 148.6s (MLA 92.4, K3.1's index keys and picks 4.1), MoE 261.3s (router and reads issued 21.0, latent 18.4, shared 33.2, routed experts computed 152.7, waiting for reads 26.9, their inputs 5.2, their sums 3.9)
+[K3]   its experts: cache hit 9.6% (7900 of 82412 asked), read ahead 4128 experts, 3906 taken by a step
+```
+
 The profile ([tools/start_kimi_k31_pro_4090.ps1](tools/start_kimi_k31_pro_4090.ps1)) reads the
 model from both folders (`K3_DIRS`), two readers per drive with the next layer's
 prefetch, puts up to 20 GiB of dense matrices on the GPU and releases their host copies
@@ -121,7 +158,8 @@ prefetch, puts up to 20 GiB of dense matrices on the GPU and releases their host
 prompt step's experts, its other dense matrices, its KDA layers, its MLA attention and its routers
 on the GPU too, in the CPU's arithmetic to the bit (`K3_GPU_EXPERTS`, `coli_cuda_k3.dll`; a 20 GB
 pool reads the next layer's experts ahead), gives the process 174 GB of RAM (the expert
-cache takes what the rest leaves), a 131,072-token context (the MLA caches: 55 KB a token)
+cache takes what the rest leaves), a 131,072-token context the caches grow into as the
+conversation does (the MLA caches: 55 KB a token, plus K3.1's 12 KB of index keys)
 and 8,192-token prompt steps (each expert a step needs is read once for all of them; 1.4 MB
 of RAM a token of the step past 512: decode 0.81 -> 0.80 tokens a second against steps of
 4,096, a 5,862-token prompt 254 -> 200 s; `-Chunk` takes up to 16,384). `-CpuExperts` keeps a prompt on the CPU;
@@ -129,6 +167,50 @@ of RAM a token of the step past 512: decode 0.81 -> 0.80 tokens a second against
 `-DenseGB 21.5 -ReserveGB 1` puts 35 more on the GPU (0.78 -> 0.81 tokens a second
 measured) and leaves about 0.6 GiB of VRAM to other programs: past what is free, Windows
 moves GPU memory to RAM without an error and every call slows down.
+
+**RAM follows the conversation.** The caches used to be allocated whole at the first request:
+`-Context 131072` meant 8.8 GB of MLA caches and index keys, held from the first token of a
+35-token chat to the last of a 100k-token one, and the expert cache was sized around them. Now
+they grow with the conversation (on by default): the plan projects 4,096 positions
+(`K3_KV_MIN`), the rest of those 8.8 GB goes to experts while the session is idle, a request
+allocates its prompt's positions plus 1,024 of the answer's (`K3_KV_GEN`) and doubles as it
+writes them, and each grow says what the caches hold now:
+
+    [K3] KV: 642 of the 131072 positions this context may reach (0.04 GB, was 214)
+
+A grow the machine cannot pay for takes the bytes from the experts touched longest ago and says
+which:
+
+    [K3][RAM] the conversation's rows growing wants 1.05 GB with 0.4 GB free: 53 experts out
+    of their slots, 0.93 GB back (0.93 of the 1.65 GB needed)
+
+The context a request may reach is unchanged, so a conversation that really runs to 131k ends
+holding its 8.8 GB and gets it out of the expert cache on the way; the hit rate then drops the
+way it does with `-Context` set high. `K3_KV_GROW=0` returns the old behaviour (allocate the
+whole context at the first request), and a muxed serve (`KV_SLOTS` above 1) keeps it. What it
+changes is only where the RAM is: the answers are the bytes the whole-cache engine returns --
+checked on the tiny K3.1 fixture through the API, a three-turn session forced to grow at every
+few tokens, and again with the eviction driven hard (the coldest experts freed between the
+tokens, `K3_CHECK=1` finding every expert the engine kept where it left it). The card was busy
+with another model while this went in, so nothing here is measured on K3.1 Pro itself: what the
+growing cache returns to the expert cache -- 8.5 GB, roughly 5 experts a layer -- and what that
+is worth in tokens a second stay to be measured.
+
+**A conversation past the context is an answer, not a restart.** One that grew longer than
+the context used to take the engine down. The framed conversation is built in a buffer
+before the engine looks at it, and that buffer was 65,536 tokens whatever `-Context` said:
+the builder that met its end printed `chat prompt too long` and called `exit(1)`. The
+gateway started the engine again -- 62 s of weights and pinned experts -- the client resent
+the same conversation, and it died again: `restart 3`, `restart 4`, once a minute forever.
+The buffer now takes its size from `-Context` (plus 4,096 for the XTML framing), and a
+conversation longer than even that is answered the way an over-long prompt is answered
+everywhere else:
+
+    [serve] a conversation of 266240 tokens or more does not fit this 262144-token context:
+            CONTEXT_EXCEEDED, and the engine keeps serving (raise -Context / K3_MAXT for a longer one)
+
+which the API returns as a 400 the client may compact. Nothing about a request stops the
+engine any more.
 
 **Agent turns.** The profile keeps four photos of the recurrent state (`COLI_K3_CKPT=4`,
 about 434 MB each), taken at every prompt's and every reply's end. OpenAI-compatible
@@ -183,6 +265,7 @@ routed experts before their routing. The GPU's 404 dense matrices take 111 ms a 
 | the reads issued before the latent projection, the shared experts computed while none has arrived | none |
 | the prediction from the next layer's own mix, its 12 best experts (`K3_PREFETCH_MIX`, `K3_PREFETCH_TOP`) | none (a prediction only decides what is read early) |
 | the routers kept in BF16, widened in the f32 kernel's order | none: the f32 copy's bits from half the bytes |
+| the load's quantization in chunks of 128 rows instead of 1,024 (`QCHUNK`): a `[7168,7168]` matrix fed 7 workers of a 28-thread team, which is what the start waited on -- the same run's `[PIN]` line reads 53.3 GB at 4.8 GB/s with one reader at a time, while the load took 44.5 s for 89 layers | none: a row is quantized alone (int8 per row, int4 per 64-column group of one row), so the chunk's size cannot change a byte of what lands in RAM. What it changes is the 44 s start above, and that is the box's number to read, not this page's: the card was serving another model while this went in |
 
 The dense matrices on the 4090 against the CPU kernels (`tests/bench_k3_cuda_dense.c`,
 random weights, the time of a whole call with its copies; "tiled" is

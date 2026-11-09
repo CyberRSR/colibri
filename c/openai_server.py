@@ -7981,6 +7981,10 @@ class _DeadlineReader:
     def __init__(self, raw, sock, per_read, budget):
         self._raw, self._sock, self._per_read = raw, sock, per_read
         self._expires = time.monotonic() + budget
+        # Did this request read a single byte yet? A kept-alive client that sends
+        # nothing at all is an idle connection being closed, not a request that
+        # ran out of its read budget, and the log should not claim otherwise.
+        self.got_bytes = False
 
     def _arm(self):
         left = self._expires - time.monotonic()
@@ -8005,6 +8009,8 @@ class _DeadlineReader:
                 take = min(take, remaining)
             chunk = self._raw.read1(take)
             chunks.append(chunk)
+            if chunk:
+                self.got_bytes = True
             if remaining > 0:
                 remaining -= len(chunk)
             if chunk.endswith(b"\n"):
@@ -8023,6 +8029,7 @@ class _DeadlineReader:
             if not chunk:
                 break
             chunks.append(chunk)
+            self.got_bytes = True
             if remaining > 0:
                 remaining -= len(chunk)
         return b"".join(chunks)
@@ -8061,6 +8068,19 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         sys.stderr.write("[api] %s - %s\n" % (self.address_string(), fmt % args))
+
+    def log_error(self, fmt, *args):
+        """`BaseHTTPRequestHandler.handle_one_request` catches a socket TimeoutError before
+        this class's handler does and calls it "Request timed out", which reads as a request
+        that took too long. On HTTP/1.1 persistence it is nearly always the opposite: the
+        client kept the connection and sent nothing, so the connection is only being closed.
+        Say which of the two happened -- a log line nobody can act on sends people looking
+        for an engine fault that is not there."""
+        msg = fmt % args if args else fmt
+        if "timed out" in msg and isinstance(self.rfile, _DeadlineReader) and not self.rfile.got_bytes:
+            msg = ("kept the connection %d s with no request line on it, closing it "
+                   "(an idle client, not a slow request)" % self.timeout)
+        self.log_message("%s", msg)
 
     def handle_one_request(self):
         """Per-request bookkeeping for HTTP/1.1 persistence (#597 item 3).

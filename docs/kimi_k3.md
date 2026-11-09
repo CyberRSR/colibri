@@ -219,6 +219,7 @@ Judge quantization choices on real-text logits, not synthetic-vector norms.
 | `K3_PIPE` | 1 | expert reads on reader threads, beside the compute |
 | `K3_IO_PER_DRIVE` | 2 | readers per storage device the shards are on |
 | `K3_IO_THREADS` | — | that many readers on one queue instead (`K3_LOAD_THREADS`, the old loader's size, is read as this); 0 = reads on the caller |
+| `K3_LOAD_PARALLEL` | 4 prepared / 1 BF16 | the dense weights of this many layers read at once while the model loads: 4 where each matrix is one straight read (a repacked U8 or GGUF container), 1 where the load loop is busy quantizing a BF16 checkpoint on every core instead; `K3_MMAP=1` forces it |
 | `K3_PREFETCH` | 1 | read the next MoE layer's predicted experts ahead (decode steps) |
 | `K3_PREFETCH_ROWS` | 4 | the most rows a step may have for its prediction |
 | `K3_PREFETCH_LIMIT` | 64 | prefetches queued at once |
@@ -229,10 +230,16 @@ Judge quantization choices on real-text logits, not synthetic-vector norms.
 | `K3_WAIT_LAYERS` | 0 | measurement: a decode token's wait for reads and its demand reads, by layer (last lines) |
 | `K3_REUSE` | -- | measurement: every MoE layer's LRU stack distances and predicted share, written to this file at exit |
 | `K3_TOPP` | 0 | keep routed experts to cumulative weight p (0 = off) |
+| `K3_DSA` | 1 | Kimi K3.1: 0 runs the MLA layers dense, the indexer neither loaded nor run (exact up to `index_topk` positions, another attention past them; see [Kimi K3.1](#kimi-k31)) |
+| `K3_DSA_BITS` | `K3_MLA_BITS` | Kimi K3.1: load-time bits of the indexer's three matrices |
+| `K3_DSA_GPU` | 1 | Kimi K3.1, a CUDA build: a prompt step's scores and picks on the GPU (`k3cu_dsa_mask`); 0 = on the CPU (the same bytes) |
 | `K3_CHUNK` | 32 | prefill chunk size, at most 16384 (1 = token-at-a-time; forced 1 under `K3_TRACE`); past 512 rows the RAM budget reserves 1.4 MB of activations a row |
 | `K3_THINK` | 1 | chat mode: open the structural think channel (0 = response-only) |
 | `K3_DIRS` | — | extra shard directories (multi-drive split, no duplication; `tools/k3_download.py` cuts every layer over them) |
 | `K3_MAXT` | prompt+ngen | context capacity |
+| `K3_KV_GROW` | 1 | the MLA caches and the index keys grow with the conversation: a request allocates its prompt's positions plus `K3_KV_GEN` of the answer's, doubles as it writes them, and a grow the machine cannot pay for comes out of the experts touched longest ago (0 = the whole `K3_MAXT` at the first request; off under `KV_SLOTS>1`) |
+| `K3_KV_GEN` | 1024 | answer positions allocated with the prompt's, before the caches start doubling |
+| `K3_KV_MIN` | 4096 | positions the RAM plan projects the caches for while the session is still idle — what it does not project, the expert cache is allowed to hold |
 | `K3_LAYERS` | all | truncate the stack (validation) |
 | `K3_TRACE` | — | dump f32 hidden state after every layer (validation) |
 | `K3_X0` | — | inject input rows, bypass embedding (validation) |
@@ -564,6 +571,121 @@ the RAM).
 | `K3_GPU_MLA` | 1 | a prompt step's gated MLA layers whole on the card, `k3cu_mla_layer` (0: call by call around the core) |
 | `K3_GPU_KDA_ROWS` | 512 | the rows of a KDA layer's piece on the card |
 | `K3_READAHEAD_GB` | 20 with the card, else 0 | the read-ahead pool, counted in the RAM budget |
+
+## Kimi K3.1
+
+[moonshotai/Kimi-K3.1-Pro](https://huggingface.co/moonshotai/Kimi-K3.1-Pro) is Kimi K3
+post-trained, and not only that: each of its 24 gated MLA layers carries a DeepSeek-V3.2
+style **lightning indexer** (`text_config.dsa_config`; the wrapper's `model_type` is
+`kimi_k31`, its class `KimiK31ForConditionalGeneration`). The checkpoint ships no modeling
+code; the semantics here follow the one implementation published with it,
+[TokenSpeed's `KimiK31Indexer`](https://github.com/lightseekorg/tokenspeed/pull/3015)
+(`python/tokenspeed/runtime/models/kimi_k31.py`), and its config parser's checks:
+
+| | Kimi K3 | Kimi K3.1 |
+|---|---|---|
+| MLA layer | gated NoPE MLA over every earlier row | the same projections, over the `index_topk` (2,048) rows its indexer picks; a row with no more positions attends all of them |
+| new tensors a layer | -- | `self_attn.indexer.wq_b` [32*128, 1536], `.wk` [128, 7168], `.weights_proj` [32, 7168], `.k_norm.{weight,bias}` [128], BF16 |
+| config | -- | `dsa_config`: `dsa_layers` (every MLA layer), `index_topk` 2048, `index_head_dim` 128, `index_num_heads` 32, `index_rope_dim` 0, `index_k_norm_type` layernorm, `index_topk_freq` 1 |
+| everything else | | Kimi K3's: KDA, AttnRes, LatentMoE, MXFP4 experts, the tokenizer and the chat format |
+
+For the query row at position t and an earlier row s,
+
+    I(t,s) = d^-0.5 H^-0.5 * sum_h w_h(t) relu(q_h(t) . k(s))
+    q(t) = wq_b(c_q(t))           c_q: the RMSNorm'd q latent (qa after q_a_layernorm)
+    k(s) = LayerNorm(wk(x(s)))    eps 1e-6, no RoPE, no Hadamard rotation
+    w(t) = weights_proj(x(t))     x: the attention input
+
+and the row attends the `index_topk` rows of the highest I (all heads share the pick).
+
+**In the engine.** `load_cfg` reads `dsa_config` and refuses any value the code does not
+implement (an unknown key, a RoPE part, an RMSNorm key norm, FP8 indexer weights, a pick
+shared between layers). Every MLA step writes its rows' keys into the layer's `Ic` cache
+(f32, `index_head_dim` floats a position, beside `Lc`/`Rc`: photos, parking, the
+multiplexed slots and the segment sessions carry it). A row past `index_topk` positions
+gets its pick -- in a decode step on the CPU (`k3_dsa_scores`: 16 positions a pass, 8x8
+blocks of keys transposed in registers; `k3_dsa_pick`: quickselect, ties to the lower
+position, the list ascending), in a prompt step of a CUDA build on the GPU (`k3cu_dsa_mask`,
+`backend_cuda_k3_dsa.cuh`: the same chain of fused multiply-adds a score, a radix select a
+row, so the same bits as the CPU's pick); then its attention runs over the picked rows only -- on the CPU's loop (the
+scores and the latent sum over the list) or, for a prompt step, on the GPU's core with the
+pick as a bit mask (`k3cu_mla_mask` in `coli_cuda_k3.dll`: a masked position's weight is
+exactly 0, which changes neither the softmax's sum nor the latent's, so the GPU's bytes are
+the CPU loop's over the picked rows). A step all of whose rows have at most `index_topk`
+positions is K3's to the bit, the GPU's whole-layer path included (the keys then on the
+CPU). `K3_DSA=0` runs a K3.1 checkpoint dense.
+
+**What it costs.** Up to 2,048 positions: one 128 x 7168 matrix a row and a layer (the
+keys), nothing else. Past them a prompt's scores grow with the square of its length (a
+32,768-token prompt: 44 T multiply-adds over the 24 layers): on the CPU alone that kept the
+first K3.1 build's prompts on the CPU for minutes with the drives and the card idle, hence
+the GPU's pick. Past them, for each row and layer: the projections (32 x 128 by 1536,
+32 by 7168), 4,096 multiply-adds a position for the scores, a quickselect, and then the
+attention over 2,048 rows instead of all of them -- at long contexts much less than K3's
+dense attention reads. On the 4-core test machine of this change (Xeon, 2.1 GHz) the scores
+ran at about 100 GMAC/s for a prompt step's rows and 50-78 for a decode row
+(`tests/test_k3_dsa bench`); the keys add 12 KB a position to the 55 KB of the MLA caches.
+The prompt's selections are reported (`[K3-DSA] the prompt: ...`) and the GPU's masked steps
+(`[K3-CUDA] the gated MLA's attention: ... K3.1's selections`).
+
+**Both binaries, or none of the card.** The GPU's pick is in `coli_cuda_k3.dll`, not in
+`kimi_k3.exe`, and the loader binds `k3cu_dsa_mask` as an *optional* export: a DLL older than
+`dsa_config` loads without a word and every MLA layer then scores its prompt on the CPU. The
+bytes are the same, the time is not -- that is what a CPU at 100 % with idle drives and an idle
+card for minutes looks like, and the engine's one line about it is easy to miss in a loading
+log. So `tools/start_kimi_k31_pro_4090.ps1` checks the DLL for the export and refuses to start
+instead of running quietly at a fraction of its speed (`-AllowCpuIndexer` starts it anyway),
+the loader names every optional kernel a DLL lacks, and the launcher's banner says where the
+picks will run. After a prompt, `[K3-DSA] the prompt: ... (N on the GPU)` says it outright:
+`0` there means the CPU did them.
+
+**And the C runtime the engine was built against.** `coli_cuda_k3.dll`'s kernels reproduce
+*MinGW's* `exp_f` and `tanhf` bit for bit, so an engine linked against the UCRT -- MSYS2's
+`ucrt64` gcc, which is what `mingw-w64-ucrt-x86_64-gcc` installs -- computes those two
+differently and is refused the card entirely: not the prompt's routed experts, nor the masked
+MLA layers, nor the indexer's picks, and neither `K3_GPU_EXPERTS=1` nor the `coli_cuda.dll`
+dense tier changes that. The whole prompt then runs on the CPU's threads, which is minutes per
+8,192 rows. The engine says so at startup, with the reason:
+
+    [K3-CUDA] experts: off (the engine was built against a C library whose expf and tanhf are
+    not MinGW's (build it with an msvcrt MinGW)) -- a prompt step's routed experts, its gated
+    MLA and KDA layers and its index picks stay on the CPU
+
+`deploy\kimi-k31\build-windows.ps1` asks gcc which C runtime it targets and stops on the UCRT
+(`-AllowUcrt` builds that engine on purpose), the install's workflow builds with an msvcrt
+MinGW-w64, and BUILD-INFO-K31.txt names the runtime the shipped `kimi_k3.exe` was built on.
+
+**Checked** (`make kimi-k31-tiny-check`): `tools/make_kimi_k3_tiny.py --dsa` writes the
+tiny fixture with an indexer on every MLA layer (its other weights K3's tiny ones byte for
+byte, `index_topk` 16). `tests/test_kimi_k31_dsa.py` runs the engine against
+`tools/k3_ref.py`'s independent numpy indexer and sparse MLA on injected inputs (every
+layer, rel-L2 below 3e-4; the dense reference differs by 10-100% past position 16, so the
+comparison bites), checks that prompt steps of any size give the same logits, that
+`K3_DSA=0` gives K3's, and that a config the engine does not implement is refused. The
+photos, parking, dashboard and multiplexed-slot checks pass on it as on K3's fixture.
+`tests/test_k3_dsa` checks the scores (bit for bit against the fused chain), the pick and the
+LayerNorm; `tools/check_k3_dsa_kernels.cpp` runs the GPU's indexer kernels on the CPU (a thread
+a CUDA thread) against the same chain and a stable sort, ties and NaN included.
+`tests/test_k3_cuda_experts --dsa` checks `k3cu_dsa_mask` and `k3cu_mla_mask` on a card against
+the CPU, bit for bit; it was not run on one in this change.
+
+**Context.** The keys and the MLA caches take 67 KB a position. They used to be counted against
+the RAM whole before the expert cache got the rest, so `-Context 1048576` reserved 71 GB whether
+or not a conversation ever reached them, leaving the 4090 machine's cache about 33 experts a layer
+instead of about 85 at the profile's 131,072. Now the caches grow with the conversation
+(`K3_KV_GROW=1`, the default): the RAM plan projects `K3_KV_MIN` positions, the rest of an idle
+machine goes to experts, and a request takes its positions as it writes them, doubling — a grow
+the machine cannot pay for frees the coldest experts' slots and says so (`[K3][RAM]`). What the
+caches may still reach (`max_t`) is unchanged, so a long conversation ends up taking its 71 GB
+and pushing the experts out on the way; ask for the context the conversations need.
+`K3_KV_GROW=0` is the old behaviour, and a muxed serve (`KV_SLOTS>1`) keeps it.
+
+Download and run on the 4090 machine: `tools/download_kimi_k31_pro_4090.ps1` (folders
+`C:\AI\Kimi-K3.1-Pro`, `D:\AI\Models\Kimi-K3.1-Pro`) and
+`tools/start_kimi_k31_pro_4090.ps1` (API model `kimi-k3.1-pro`; it refuses a `kimi_k3.exe` that
+predates `dsa_config` and a `coli_cuda_k3.dll` that lacks `k3cu_dsa_mask`). Both come from one
+build: `deploy/kimi-k31/build-windows.ps1` compiles the engine and the DLL together and runs
+`tests/test_k3_cuda_experts.exe --dsa` against the card before copying them into the install.
 
 ## Current limitations
 

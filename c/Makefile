@@ -835,6 +835,28 @@ kimi-k3-tiny-check: kimi-k3-tiny-generate kimi_k3$(EXE)
 		--binary ./kimi_k3$(EXE) \
 		--fixture ./kimi_k3_tiny
 
+# Kimi K3.1 (dsa_config): the same tiny model plus a lightning indexer on every MLA layer,
+# against tools/k3_ref.py's numpy indexer and sparse MLA; then the K3 fixture's checks on it
+.PHONY: kimi-k31-tiny-generate kimi-k31-tiny-check
+kimi-k31-tiny-generate:
+	$(PYTHON) tools/make_kimi_k3_tiny.py --output ./kimi_k31_tiny --force --dsa
+
+# the GPU's indexer kernels (backend_cuda_k3_dsa.cuh) run on the CPU, a thread a CUDA thread
+tools/check_k3_dsa_kernels$(EXE): tools/check_k3_dsa_kernels.cpp backend_cuda_k3_dsa.cuh
+	$(CXX) -O2 -std=c++20 -pthread $< -o $@
+
+kimi-k31-tiny-check: kimi-k31-tiny-generate kimi-k3-tiny-generate kimi_k3$(EXE) tests/test_k3_dsa$(EXE) tools/check_k3_dsa_kernels$(EXE)
+	$(PYTHON) tools/run_tests.py tests/test_k3_dsa$(EXE) tools/check_k3_dsa_kernels$(EXE)
+	$(PYTHON) tests/test_kimi_k31_dsa.py \
+		--binary ./kimi_k3$(EXE) \
+		--fixture ./kimi_k31_tiny --k3-fixture ./kimi_k3_tiny
+	$(PYTHON) tests/test_kimi_k3_ckpt.py \
+		--binary ./kimi_k3$(EXE) \
+		--fixture ./kimi_k31_tiny
+	$(PYTHON) tests/kimi_k3_park_harness.py \
+		--binary ./kimi_k3$(EXE) \
+		--fixture ./kimi_k31_tiny
+
 .PHONY: deepseek-v4 deepseek-v4-oracle deepseek-v4-tiny-generate \
 	deepseek-v4-tiny-check deepseek-v4-clean
 ifeq ($(COLI_V4_SUPPORTED),1)
@@ -2130,6 +2152,10 @@ tests/test_k3_ram_budget$(EXE): tests/test_k3_ram_budget.c kimi_k3.c $(VK_OBJ)
 
 tests/test_k3_mla_scores$(EXE): tests/test_k3_mla_scores.c kimi_k3.c $(VK_OBJ)
 	$(CC) $(CFLAGS) $< $(VK_OBJ) -o $@ $(LDFLAGS)
+
+# Kimi K3.1's lightning indexer on the CPU: its scores, top-k pick and key LayerNorm
+tests/test_k3_dsa$(EXE): tests/test_k3_dsa.c kimi_k3.c $(VK_OBJ)
+	$(CC) $(NOCUDA_CFLAGS) $< $(VK_OBJ) -o $@ $(NOCUDA_LDFLAGS)
 
 # coli_cuda_k3.dll against kimi_k3.c, bit for bit (skipped without the DLL or a device)
 tests/test_k3_cuda_experts$(EXE): tests/test_k3_cuda_experts.c kimi_k3.c backend_cuda_k3_loader.c backend_cuda_k3.h $(CUDA_OBJ) $(VK_OBJ)

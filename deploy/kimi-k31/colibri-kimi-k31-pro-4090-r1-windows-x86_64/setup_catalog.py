@@ -141,12 +141,12 @@ CATALOG = (
         post_install=(("k3_tokenizer", "tokenizer.json"),),
         doc="docs/kimi_k3.md"),
     CatalogModel(
-        # Kimi K3 trained further: the same architecture, tensors and shard layout,
-        # so the same engine (kimi_k3), sizes and tokenizer conversion as K3.
+        # Kimi K3 post-trained, plus a DSA lightning indexer on every MLA layer
+        # (dsa_config): a kimi_k3 built from branch claude/kimi-k31-dsa or later.
         id="kimi-k3.1-pro", family="kimi", name="Kimi K3.1 Pro",
         repo="moonshotai/Kimi-K3.1-Pro", disk_gb=1561.0,
-        ram_min_gb=32, ram_good_gb=64, dense_gb=20.0, rank=10, size_class="large",
-        summary="2.8T, Kimi K3 trained further, native MXFP4 experts",
+        ram_min_gb=32, ram_good_gb=64, dense_gb=20.2, rank=10, size_class="large",
+        summary="2.8T, Kimi K3 post-trained, sparse (DSA) attention, native MXFP4 experts",
         post_install=(("k3_tokenizer", "tokenizer.json"),),
         prebuilt_since="2.0.0", doc="docs/kimi_k3.md"),
     CatalogModel(

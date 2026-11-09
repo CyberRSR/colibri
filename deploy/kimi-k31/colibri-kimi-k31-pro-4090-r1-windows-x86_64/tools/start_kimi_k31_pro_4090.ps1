@@ -1,6 +1,8 @@
 # Kimi K3.1 Pro on the RTX 4090 / 192 GiB RAM / two-NVMe machine (README-KIMI-K31-PRO-4090.md).
-# K3.1 Pro is Kimi K3 trained further, the same architecture and tensors: kimi_k3.exe runs it
-# with K3's profile. The checkpoint as tools/download_kimi_k31_pro_4090.ps1 lays it out: the model folder on C:
+# K3.1 Pro is Kimi K3 post-trained, with a DSA lightning indexer on each of its 24 MLA layers
+# (dsa_config): past 2,048 positions a query row attends the 2,048 rows its layer's indexer
+# picks. kimi_k3.exe needs to be a build that reads dsa_config (checked below); the rest is K3's
+# profile. The checkpoint as tools/download_kimi_k31_pro_4090.ps1 lays it out: the model folder on C:
 # and every MoE layer's other part on D:, read by two readers per drive. The largest
 # dense matrices go to the GPU (K3_CUDA_DENSE), their host copies released for the
 # expert cache. A decode step's routed experts run on the CPU, which reads them in place;
@@ -24,7 +26,12 @@ param(
     # 0.6 GiB free: past the free memory Windows pages the GPU's to RAM and every call slows
     [ValidateRange(0,23)][double]$DenseGB = 20,
     [ValidateRange(0.5,8)][double]$ReserveGB = 2,
-    # Context, tokens: the MLA caches take 55 KB a token (7 GB at 128k), counted against RamGB
+    # Context, tokens: the MLA caches and K3.1's index keys take 67 KB a token (8.8 GB at 128k).
+    # The caches are allocated as the conversation reaches them, so an idle session costs the
+    # expert cache 4k positions' worth, not this whole ceiling; a conversation that does run to
+    # -Context takes its 8.8 GB out of the expert cache as it goes (K3_KV_GROW=0: all of it up
+    # front). RamGB stays the ceiling either way: what the caches grow into is what the experts
+    # give back, so a long conversation does not overrun the process' budget.
     [ValidateRange(512,1048576)][int]$Context = 131072,
     # The most tokens a reply may have when a request does not ask for fewer (reasoning included)
     [ValidateRange(256,1048576)][int]$MaxOutput = 32768,
@@ -60,6 +67,13 @@ foreach ($file in $need) {
         throw "Missing $file in $EngineDir. See README-KIMI-K31-PRO-4090.md for the build commands (or pass -Cpu)."
     }
 }
+# A kimi_k3.exe older than K3.1 ignores dsa_config and runs every MLA layer dense: the same up
+# to 2,048 positions, another model's attention past them
+$engineText = [System.IO.File]::ReadAllText((Join-Path $EngineDir 'kimi_k3.exe'), [System.Text.Encoding]::ASCII)
+if (!$engineText.Contains('dsa_config')) {
+    throw "kimi_k3.exe in $EngineDir predates Kimi K3.1 (it does not read dsa_config): build it from this branch (build-windows.ps1)"
+}
+Remove-Variable engineText
 if (!$Cpu -and !$CpuExperts -and !(Test-Path -LiteralPath (Join-Path $EngineDir 'coli_cuda_k3.dll') -PathType Leaf)) {
     Write-Warning "No coli_cuda_k3.dll in $EngineDir (c\build_k3_cuda.bat): a prompt's experts stay on the CPU"
 }

@@ -500,7 +500,10 @@ Read **only** by `c/kimi_k3.c`. The K3 engine has its own loader, cache and quan
 | `K3_MMAP` | `0` (off) | Map fully prepared U8 matrices and F32 sidecars read-only. CPU-only; refuses conversion and enabled GPU backends rather than falling back. |
 | `K3_EXPERT_GB` | `8.0` | RAM budget (GB) for the expert LRU cache; per-layer slots are derived from it. |
 | `K3_LAYERS` | `0` (all) | Load only the first N layers — for smoke tests and trace-only runs. |
-| `K3_MAXT` | `np + ngen` one-shot, `8192` in serve | KV cache capacity in tokens. In serve mode it is also the prompt-rejection bound. |
+| `K3_MAXT` | `np + ngen` one-shot, `8192` in serve | KV cache capacity in tokens. In serve mode it is also the prompt-rejection bound and the size of the buffer the framed conversation is built in (`+4096` of XTML framing): a conversation longer than that is answered `CONTEXT_EXCEEDED`, which is a 400 the client may compact — the engine does not stop. |
+| `K3_KV_GROW` | `1` (on) | The MLA caches and K3.1's index keys are allocated for the positions the conversation stands at and double as it writes them, instead of the whole `K3_MAXT` at its first request. A grow the machine cannot pay for takes its bytes from the experts touched longest ago. `=0` allocates the whole context up front; a muxed serve (`KV_SLOTS>1`) keeps that. See [kimi_k3.md](kimi_k3.md#kimi-k31). |
+| `K3_KV_GEN` | `1024` | With `K3_KV_GROW`: the answer's positions allocated with the prompt's, before the doubling starts. |
+| `K3_KV_MIN` | `4096` | With `K3_KV_GROW`: the positions the RAM plan projects the caches for, so what an idle session does not reserve for them goes to the expert cache. |
 | `K3_CHUNK` | `32` | Prefill chunk size in tokens. Clamped to [1,16384]; past 512 rows the RAM budget reserves 1.4 MB a row. A CUDA build's GPU calls take a step's rows 1,024 at a time. |
 | `K3_GPU_EXPERTS` | `1` (on) | Windows `CUDA_DLL=1` build with `coli_cuda_k3.dll` beside it: a prompt step's routed experts, the dense matrices `K3_CUDA_DENSE` did not place, the gated MLA's attention core, the shared experts and the routers on the card, in the CPU's arithmetic to the bit. `=0`: the CPU's alone. See [kimi_k3.md](kimi_k3.md#cuda-a-prompt-step-on-the-gpu-the-cpus-bytes-coli_cuda_k3dll). |
 | `K3_GPU_MIN_ROWS` | `32` | The prompt rows a step needs before the card takes its parts (`1` in tests). |
@@ -515,6 +518,7 @@ Read **only** by `c/kimi_k3.c`. The K3 engine has its own loader, cache and quan
 | `K3_IDOT` | `1` (on) | Integer dot-product kernels. `=0` uses exact f32 (A/B numerical checks). |
 | `K3_PIPE` | `1` (on) | Overlap expert disk-load with compute. `=0` serializes. |
 | `K3_LOAD_THREADS` | `4` | Loader threads for the pipe path. Clamped to [1,16]. |
+| `K3_LOAD_PARALLEL` | `4` on a prepared container, `1` on a BF16 checkpoint | The dense (non-expert) weights of this many layers read at the same time while the model loads. A prepared container (repacked U8 + `.qs`, or a GGUF) reads each matrix straight into RAM on the load loop's one thread, so several layers at once is what fills the drives — and a model split over two volumes keeps both busy. A BF16 checkpoint quantizes each matrix as it reads it, over every core of the team, which is what the load waits on there; a second layer would take those cores. `1` = the serial load, what a spinning disk wants. Reads only: the bytes land where they did. `K3_MMAP=1` forces it to 1. |
 | `K3_DIRS` | unset | Extra shard directories (`;`/`,`-separated) for a multi-drive split, as `COLI_MODEL_DIRS` is for `colibri`. |
 | `K3_TOPP` | `0` (off) | Prune routed experts to this cumulative gate weight. A quality lever — A/B it against `K3_LOGITS`. |
 | `K3_THINK` | `1` (on) | Emit a reasoning block. `=0` disables. |

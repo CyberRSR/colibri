@@ -65,6 +65,13 @@
  *   K3_IO_PER_DRIVE=N    readers per storage device the shards are on (default 2)
  *   K3_IO_THREADS=N      that many readers on one queue instead (K3_LOAD_THREADS
  *                        alike); 0 = reads on the caller
+ *   K3_LOAD_PARALLEL=N   the dense weights of N layers read at the same time while
+ *                        the model loads (4 for a prepared U8/GGUF container, where
+ *                        each matrix is one straight read on this loop's one thread;
+ *                        1 for a BF16 checkpoint, which quantizes inside the loop and
+ *                        wants every core for that). Reads only: the bytes land where
+ *                        they did. Forced to 1 by K3_MMAP=1, whose views are counted
+ *                        process-wide.
  *   K3_PREFETCH=0|1      read the next MoE layer's predicted experts ahead in decode
  *                        steps of up to K3_PREFETCH_ROWS (4) rows (default 1)
  *   K3_PREFETCH_TOP=N    the experts a row's prediction reads ahead (default 12)
@@ -81,6 +88,17 @@
  *   K3_LOGITS=path       dump f32 logits per PREFILL position (teacher-forced
  *                        bit-width comparisons; use with --ngen 0)
  *   K3_MAXT=N            KV/context capacity (default prompt+ngen)
+ *   K3_KV_GROW=0|1       the MLA caches and K3.1's index keys grow with the
+ *                        conversation (default 1): a request allocates its prompt's
+ *                        rows plus K3_KV_GEN of the answer's and doubles as it
+ *                        writes them, and a grow the machine cannot pay for takes
+ *                        its bytes from the experts touched longest ago. 0 is the
+ *                        old way: the whole K3_MAXT at the first request. Kept off
+ *                        for a muxed serve (KV_SLOTS>1).
+ *   K3_KV_GEN=N          rows of the answer allocated with the prompt's (1024)
+ *   K3_KV_MIN=N          positions the RAM plan projects the caches for while the
+ *                        session is still idle (4096): what it does not project, the
+ *                        expert cache is allowed to hold
  *   COLI_K3_CKPT=N       OPT-IN recurrent-state checkpoints for serve: keep N
  *                        photos of the KDA state at turn boundaries so a
  *                        divergent prompt (agentic edit) resumes from the
@@ -260,7 +278,7 @@ typedef struct {
  * each row's from its K3Row. */
 typedef struct {
     float **kstate, **cwq, **cwk, **cwv, **Lc, **Rc, **Ic;
-    int max_t;
+    int max_t, kv_cap;
     kv_prefix kvp;
 } K3Seq;
 typedef struct { K3Seq *seq; int pos; } K3Row;
@@ -281,6 +299,7 @@ typedef struct {
     float **cwq, **cwk, **cwv;            /* conv windows [proj*conv_k], oldest first */
     /* MLA cache */
     float **Lc, **Rc; int max_t;
+    int kv_cap;                             /* positions of Lc/Rc/Ic allocated, <= max_t (kv_alloc_cap) */
     /* KV prefix reuse: what the current state was built from (kv_prefix.h).
      * K3 has no single KV to inspect — 69 KDA layers carry a RECURRENT state
      * and only the 24 MLA layers keep Lc/Rc — so an explicit record of the
@@ -535,71 +554,190 @@ static void rmsnorm_(float *out, const float *x, const float *w, int D, float ep
     for(int i=0;i<D;i++) out[i]=x[i]*r*w[i];
 }
 
-/* ---------- DSA (Dictionary Sparse Attention) CPU helpers ---------- */
-/* L'indexer DSA e' COSTRUITO ma non COLLEGATO (#1333): l'unica funzione che
- * leggerebbe la cache Ic per scegliere le posizioni top-K, dsa_score_single qui
- * sotto, non ha nessun chiamante -- una grep su tutto il repo trova solo la sua
- * definizione.
+/* ---------- DSA: Kimi K3.1's lightning indexer (CPU) ----------
+ * Kimi K3.1 is Kimi K3 with a DeepSeek-V3.2 lightning indexer on each gated MLA layer
+ * (dsa_config; TokenSpeed's KimiK31Indexer, lightseekorg/tokenspeed#3015). For the query
+ * row at position t and an earlier row s <= t the layer scores
  *
- * Finche' resta cosi' l'attenzione e' densa e il sottosistema e' lavoro pagato e
- * mai letto: CINQUE tensori dal disco per ogni layer DSA (w_k, w_q, w_p, kn_w,
- * kn_b -- e w_q, w_p, kn_b non sono toccati nemmeno dal codice morto), la cache
- * Ic da [max_t * index_hd] float per layer, e per ogni token un matmul piu'
- * rmsnorm piu' rope.
+ *     I(t,s) = d^-0.5 H^-0.5 sum_h w_h(t) relu(q_h(t) . k(s))
+ *     q(t) = wq_b(c_q(t))          [H][d]   c_q: the RMSNorm'd q latent (qa after q_a_layernorm)
+ *     k(s) = LayerNorm(wk(x(s)))   [d]      weight and bias, eps 1e-6; no RoPE, no rotation
+ *     w(t) = weights_proj(x(t))    [H]      x: the attention input (the normed hidden)
  *
- * Spento di default, non cancellato: quel che manca e' collegare
- * dsa_score_single, e chi lo fara' ha bisogno di questi pesi. KIMI_DSA_INDEXER=1
- * li ricarica. Avvertenza per chi ci mettera' mano: collegarlo CAMBIA le uscite
- * -- l'attenzione diventa sparsa dove oggi e' densa -- quindi va fatto contro
- * l'oracolo token-exact, non a occhio. */
-static int k3_dsa_indexer_on(void){
-    static int cached = -1;
-    if(cached < 0){ const char *e = getenv("KIMI_DSA_INDEXER"); cached = e && *e=='1'; }
-    return cached;
-}
+ * and the row attends only the index_topk rows of the highest I; a row with no more than
+ * index_topk positions attends all of them, so up to index_topk positions K3.1's attention is
+ * dense MLA's to the bit. The positive scale d^-0.5 H^-0.5 changes no ranking and is left out.
+ * The keys are kept f32 in the layer's Ic cache [max_t][d] (beside Lc/Rc: photos, parking and
+ * the segment sessions carry it). A row's selection is the same whichever path computes its
+ * attention: k3_dsa_pick's list (the positions in ascending order, ties to the lower one) is
+ * what the CPU's loop gathers and what the GPU's core gets as a mask. */
+static int g_k3_dsa_on;                    /* load_cfg: the checkpoint has dsa_config, K3_DSA != 0 */
+static int k3_dsa_indexer_on(void){ return g_k3_dsa_on; }
+static unsigned long long g_k3_dsa_rows, g_k3_dsa_pos;   /* rows selected for, positions scored */
+static unsigned long long g_k3_dsa_gpu_rows;             /* of them on the GPU (k3cu_dsa_mask) */
+static double g_k3_dsa_t;                  /* seconds: the indexer's projections, scores and picks */
 
-static void dsa_rope(float *v, int pos, int qk_rope, float base_theta){
-    int half = qk_rope/2;
-    if(qk_rope > 256){ fprintf(stderr,"qk_rope=%d exceeds rope buffer (256)\n",qk_rope); exit(1); }
-    float in[256]; memcpy(in,v,qk_rope*sizeof(float));
-    for(int j=0;j<half;j++){
-        float inv=powf(base_theta,-2.0f*j/qk_rope), ang=pos*inv;
-        float cs=cosf(ang), sn=sinf(ang);
-        float a=in[2*j], b=in[2*j+1];
-        v[j]      = a*cs - b*sn;
-        v[half+j] = b*cs + a*sn;
+/* ---- the conversation's rows, taken as it needs them (K3_KV_GROW) ----------------
+ * The RAM plan used to project the MLA caches and K3.1's index keys for the whole
+ * K3_MAXT -- 8.8 GB at the 4090 profile's 131,072 positions -- and the expert cache
+ * had to fit under it, while the prompt that opens a session fills a tenth of that
+ * projection and leaves the rest of it empty for the rest of the run. So the caches
+ * are allocated for the positions the conversation is at and double from there, and
+ * a grow the machine cannot pay for takes its bytes back from the experts touched
+ * longest ago (their slots stay; the next read fills one in again). `max_t` stays the
+ * context a request was given and `kv_cap` the rows allocated; the readers take
+ * m->Lc/Rc/Ic at the call and the rows are position-indexed, so moving them between
+ * steps is only what kv_alloc already did between turns. A muxed serve (KV_SLOTS>1)
+ * keeps the one-shot allocation: its conversations trade these arrays between every
+ * row of a step. */
+static double g_k3_kv_row_bytes;           /* one position of this model's caches, in bytes */
+static int g_k3_kv_grow=-1, g_k3_kv_gen=-1;
+#define K3_KV_ROOM 1.0e9                   /* the machine keeps this much free besides a grow */
+static int k3_kv_grow_on(void){
+    if(g_k3_kv_grow<0){ const char *e=getenv("K3_KV_GROW"); g_k3_kv_grow=e?atoi(e)!=0:1; }
+    return g_k3_kv_grow&&g_k3_mux_slots==1;
+}
+static int k3_kv_gen_rows(void){           /* the answer's rows allocated with the prompt's */
+    if(g_k3_kv_gen<0){ const char *e=getenv("K3_KV_GEN"); g_k3_kv_gen=e?atoi(e):1024; if(g_k3_kv_gen<1) g_k3_kv_gen=1; }
+    return g_k3_kv_gen;
+}
+/* what one more position of the caches costs on this model: the MLA layers' Lc and Rc
+ * plus, where the indexer is on, that layer's index keys */
+static double k3_kv_rows_bytes(Model *m){
+    Cfg *c=&m->c; int64_t per=0;
+    const int dsa=c->index_hd>0&&k3_dsa_indexer_on();
+    for(int i=0;i<c->n_layers;i++) if(!m->L[i].kda){
+        per+=(int64_t)c->kv_lora+(int64_t)c->qk_rope;
+        if(dsa&&c->idx_type[i]) per+=c->index_hd;
     }
+    return (double)per*sizeof(float);
 }
 
-typedef struct { float sc; int idx; } DsaEntry;
-static int dsa_entry_cmp_desc(const void *a,const void *b){
-    float d=((const DsaEntry*)b)->sc-((const DsaEntry*)a)->sc;
-    return d>0?1:d<0?-1:0;
+/* LayerNorm of one key: mean and variance in double, in order; y may be x */
+static void k3_dsa_ln(float *y, const float *x, const float *w, const float *b, int n){
+    double s=0; for(int i=0;i<n;i++) s+=x[i];
+    const double mu=s/n; double v=0;
+    for(int i=0;i<n;i++){ const double d=(double)x[i]-mu; v+=d*d; }
+    const float r=(float)(1.0/sqrt(v/n+1e-6)), muf=(float)mu;
+    for(int i=0;i<n;i++) y[i]=(x[i]-muf)*r*w[i]+b[i];
 }
 
-/* dsa_score: multi-head cosine distance + ReLU + weight + top-K select.
- * qi: [nh * index_hd] — per-head indexer query (post-RoPE, post-projection)
- * Ic: [nk * index_hd] — indexer cache rows
- * w32: [nh] — weight scalars from P projection
- * nk: number of cache rows in context
- * sel: output buffer of maxsel ints (sorted desc by score)
- * Returns actual count of selected indices. Caller supplies token-local DsaEntry array. */
-static int dsa_score_single(int *sel, int maxsel, const float *qi, const float *Ic, int index_hd,
-                            const float *w32, int nh, int nk, DsaEntry *entries){
-    if(nk <= 0 || maxsel <= 0) return 0;
-    for(int t=0;t<nk;t++){
-        float s = 0;
-        for(int h=0;h<nh;h++){
-            float d=0;
-            for(int i=0;i<index_hd;i++) d += qi[(int64_t)h*index_hd+i] * Ic[(int64_t)t*index_hd+i];
-            s += w32[h]*(d>0?d:0); /* ReLU per-head */
+/* sc[t-t0] = sum_h w[h] max(0, q[h] . K[t]) for t in [t0,t1); q [nh][hd], K [*][hd]. Every
+ * score is one chain of fused multiply-adds, the same on every path and on the GPU
+ * (k3cu_dsa_mask): a = fma(q[h][d], K[t][d], a) for d = 0.. from +0, then s = fma(w[h],
+ * a > 0 ? a : +0, s) for h = 0.. from +0. The AVX2 path does it 8 positions a lane each (8x8
+ * blocks of K transposed in registers); a NaN score becomes -inf (never picked over a
+ * number), -0 becomes +0. */
+#if defined(__AVX2__) && defined(__FMA__)
+#define K3_DSA_AVX 1
+#define K3_DSA_FMA(a,b,c) _mm256_fmadd_ps(a,b,c)
+static inline void k3_tr8(__m256 r[8]);
+#endif
+static void k3_dsa_scores(float *sc, const float *q, const float *w, const float *K, int t0, int t1,
+                          int nh, int hd){
+    int t=t0;
+#if defined(K3_DSA_AVX)
+    if(hd>=8&&!(hd&7)&&hd<=512){
+        /* 16 positions a pass (two blocks of 8, a lane each), 4 heads at a time: per column d two
+         * key loads and four query broadcasts feed eight fused products */
+        __m256 kt[2*512];   /* the pass's keys transposed: kt[2d+b] = column d of block b */
+        const __m256 z=_mm256_setzero_ps();
+        for(;t+16<=t1;t+=16){
+            for(int b=0;b<2;b++)
+                for(int d0=0;d0<hd;d0+=8){
+                    __m256 r[8];
+                    for(int j=0;j<8;j++) r[j]=_mm256_loadu_ps(K+(int64_t)(t+8*b+j)*hd+d0);
+                    k3_tr8(r);
+                    for(int j=0;j<8;j++) kt[2*(d0+j)+b]=r[j];
+                }
+            __m256 s0=z, s1=z;
+            int h=0;
+            for(;h+4<=nh;h+=4){
+                const float *q0=q+(int64_t)h*hd, *q1=q0+hd, *q2=q1+hd, *q3=q2+hd;
+                __m256 a0=z,a1=z,a2=z,a3=z,b0=z,b1=z,b2=z,b3=z;
+                for(int d=0;d<hd;d++){
+                    const __m256 ka=kt[2*d], kb=kt[2*d+1];
+                    __m256 x=_mm256_broadcast_ss(q0+d); a0=K3_DSA_FMA(x,ka,a0); b0=K3_DSA_FMA(x,kb,b0);
+                    x=_mm256_broadcast_ss(q1+d);        a1=K3_DSA_FMA(x,ka,a1); b1=K3_DSA_FMA(x,kb,b1);
+                    x=_mm256_broadcast_ss(q2+d);        a2=K3_DSA_FMA(x,ka,a2); b2=K3_DSA_FMA(x,kb,b2);
+                    x=_mm256_broadcast_ss(q3+d);        a3=K3_DSA_FMA(x,ka,a3); b3=K3_DSA_FMA(x,kb,b3);
+                }
+                const __m256 w0=_mm256_set1_ps(w[h]), w1=_mm256_set1_ps(w[h+1]),
+                             w2=_mm256_set1_ps(w[h+2]), w3=_mm256_set1_ps(w[h+3]);
+                s0=K3_DSA_FMA(w0,_mm256_max_ps(a0,z),s0); s1=K3_DSA_FMA(w0,_mm256_max_ps(b0,z),s1);
+                s0=K3_DSA_FMA(w1,_mm256_max_ps(a1,z),s0); s1=K3_DSA_FMA(w1,_mm256_max_ps(b1,z),s1);
+                s0=K3_DSA_FMA(w2,_mm256_max_ps(a2,z),s0); s1=K3_DSA_FMA(w2,_mm256_max_ps(b2,z),s1);
+                s0=K3_DSA_FMA(w3,_mm256_max_ps(a3,z),s0); s1=K3_DSA_FMA(w3,_mm256_max_ps(b3,z),s1);
+            }
+            for(;h<nh;h++){
+                const float *qh=q+(int64_t)h*hd; __m256 a=z, bq=z;
+                for(int d=0;d<hd;d++){
+                    const __m256 x=_mm256_broadcast_ss(qh+d);
+                    a=K3_DSA_FMA(x,kt[2*d],a); bq=K3_DSA_FMA(x,kt[2*d+1],bq);
+                }
+                const __m256 wh=_mm256_set1_ps(w[h]);
+                s0=K3_DSA_FMA(wh,_mm256_max_ps(a,z),s0); s1=K3_DSA_FMA(wh,_mm256_max_ps(bq,z),s1);
+            }
+            _mm256_storeu_ps(sc+(t-t0),s0); _mm256_storeu_ps(sc+(t-t0)+8,s1);
         }
-        entries[t]=(DsaEntry){s/sqrtf((float)nh), t};
     }
-    int K = nk < maxsel ? nk : maxsel;
-    qsort(entries, nk, sizeof(DsaEntry), dsa_entry_cmp_desc);
-    for(int k=0;k<K;k++) sel[k]=entries[k].idx;
-    return K;
+#endif
+    for(;t<t1;t++){
+        const float *kr=K+(int64_t)t*hd; float s=0;
+        for(int h=0;h<nh;h++){
+            const float *qh=q+(int64_t)h*hd; float a=0;
+            for(int d=0;d<hd;d++) a=fmaf(qh[d],kr[d],a);
+            s=fmaf(w[h],a>0?a:0.0f,s);
+        }
+        sc[t-t0]=s;
+    }
+    for(int i=0;i<t1-t0;i++){ if(sc[i]!=sc[i]) sc[i]=-INFINITY; else if(sc[i]==0) sc[i]=0.0f; }
+}
+
+/* The k-th largest of a[0..n) (k from 1), a reordered: quickselect, Hoare's partition around
+ * the median of three (equal values split evenly, so a flat row stays linear) */
+static float k3_dsa_kth(float *a, int n, int k){
+    int lo=0, hi=n-1; const int want=k-1;
+    while(lo<hi){
+        const int mid=lo+(hi-lo)/2;
+        float x=a[lo], y=a[mid], zz=a[hi];
+        const float p = x>y ? (y>zz ? y : (x>zz ? zz : x)) : (x>zz ? x : (y>zz ? zz : y));
+        int i=lo, j=hi;
+        while(i<=j){
+            while(a[i]>p) i++;
+            while(a[j]<p) j--;
+            if(i<=j){ const float t=a[i]; a[i]=a[j]; a[j]=t; i++; j--; }
+        }
+        if(want<=j) hi=j; else if(want>=i) lo=i; else return a[want];
+    }
+    return a[want];
+}
+/* sel = the K positions of the highest scores in ascending order, ties to the lower position
+ * (all nt of them when nt <= K); tmp: nt floats of room. Returns how many. */
+static int k3_dsa_pick(int *sel, const float *sc, float *tmp, int nt, int K){
+    if(nt<=K){ for(int t=0;t<nt;t++) sel[t]=t; return nt; }
+    memcpy(tmp,sc,(size_t)nt*sizeof(float));
+    const float v=k3_dsa_kth(tmp,nt,K);
+    int gt=0; for(int t=0;t<nt;t++) gt+=sc[t]>v;
+    int eq=K-gt, n=0;
+    for(int t=0;t<nt;t++) if(sc[t]>v||(sc[t]==v&&eq>0)){ if(!(sc[t]>v)) eq--; sel[n++]=t; }
+    return n;
+}
+/* One query row's selection over the nt positions of its layer's keys Ic: q [nh][hd], w [nh];
+ * sc and tmp nt floats each. par: the positions over the OpenMP team (a decode step's single
+ * row), else on the caller's thread (a prompt step's rows go over the team instead). */
+#define K3_DSA_BLK 2048
+static int k3_dsa_row(int *sel, const float *q, const float *w, const float *Ic, int nt, int nh, int hd,
+                      int K, float *sc, float *tmp, int par){
+    if(par&&nt>K3_DSA_BLK){
+        const int nb=(nt+K3_DSA_BLK-1)/K3_DSA_BLK;
+        #pragma omp parallel for schedule(static)
+        for(int b=0;b<nb;b++){
+            const int t0=b*K3_DSA_BLK, t1=t0+K3_DSA_BLK<nt?t0+K3_DSA_BLK:nt;
+            k3_dsa_scores(sc+t0,q,w,Ic,t0,t1,nh,hd);
+        }
+    } else k3_dsa_scores(sc,q,w,Ic,0,nt,nh,hd);
+    return k3_dsa_pick(sel,sc,tmp,nt,K);
 }
 
 /* ---------- W: load-time quantization + matvec ---------- */
@@ -895,7 +1033,15 @@ static float w_rowdot(const W *w, int r, const float *x){
     return a;
 }
 
-#define QCHUNK 1024                      /* rows per load-quantize pass */
+/* Rows per load-quantize pass, and with it the ceiling on how much of the team works on
+ * one matrix: the pass hands out ceil(O/QCHUNK) chunks and a chunk is one worker's. At
+ * 1024 a [7168,7168] matrix fed 7 of a 28-thread team, and that is the story of a slow
+ * start on an HF checkpoint: the same run reads 53.3 GB of pinned experts at 4.8 GB/s
+ * with one reader at a time (its [PIN] line, same two drives) while this loop took 44.5s
+ * for 89 layers -- 1.4 GB/s, far below what the drives were just shown to give. Rows
+ * quantize alone (int8 per row, int4 per 64-column group of one row), so how few rows a
+ * chunk carries cannot change a byte of what lands in RAM, only who carries it. */
+#define QCHUNK 128
 static int g_bits_env=0;                 /* K3_BITS explicitly set: enables the
                                           * int8-container -> int4 load downcast */
 static int g_k3_mmap=0;                  /* prepared U8/F32 tensors stay file-backed */
@@ -1419,31 +1565,57 @@ static void load_cfg(Cfg *c, const char *snap){
     if(!kl||kl->t!=J_ARR){ fprintf(stderr,"config.json: missing kda_layers\n"); exit(1); }
     for(int i=0;i<kl->len;i++){ int v=(int)kl->kids[i]->num;      /* 1-indexed */
         if(v>=1&&v<=c->n_layers) c->is_kda[v-1]=1; }
-    /* DSA indexer (optional — if absent in config, DSA is disabled) */
-    { jval *jn=json_get(tc,"index_hd");   c->index_hd   = jn&&jn->t==J_NUM ? (int)jn->num : 0; }
-    { jval *jn=json_get(tc,"index_nh");   c->index_nh   = jn&&jn->t==J_NUM ? (int)jn->num : 0; }
-    { jval *jn=json_get(tc,"index_topk"); c->index_topk = jn&&jn->t==J_NUM ? (int)jn->num : 0; }
-    if(c->index_hd > 0){
-        /* Default: all MLA layers are "full" DSA layers (compute own Ic + top-K) */
-        for(int i=0;i<c->n_layers;i++) if(!c->is_kda[i]) c->idx_type[i]=1;
-        jval *il=json_get(tc,"index_layers");
-        if(il && il->t==J_ARR){
-            /* Override: explicit list of 1-indexed full DSA layers */
-            memset(c->idx_type, 0, sizeof(c->idx_type));
-            for(int i=0;i<il->len;i++){ int v=(int)il->kids[i]->num;
-                if(v>=1&&v<=c->n_layers) c->idx_type[v-1]=1; }
+    /* DSA (Kimi K3.1): text_config.dsa_config, a lightning indexer on every gated MLA layer
+     * (DeepSeek-V3.2's sparse attention: each query row attends only the index_topk earlier
+     * rows its layer's indexer scores highest). Absent (Kimi K3): dense MLA. Every key the
+     * released checkpoint declares is checked, as TokenSpeed's parser does: a value this
+     * engine does not implement (a RoPE part in the index keys, an RMSNorm key norm, FP8
+     * indexer weights, a top-k shared between layers) stops the load instead of computing
+     * something else. K3_DSA=0 runs the MLA layers dense (the indexer neither loaded nor
+     * run): exact up to index_topk positions, an approximation past them. */
+    { jval *dc=json_get(tc,"dsa_config");
+      if(dc&&dc->t==J_OBJ){
+        static const char *known[]={"dsa_layers","index_topk","index_head_dim","index_num_heads",
+                                    "index_rope_dim","index_k_norm_type","index_topk_freq",
+                                    "index_skip_topk_offset","indexer_use_fp8"};
+        for(int i=0;i<dc->len;i++){
+            int ok=0; for(size_t k=0;k<sizeof known/sizeof *known;k++) if(!strcmp(dc->keys[i],known[k])) ok=1;
+            if(!ok){ fprintf(stderr,"config.json: dsa_config.%s is not implemented by this engine\n",dc->keys[i]); exit(1); }
         }
-    }
-    /* the DSA indexer ropes the first qk_rope_head_dim floats of each of its index_hd-long
-     * rows (dsa_rope) */
-    if(c->index_hd > 0 && c->index_hd < c->qk_rope){
-        fprintf(stderr,"config.json: index_hd=%d is shorter than qk_rope_head_dim=%d, which the "
-                       "indexer ropes in each of its rows\n",c->index_hd,c->qk_rope); exit(1); }
+        jval *rd=json_get(dc,"index_rope_dim"), *nt=json_get(dc,"index_k_norm_type"),
+             *fq=json_get(dc,"index_topk_freq"), *f8=json_get(dc,"indexer_use_fp8"),
+             *dl=json_get(dc,"dsa_layers");
+        if(rd&&(rd->t!=J_NUM||rd->num!=0)){
+            fprintf(stderr,"config.json: dsa_config.index_rope_dim must be 0 (index keys without RoPE)\n"); exit(1); }
+        if(nt&&(nt->t!=J_STR||strcmp(nt->str,"layernorm"))){
+            fprintf(stderr,"config.json: dsa_config.index_k_norm_type must be \"layernorm\"\n"); exit(1); }
+        if(fq&&(fq->t!=J_NUM||fq->num!=1)){
+            fprintf(stderr,"config.json: dsa_config.index_topk_freq must be 1 (each layer its own top-k)\n"); exit(1); }
+        if(f8&&!(f8->t==J_BOOL&&!f8->boolean)&&f8->t!=J_NULL){
+            fprintf(stderr,"config.json: dsa_config.indexer_use_fp8 must be false (BF16 indexer weights)\n"); exit(1); }
+        c->index_hd  =(int)req_num(dc,"index_head_dim");
+        c->index_nh  =(int)req_num(dc,"index_num_heads");
+        c->index_topk=(int)req_num(dc,"index_topk");
+        if(c->index_hd<1||c->index_hd>1024||c->index_nh<1||c->index_nh>256||c->index_topk<1){
+            fprintf(stderr,"config.json: dsa_config dimensions out of range\n"); exit(1); }
+        if(!dl||dl->t!=J_ARR){ fprintf(stderr,"config.json: dsa_config.dsa_layers missing\n"); exit(1); }
+        for(int i=0;i<dl->len;i++){ int v=(int)dl->kids[i]->num;      /* 1-indexed */
+            if(dl->kids[i]->t!=J_NUM||v<1||v>c->n_layers||c->is_kda[v-1]){
+                fprintf(stderr,"config.json: dsa_config.dsa_layers names %d, not a gated MLA layer\n",v); exit(1); }
+            c->idx_type[v-1]=1; }
+        const char *e=getenv("K3_DSA");
+        if(e&&*e=='0'){
+            fprintf(stderr,"[K3-DSA] K3_DSA=0: the MLA layers dense, the indexer off (exact up to %d positions, "
+                           "approximate past them)\n",c->index_topk);
+            c->index_hd=c->index_nh=c->index_topk=0; memset(c->idx_type,0,sizeof c->idx_type);
+        }
+      } }
     jval *b=json_get(root,"bos_token_id"); if(!b) b=json_get(tc,"bos_token_id");
     c->bos = b&&b->t==J_NUM ? (int)b->num : -1;
     jval *e=json_get(root,"eos_token_id"); if(!e) e=json_get(tc,"eos_token_id");
     if(e&&e->t==J_NUM) c->eos[c->n_eos++]=(int)e->num;
     else if(e&&e->t==J_ARR) for(int i=0;i<e->len&&c->n_eos<8;i++) c->eos[c->n_eos++]=(int)e->kids[i]->num;
+    g_k3_dsa_on=c->index_hd>0;
     free(buf); (void)arena;
 }
 
@@ -1648,7 +1820,34 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
     m->cwv=calloc(c->n_layers,sizeof(float*));
     char nm[512];
     #define NM(...) (snprintf(nm,sizeof(nm),__VA_ARGS__),nm)
+    /* Several readers, but only where more readers are what this loop waits for. A
+     * prepared container (a repacked U8 + .qs sidecar, or a GGUF's own blocks) loads each
+     * matrix with one straight read, on this loop's one thread, tensor after tensor. An
+     * HF BF16 checkpoint instead reads and quantizes each matrix inside w_load over every
+     * core of the team (QCHUNK), so a second layer met here would add readers to a loop
+     * that is not waiting for readers, and take the cores the conversion wants: a region
+     * met inside a region is a team of one (omp_spin.c). Nothing crosses an iteration
+     * either way: each writes its own m->L[i] and its own KDA state rows, the shard index
+     * is read-only once built, and st.h gives every shard a second, overlapped descriptor
+     * precisely so two reads of one file are in flight together -- a model cut over two
+     * volumes keeps both busy. K3_LOAD_PARALLEL says how many either way. */
+    int par=getenv("K3_LOAD_PARALLEL")?atoi(getenv("K3_LOAD_PARALLEL")):0;
+    if(!par){
+        par=1;
+        for(int i=layer_begin;i<layer_end&&par==1;i++) if(!c->is_kda[i]){
+            snprintf(nm,sizeof(nm),"%smodel.layers.%d.self_attn.q_a_proj.weight",m->pfx,i);
+            st_tensor *t=st_find(&m->S,nm);
+            if(t&&(t->dtype==3||st_is_ggml(t->dtype))) par=4;
+        }
+    }
+    if(par<1) par=1;
+    if(par>16) par=16;
+    if(g_k3_mmap) par=1;
+    int nloaded=0, ntotal=layer_end-layer_begin;
+    if(par>1) fprintf(stderr,"[K3] dense weights: %d layers read at a time\n",par);
+    #pragma omp parallel for schedule(dynamic,1) num_threads(par) if(par>1)
     for(int i=layer_begin;i<layer_end;i++){
+        char nm[512];   /* the reader above is shared by the threads; this one is not */
         Layer *l=&m->L[i];
         l->kda=c->is_kda[i];
         l->sparse=(i>=c->first_dense);
@@ -1729,13 +1928,15 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
             w_load(m,&a->g,NM("model.layers.%d.self_attn.g_proj.weight",i),c->n_heads*c->v_head,c->hidden,mbits);
             a->qa_ln =f32_load(m,NM("model.layers.%d.self_attn.q_a_layernorm.weight",i),c->q_lora);
             a->kva_ln=f32_load(m,NM("model.layers.%d.self_attn.kv_a_layernorm.weight",i),c->kv_lora);
-            /* DSA indexer weights – only for "full" layers (idx_type=1) */
+            /* K3.1's DSA indexer (dsa_config.dsa_layers): BF16 in the checkpoint, kept at the MLA
+             * layers' bits (K3_DSA_BITS: its own) */
             if(c->index_hd > 0 && c->idx_type[i] && k3_dsa_indexer_on()){
-                w_load(m,&a->wk,NM("model.layers.%d.self_attn.w_k.weight",i),(int64_t)c->index_hd,c->hidden,mbits);
-                w_load(m,&a->wq,NM("model.layers.%d.self_attn.w_q.weight",i),(int64_t)c->index_hd,c->q_lora,mbits);
-                w_load(m,&a->wp,NM("model.layers.%d.self_attn.w_p.weight",i),(int64_t)c->index_hd,c->hidden,mbits);
-                a->knw=f32_load(m,NM("model.layers.%d.self_attn.kn_w",i),(int64_t)c->index_hd);
-                a->knb=f32_load(m,NM("model.layers.%d.self_attn.kn_b",i),(int64_t)c->index_hd);
+                const char *db=getenv("K3_DSA_BITS"); const int dbits=db&&*db?atoi(db):mbits;
+                w_load(m,&a->wq,NM("model.layers.%d.self_attn.indexer.wq_b.weight",i),(int64_t)c->index_nh*c->index_hd,c->q_lora,dbits);
+                w_load(m,&a->wk,NM("model.layers.%d.self_attn.indexer.wk.weight",i),(int64_t)c->index_hd,c->hidden,dbits);
+                w_load(m,&a->wp,NM("model.layers.%d.self_attn.indexer.weights_proj.weight",i),(int64_t)c->index_nh,c->hidden,dbits);
+                a->knw=f32_load(m,NM("model.layers.%d.self_attn.indexer.k_norm.weight",i),(int64_t)c->index_hd);
+                a->knb=f32_load(m,NM("model.layers.%d.self_attn.indexer.k_norm.bias",i),(int64_t)c->index_hd);
             }
         }
         if(l->sparse){
@@ -1767,7 +1968,9 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
             w_load(m,&l->d_up,NM("model.layers.%d.mlp.up_proj.weight",i),c->dense_inter,c->hidden,bits);
             w_load(m,&l->d_down,NM("model.layers.%d.mlp.down_proj.weight",i),c->hidden,c->dense_inter,bits);
         }
-        if(i%8==0) fprintf(stderr,"[K3] loaded layer %d/%d (%.1fs, RSS %.1f GB)\n",i+1,c->n_layers,now_s()-t0,rss_gb());
+        int done=__atomic_add_fetch(&nloaded,1,__ATOMIC_RELAXED);   /* layers finished, whichever thread finished them */
+        if(done%8==0||done==ntotal)
+            fprintf(stderr,"[K3] loaded layer %d/%d (%.1fs, RSS %.1f GB)\n",done,ntotal,now_s()-t0,rss_gb());
     }
     snprintf(nm,sizeof(nm),"%smodel.norm.weight",m->pfx);
     m->has_head = load_boundaries&&st_has(&m->S,nm);
@@ -1888,8 +2091,23 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
         int max_t = context_hint > 0 ? context_hint :
                     (getenv("K3_MAXT") ? atoi(getenv("K3_MAXT")) : 8192);
         if(max_t < 1) max_t = 8192;
+        /* A growing conversation is projected for the rows it stands at when the plan is
+         * made, not for the context it may reach: an idle session holds none of them, and
+         * every byte reserved here is a byte the experts were told they could not have
+         * (131,072 positions of caches is 8.8 GB on this model). A request longer than
+         * K3_KV_MIN takes its rows as it arrives, and the coldest experts give them back
+         * when the machine has nothing else to give (k3_kv_yield). */
+        int kv_t = max_t;
+        if(k3_kv_grow_on()){
+            int kvmin=getenv("K3_KV_MIN")?atoi(getenv("K3_KV_MIN")):4096;
+            if(kvmin<64) kvmin=64;
+            if(kvmin<max_t) kv_t=kvmin;
+        }
         int nkv = 0; for(int i=0;i<c->n_layers;i++) if(!m->L[i].kda) nkv++;
-        double kv_gb = (double)nkv*(double)max_t*(double)(c->kv_lora+c->qk_rope)*4.0/1e9;
+        int ndsa = 0; for(int i=0;i<c->n_layers;i++) if(c->index_hd>0&&c->idx_type[i]) ndsa++;
+        double kv_pos = ((double)nkv*(double)(c->kv_lora+c->qk_rope) +
+                         (double)ndsa*(double)c->index_hd)*4.0/1e9;   /* + K3.1's index keys */
+        double kv_gb = kv_pos*(double)kv_t, kv_max_gb = kv_pos*(double)max_t;
         /* 2.5 GB page cache -- measured on Linux 2026-07-06: strangling it drops
          * buffered pread from ~800 to ~180 MB/s and the last GB of LRU costs
          * more in lost bandwidth than it returns. k3_act_gb(): the activations and logits.
@@ -1898,7 +2116,7 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
         double ckpt_gb = k3_ckpt_reserve_gb(m,g_k3_ckpt_slots);
         double act_gb = k3_act_gb(), ra_gb = k3_ra_gb();
         double reserve = 2.5 + act_gb + ra_gb + kv_gb + ckpt_gb;
-        g_k3_ram_later = (kv_gb + ckpt_gb) * 1e9;   /* allocated once it serves: the tier's host pool leaves it (#2314) */
+        g_k3_ram_later = (kv_max_gb + ckpt_gb) * 1e9;   /* the ceiling, allocated once it serves: the tier's host pool leaves it (#2314) */
         double for_experts = 0.0;
 
         double slot_gb = (double)m->e_slot/1e9;
@@ -1922,7 +2140,7 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
                 "(page cache 2.5, activations %.1f, read-ahead %.1f, KV %dx%d %.1f, checkpoints %d %.1f) "
                 "-> %.1f GB for experts; "
                 "cache %d->%d/layer (%.1f MB/slot, %d layers; projected peak %.1f GB)\n",
-                budget, ram_env>0?"":" auto", resident, reserve, act_gb, ra_gb, nkv, max_t, kv_gb,
+                budget, ram_env>0?"":" auto", resident, reserve, act_gb, ra_gb, nkv, kv_t, kv_gb,
                 g_k3_ckpt_slots,ckpt_gb,
                 for_experts>0?for_experts:0.0, cap, cap_fit>0?cap_fit:1,
                 slot_gb*1000.0, nmoe,
@@ -1953,6 +2171,12 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
             }
         }
     }
+    g_k3_kv_row_bytes=k3_kv_rows_bytes(m);
+    if(k3_kv_grow_on())
+        fprintf(stderr,"[K3] KV: the caches grow with the conversation (K3_KV_GROW=0: allocated whole at the first "
+                "request). %.1f KB a position, a request starts at its prompt plus %d answer positions and doubles, "
+                "and a grow the machine cannot pay for comes out of the coldest experts' slots\n",
+                g_k3_kv_row_bytes/1024.0,k3_kv_gen_rows());
     { int ncl=c->n_layers>0?c->n_layers:1;
       m->ecache=calloc((size_t)ncl,sizeof(LCache)); }
     for(int i=0;i<c->n_layers;i++) if(m->L[i].sparse){
@@ -2454,8 +2678,9 @@ static void k3_rowdot8_i8(const W *w, int r0, const float *x, float *y){
  * one a lane, when both widths are multiples of 8 (every product of the old loop then
  * went through GCC's vector multiply, none through its scalar fma tail); the last block's
  * spare lanes repeat the last position and are not stored. Otherwise the old loop. */
+/* sel: the cached rows of the nt scores (K3.1's selection, ascending), NULL: rows 0..nt-1 */
 static void k3_mla_scores(float *sc, const float *qabs, const float *qrp, const float *Lc_,
-                          const float *Rc_, int nt, int kvl, int qr, float scale){
+                          const float *Rc_, int nt, int kvl, int qr, float scale, const int *sel){
     int t=0;
 #if defined(__AVX2__)
     if(kvl>=8&&!(kvl&7)&&(qr==0||(qr>=8&&!(qr&7)))){
@@ -2464,6 +2689,7 @@ static void k3_mla_scores(float *sc, const float *qabs, const float *qrp, const 
             const float *la[8], *lb[8], *pa[8], *pb[8];
             for(int j=0;j<8;j++){
                 int ta=t+j<nt?t+j:nt-1, tb=t+8+j<nt?t+8+j:nt-1;
+                if(sel){ ta=sel[ta]; tb=sel[tb]; }
                 la[j]=Lc_+(int64_t)ta*kvl; lb[j]=Lc_+(int64_t)tb*kvl;
                 pa[j]=Rc_+(int64_t)ta*qr;  pb[j]=Rc_+(int64_t)tb*qr;
             }
@@ -2479,7 +2705,8 @@ static void k3_mla_scores(float *sc, const float *qabs, const float *qrp, const 
     }
 #endif
     for(;t<nt;t++){
-        const float *Lt=Lc_+(int64_t)t*kvl, *Rt=Rc_+(int64_t)t*qr;
+        const int r=sel?sel[t]:t;
+        const float *Lt=Lc_+(int64_t)r*kvl, *Rt=Rc_+(int64_t)r*qr;
         float s2=0; for(int i=0;i<kvl;i++) s2+=qabs[i]*Lt[i];
         for(int i=0;i<qr;i++) s2+=qrp[i]*Rt[i];
         sc[t]=s2*scale;
@@ -2506,7 +2733,8 @@ static inline void k3_mla_dot16g(__m256 *a, __m256 *b, const float *const *q, co
 }
 #endif
 static void k3_mla_scores_g(float *sc, const float *qab, const float *const *qrps, int nh,
-                            const float *Lc_, const float *Rc_, int nt, int kvl, int qr, float scale){
+                            const float *Lc_, const float *Rc_, int nt, int kvl, int qr, float scale,
+                            const int *sel){
 #if defined(__AVX2__)
     if(kvl>=8&&!(kvl&7)&&(qr==0||(qr>=8&&!(qr&7)))){
         const float *ql[K3_MLA_G], *qp[K3_MLA_G];
@@ -2516,6 +2744,7 @@ static void k3_mla_scores_g(float *sc, const float *qab, const float *const *qrp
             const float *la[8], *lb[8], *pa[8], *pb[8];
             for(int j=0;j<8;j++){
                 int ta=t+j<nt?t+j:nt-1, tb=t+8+j<nt?t+8+j:nt-1;
+                if(sel){ ta=sel[ta]; tb=sel[tb]; }
                 la[j]=Lc_+(int64_t)ta*kvl; lb[j]=Lc_+(int64_t)tb*kvl;
                 pa[j]=Rc_+(int64_t)ta*qr;  pb[j]=Rc_+(int64_t)tb*qr;
             }
@@ -2534,7 +2763,7 @@ static void k3_mla_scores_g(float *sc, const float *qab, const float *const *qrp
     }
 #endif
     for(int g=0;g<nh;g++)
-        k3_mla_scores(sc+(int64_t)g*nt,qab+(int64_t)g*kvl,qrps[g],Lc_,Rc_,nt,kvl,qr,scale);
+        k3_mla_scores(sc+(int64_t)g*nt,qab+(int64_t)g*kvl,qrps[g],Lc_,Rc_,nt,kvl,qr,scale,sel);
 }
 #ifdef COLI_K3_CUDA
 /* A prompt step's gated MLA layer on the GPU (k3cu_mla_layer), the call-by-call path's bytes
@@ -2578,12 +2807,130 @@ static int k3_mla_gpu(Model *m, Mla *a, int li, const float *x, int pos0, int C,
     return ok;
 }
 #endif
-    static void mla_forward(Model *m, Layer *l, int li, const float *x, int pos0, int C, float *out){
-    Cfg *c=&m->c; Mla *a=&l->m;
+/* K3.1: the step's index keys into the layer's cache Ic (wk, then k_norm's LayerNorm), each row at
+ * its position (a multiplexed step's in its own conversation's cache) */
+static void k3_dsa_keys(Model *m, Mla *a, int li, const float *x, int pos0, int C, const K3Row *mr){
+    const Cfg *c=&m->c; const int hd=c->index_hd;
+    const double t0=now_s();
+    float *kb=falloc((int64_t)C*hd);
+    w_matmul(kb,x,&a->wk,C);
+    for(int t=0;t<C;t++){
+        const int pt=mr?mr[t].pos:pos0+t;
+        float *dst=(mr?mr[t].seq->Ic[li]:a->Ic)+(int64_t)pt*hd;
+        k3_dsa_ln(dst,kb+(int64_t)t*hd,a->knw,a->knb,hd);
+    }
+    free(kb);
+    g_k3_dsa_t+=now_s()-t0;
+}
+/* K3.1: the rows each query row of the step attends. ns[t] = -1: all of its positions (it has no
+ * more than index_topk), else how many, listed ascending in sel[t*index_topk..]. qa: the step's
+ * RMSNorm'd q latents [C][q_lora], x its attention inputs [C][hidden]; the step's keys already in
+ * Ic. Returns 0 when no row selects. */
+static int k3_dsa_select(Model *m, Mla *a, int li, const float *x, const float *qa, int pos0, int C,
+                         const K3Row *mr, int *sel, int *ns){
+    const Cfg *c=&m->c; const int hd=c->index_hd, nh=c->index_nh, K=c->index_topk;
+    int r0=C, nsel=0, maxnt=0;
+    for(int t=0;t<C;t++){
+        const int nt=(mr?mr[t].pos:pos0+t)+1;
+        ns[t]=-1;
+        if(nt>K){ if(t<r0) r0=t; nsel++; if(nt>maxnt) maxnt=nt; }
+    }
+    if(!nsel) return 0;
+    const double t0=now_s();
+    const int R=C-r0;   /* rows r0.. (a prompt step's are all past index_topk from r0 on) */
+    float *qi=falloc((int64_t)R*nh*hd), *wi=falloc((int64_t)R*nh);
+    w_matmul(qi,qa+(int64_t)r0*c->q_lora,&a->wq,R);
+    w_matmul(wi,x+(int64_t)r0*c->hidden,&a->wp,R);
+    unsigned long long npos=0;
+    if(nsel<omp_get_max_threads()){   /* a decode step: each row's positions over the team */
+        float *sc=falloc(maxnt), *tmp=falloc(maxnt);
+        for(int t=r0;t<C;t++){
+            const int nt=(mr?mr[t].pos:pos0+t)+1;
+            if(nt<=K) continue;
+            ns[t]=k3_dsa_row(sel+(int64_t)t*K,qi+(int64_t)(t-r0)*nh*hd,wi+(int64_t)(t-r0)*nh,
+                             mr?mr[t].seq->Ic[li]:a->Ic,nt,nh,hd,K,sc,tmp,1);
+            npos+=(unsigned long long)nt;
+        }
+        free(sc); free(tmp);
+    } else {                          /* a prompt step: its rows over the team */
+        /* one parallel for and a buffer a thread (omp_spin.c, the Windows builds' team, serves
+         * GOMP_parallel and a loop's nowait end, not a work-sharing loop's barrier) */
+        const int nth=omp_get_max_threads();
+        float **bs=malloc((size_t)nth*2*sizeof(float*));
+        if(!bs){ fprintf(stderr,"OOM DSA buffers\n"); exit(1); }
+        for(int i=0;i<2*nth;i++) bs[i]=falloc(maxnt);
+        #pragma omp parallel for schedule(dynamic,1)
+        for(int t=r0;t<C;t++){
+            const int nt=(mr?mr[t].pos:pos0+t)+1;
+            if(nt<=K) continue;
+            const int me=omp_get_thread_num();
+            ns[t]=k3_dsa_row(sel+(int64_t)t*K,qi+(int64_t)(t-r0)*nh*hd,wi+(int64_t)(t-r0)*nh,
+                             mr?mr[t].seq->Ic[li]:a->Ic,nt,nh,hd,K,bs[2*me],bs[2*me+1],0);
+        }
+        for(int i=0;i<2*nth;i++) free(bs[i]);
+        free(bs);
+        for(int t=r0;t<C;t++){ const int nt=(mr?mr[t].pos:pos0+t)+1; if(nt>K) npos+=(unsigned long long)nt; }
+    }
+    free(qi); free(wi);
+    g_k3_dsa_rows+=(unsigned long long)nsel; g_k3_dsa_pos+=npos;
+    g_k3_dsa_t+=now_s()-t0;
+    return 1;
+}
 #ifdef COLI_K3_CUDA
-    /* a prompt step of one sequence (the GPU core's case below) on the GPU, the layer whole */
-    if(!m->mux_rows&&g_k3g_on&&C>=g_k3g_min_rows&&!(c->index_hd>0&&c->idx_type[li]&&k3_dsa_indexer_on())&&
-       k3_mla_gpu(m,a,li,x,pos0,C,out)) return;
+/* K3.1, a prompt step on the GPU: the index queries and head weights from the CPU's matrices (the
+ * card's where it holds them), the scores and the picks on the card (k3cu_dsa_mask: k3_dsa_scores'
+ * and k3_dsa_pick's bytes) into the mask the attention core takes, rows up to index_topk all
+ * theirs. NULL when it cannot: the CPU picks. K3_DSA_GPU=0: always the CPU. */
+static int g_k3_dsa_gpu=-1;
+static uint32_t *k3_dsa_mask_gpu(Model *m, Mla *a, const float *x, const float *qa, int pos0, int C, int *mw_out){
+    const Cfg *c=&m->c; const int hd=c->index_hd, nh=c->index_nh, K=c->index_topk;
+    if(g_k3_dsa_gpu<0){ const char *e=getenv("K3_DSA_GPU"); g_k3_dsa_gpu=!e||!*e||atoi(e)!=0; }
+    const int N=pos0+C, mw=(N+31)/32, r0=K>pos0?K-pos0:0;
+    if(!g_k3_dsa_gpu||hd>128||r0>=C) return NULL;
+    const double t0=now_s();
+    const int R=C-r0;
+    uint32_t *mask=calloc((size_t)C*mw,sizeof(uint32_t));
+    float *qi=falloc((int64_t)R*nh*hd), *wi=falloc((int64_t)R*nh);
+    if(!mask){ free(qi); free(wi); return NULL; }
+    w_matmul(qi,qa+(int64_t)r0*c->q_lora,&a->wq,R);
+    w_matmul(wi,x+(int64_t)r0*c->hidden,&a->wp,R);
+    const int ok=k3cu_dsa_mask(a->Ic,N,pos0,C,qi,wi,nh,hd,K,mask,mw);
+    free(qi); free(wi);
+    if(!ok){
+        fprintf(stderr,"[K3-DSA] the GPU's indexer did not run (an older coli_cuda_k3.dll, or the device): "
+                       "the CPU picks from here\n");
+        g_k3_dsa_gpu=0; free(mask); return NULL;
+    }
+    unsigned long long npos=0;
+    for(int t=0;t<r0;t++){
+        uint32_t *mrow=mask+(size_t)t*mw; const int nt=pos0+t+1;
+        for(int w=0;w<nt/32;w++) mrow[w]=0xffffffffu;
+        if(nt%32) mrow[nt/32]=(1u<<(nt%32))-1u;
+    }
+    for(int t=r0;t<C;t++) npos+=(unsigned long long)(pos0+t+1);
+    g_k3_dsa_rows+=(unsigned long long)R; g_k3_dsa_pos+=npos; g_k3_dsa_gpu_rows+=(unsigned long long)R;
+    g_k3_dsa_t+=now_s()-t0;
+    *mw_out=mw;
+    return mask;
+}
+#endif
+static void mla_forward(Model *m, Layer *l, int li, const float *x, int pos0, int C, float *out){
+    Cfg *c=&m->c; Mla *a=&l->m;
+    const K3Row *mr = m->mux_rows;   /* a multiplexed step: each row's own caches and position */
+    /* K3.1: does a row of the step have more positions than it attends (index_topk)? */
+    const int dsa=c->index_hd>0&&c->idx_type[li]&&k3_dsa_indexer_on();
+    int dsa_need=0;
+    if(dsa){
+        if(mr){ for(int t=0;t<C;t++) if(mr[t].pos+1>c->index_topk) dsa_need=1; }
+        else dsa_need=pos0+C>c->index_topk;
+    }
+#ifdef COLI_K3_CUDA
+    /* a prompt step of one sequence (the GPU core's case below) on the GPU, the layer whole; a
+     * K3.1 layer's when every row attends all its positions (its keys then on the CPU) */
+    if(!mr&&g_k3g_on&&C>=g_k3g_min_rows&&!dsa_need&&k3_mla_gpu(m,a,li,x,pos0,C,out)){
+        if(dsa) k3_dsa_keys(m,a,li,x,pos0,C,NULL);
+        return;
+    }
 #endif
     int H=c->n_heads, qh=c->qk_head, vh=c->v_head, kvl=c->kv_lora, qr=c->qk_rope;
     float *qa=k3_balloc((int64_t)C*c->q_lora), *qv=k3_balloc((int64_t)C*H*qh);
@@ -2604,7 +2951,6 @@ static int k3_mla_gpu(Model *m, Mla *a, int li, const float *x, int pos0, int C,
      * and at row 0 instead of row pos_base — so on Metal the host cache was never populated
      * and attention read garbage, collapsing decode after a few tokens. This write is a
      * trivial rmsnorm+copy per row (negligible vs MoE), so CPU is the correct home for it. */
-    const K3Row *mr = m->mux_rows;   /* a multiplexed step: each row's own caches and position */
     for (int t = 0; t < C; t++) {
         int pt = mr ? mr[t].pos : pos0 + t;
         float *Lrow = (mr ? mr[t].seq->Lc[li] : m->Lc[li]) + (int64_t)pt * kvl,
@@ -2613,21 +2959,19 @@ static int k3_mla_gpu(Model *m, Mla *a, int li, const float *x, int pos0, int C,
         rmsnorm_(Lrow, cv, a->kva_ln, kvl, c->eps);
         memcpy(Rrow, cv + kvl, qr * sizeof(float));
     }
-    /* DSA indexer: prefill — write K portion for full layers */
-    if(c->index_hd > 0 && c->idx_type[li] && k3_dsa_indexer_on()){
-        /* the chunk's keys in one call ([C, index_hd] from [C, hidden], rows contiguous
-         * in Ic; every kernel computes a row as the one-row call does), then per row */
-        float *ikb = mr ? falloc((int64_t)C * c->index_hd) : a->Ic + (int64_t)pos0 * c->index_hd;
-        w_matmul(ikb, x, &a->wk, C);
-        for(int t=0;t<C;t++){
-            int pt = mr ? mr[t].pos : pos0 + t;
-            float *ikd = mr ? mr[t].seq->Ic[li] + (int64_t)pt * c->index_hd : a->Ic + (int64_t)pt * c->index_hd;
-            if (mr) memcpy(ikd, ikb + (int64_t)t * c->index_hd, (size_t)c->index_hd * sizeof(float));
-            rmsnorm_(ikd, ikd, a->knw, c->index_hd, c->eps);
-            if(c->qk_rope > 0)
-                dsa_rope(ikd, pt, c->qk_rope, c->theta);   /* in-place on first qk_rope dims */
+    /* K3.1: the step's index keys, then each row's selection (its own key among them) */
+    int *dsel=NULL, *dns=NULL;
+    uint32_t *dmask=NULL; int dmw=0;   /* the GPU's picks (a prompt step), as the core's mask */
+    if(dsa) k3_dsa_keys(m,a,li,x,pos0,C,mr);
+    if(dsa_need){
+#ifdef COLI_K3_CUDA
+        if(!mr&&g_k3g_on&&C>=g_k3g_min_rows) dmask=k3_dsa_mask_gpu(m,a,x,qa,pos0,C,&dmw);
+#endif
+        if(!dmask){
+            dsel=malloc((size_t)C*c->index_topk*sizeof(int)); dns=malloc((size_t)C*sizeof(int));
+            if(!dsel||!dns){ fprintf(stderr,"OOM DSA selection\n"); exit(1); }
+            if(!k3_dsa_select(m,a,li,x,qa,pos0,C,mr,dsel,dns)){ free(dsel); free(dns); dsel=dns=NULL; }
         }
-        if (mr) free(ikb);
     }
     w_matmul(gv,x,&a->g,C);
 #ifdef COLI_VULKAN
@@ -2635,15 +2979,51 @@ static int k3_mla_gpu(Model *m, Mla *a, int li, const float *x, int pos0, int C,
 #endif
     int on_gpu=0;
 #ifdef COLI_K3_CUDA
-    /* a prompt step's attention core on the GPU, the loop below's bytes (k3cu_mla) */
+    /* a prompt step's attention core on the GPU, the loop below's bytes (k3cu_mla); a K3.1 step
+     * whose rows select, with the selection as a mask (k3cu_mla_mask: the rows a row does not
+     * attend weigh exactly 0, so its bytes are the loop's over the selected rows) */
     if(!mr&&g_k3g_on&&C>=g_k3g_min_rows&&a->kvb.fmt==1&&a->kvb.q8&&kvl%8==0&&(qr==0||qr%8==0)){
         double t0=now_s();   /* the whole step: the call takes its rows in chunks, each with the positions up to its own */
-        on_gpu=k3cu_mla(m->Lc[li],m->Rc[li],pos0+C,pos0,C,qv,gv,a->kvb.q8,a->kvb.s,H,c->qk_nope,qr,vh,kvl,c->attn_scale,ctx);
+        if(dmask){
+            on_gpu=k3cu_mla_mask(m->Lc[li],m->Rc[li],pos0+C,pos0,C,qv,gv,a->kvb.q8,a->kvb.s,H,c->qk_nope,qr,vh,kvl,
+                                 c->attn_scale,dmask,dmw,ctx);
+        } else if(dns){
+            const int N=pos0+C, mw=(N+31)/32, K=c->index_topk;
+            uint32_t *mask=calloc((size_t)C*mw,sizeof(uint32_t));
+            if(mask){
+                for(int t=0;t<C;t++){
+                    uint32_t *mrow=mask+(size_t)t*mw;
+                    if(dns[t]<0){ const int nt=pos0+t+1;
+                        for(int w=0;w<nt/32;w++) mrow[w]=0xffffffffu;
+                        if(nt%32) mrow[nt/32]=(1u<<(nt%32))-1u; }
+                    else for(int j=0;j<dns[t];j++){ const int p=dsel[(int64_t)t*K+j]; mrow[p>>5]|=1u<<(p&31); }
+                }
+                on_gpu=k3cu_mla_mask(m->Lc[li],m->Rc[li],N,pos0,C,qv,gv,a->kvb.q8,a->kvb.s,H,c->qk_nope,qr,vh,kvl,
+                                     c->attn_scale,mask,mw,ctx);
+                free(mask);
+            }
+        } else
+            on_gpu=k3cu_mla(m->Lc[li],m->Rc[li],pos0+C,pos0,C,qv,gv,a->kvb.q8,a->kvb.s,H,c->qk_nope,qr,vh,kvl,c->attn_scale,ctx);
         if(on_gpu) m->t_mla_gpu+=now_s()-t0;
     }
 #endif
+    if(!on_gpu&&dmask){   /* the GPU picked but its core did not run: the picks as the CPU loop's lists */
+        const int K=c->index_topk;
+        dsel=malloc((size_t)C*K*sizeof(int)); dns=malloc((size_t)C*sizeof(int));
+        if(!dsel||!dns){ fprintf(stderr,"OOM DSA selection\n"); exit(1); }
+        for(int t=0;t<C;t++){
+            const int nt=pos0+t+1;
+            dns[t]=-1;
+            if(nt<=K) continue;
+            const uint32_t *mrow=dmask+(size_t)t*dmw; int n=0;
+            for(int p=0;p<nt&&n<K;p++) if(mrow[p>>5]>>(p&31)&1u) dsel[(int64_t)t*K+n++]=p;
+            dns[t]=n;
+        }
+    }
     for(int tt=0;tt<C&&!on_gpu;tt++){
-        int nt=(mr?mr[tt].pos:pos0+tt)+1;
+        /* K3.1: a row past index_topk scores and sums only its selected rows, in their order */
+        const int *sl=dns&&dns[tt]>=0?dsel+(int64_t)tt*c->index_topk:NULL;
+        const int nt=sl?dns[tt]:(mr?mr[tt].pos:pos0+tt)+1;
         const float *Lc_=mr?mr[tt].seq->Lc[li]:m->Lc[li], *Rc_=mr?mr[tt].seq->Rc[li]:m->Rc[li];
         const float *qvt=qv+(int64_t)tt*H*qh, *gvt=gv+(int64_t)tt*H*vh;
         float *ctxt=ctx+(int64_t)tt*H*vh;
@@ -2662,14 +3042,14 @@ static int k3_mla_gpu(Model *m, Mla *a, int li, const float *x, int pos0, int C,
             for(int d=0;d<c->qk_nope;d++) w_addrow(&a->kvb,rbase+d,qp[d],qabs);
             qrps[g]=qp+c->qk_nope;
           }
-          k3_mla_scores_g(scs,qab,qrps,nh,Lc_,Rc_,nt,kvl,qr,c->attn_scale);
+          k3_mla_scores_g(scs,qab,qrps,nh,Lc_,Rc_,nt,kvl,qr,c->attn_scale,sl);
           for(int g=0;g<nh;g++){
             const int h=h0+g, rbase=h*(c->qk_nope+vh);
             float *sc=scs+(int64_t)g*nt;
             softmax_(sc,nt);
             float clat[4096]; memset(clat,0,kvl*sizeof(float));
             for(int t=0;t<nt;t++){
-                const float *Lt=Lc_+(int64_t)t*kvl; float s2=sc[t];
+                const float *Lt=Lc_+(int64_t)(sl?sl[t]:t)*kvl; float s2=sc[t];
                 for(int i=0;i<kvl;i++) clat[i]+=s2*Lt[i];
             }
             float *cx=ctxt+(int64_t)h*vh;
@@ -2688,6 +3068,7 @@ static int k3_mla_gpu(Model *m, Mla *a, int li, const float *x, int pos0, int C,
           free(qab); free(scs);
         }
     }
+    free(dsel); free(dns); free(dmask);
     w_matmul(out,ctx,&a->o,C);
     k3_bfree(qa);k3_bfree(qv);k3_bfree(ckv);k3_bfree(gv);k3_bfree(ctx);
 }
@@ -3833,11 +4214,24 @@ static struct {
 } g_k3g={ .mx=PTHREAD_MUTEX_INITIALIZER, .go=PTHREAD_COND_INITIALIZER, .ev=PTHREAD_COND_INITIALIZER };
 static void k3g_init(Model *m){
     const char *e=getenv("K3_GPU_EXPERTS");
-    if((e&&!atoi(e))||m->gx||!g_k3_idot||!EXP_F_X87) return;   /* MXFP4's, int8 inputs, MinGW's exp_f and tanhf */
+    /* Named rather than silent: this gate holds the routed experts, the gated MLA and KDA
+     * layers and the index picks, all of which fall back to the CPU (a prompt ten times
+     * slower) and a refused load used to leave no trace in the log. The C library is one of
+     * the reasons because the card's tables hold MinGW's exp_f and tanhf bits; a UCRT build
+     * computes the same numbers with different ones, so it cannot share them with the card. */
+    const char *off=(e&&!atoi(e))?"K3_GPU_EXPERTS=0":m->gx?"the Vulkan tier holds the experts":
+                    !g_k3_idot?"K3_IDOT=0: the card takes int8 activation inputs":
+                    !EXP_F_X87?"the engine was built against a C library whose expf and tanhf "
+                               "are not MinGW's (build it with an msvcrt MinGW)":NULL;
+    int dev=getenv("COLI_GPU")?atoi(getenv("COLI_GPU")):0;
+    if(!off&&!k3cu_init(dev)) off="the device refused coli_cuda_k3.dll";
+    if(off){
+        fprintf(stderr,"[K3-CUDA] experts: off (%s) -- a prompt step's routed experts, its gated MLA and KDA "
+                "layers and its index picks stay on the CPU\n",off);
+        return;
+    }
     if(getenv("K3_GPU_MIN_ROWS")){ g_k3g_min_rows=atoi(getenv("K3_GPU_MIN_ROWS")); if(g_k3g_min_rows<1) g_k3g_min_rows=1; }
     if(getenv("K3_GPU_CPU_WAVE")){ g_k3g_cpu_wave=atoi(getenv("K3_GPU_CPU_WAVE")); if(g_k3g_cpu_wave<0) g_k3g_cpu_wave=0; }
-    int dev=getenv("COLI_GPU")?atoi(getenv("COLI_GPU")):0;
-    if(!k3cu_init(dev)) return;
     g_k3g_on=1;
     fprintf(stderr,"[K3-CUDA] experts: a prompt step's routed experts (steps of %d rows or more) on GPU %d beside the CPU, "
             "the CPU's bytes (K3_GPU_EXPERTS=0: the CPU's alone)\n",g_k3g_min_rows,dev);
@@ -4223,6 +4617,7 @@ static void pin_seed(Model *m, int64_t hist){
     Cfg *c=&m->c;
     if(getenv("AUTOPIN") && atoi(getenv("AUTOPIN"))==0) return;
     if(hist<5000) return;
+    const double t0=now_s();
     double conf=(double)hist/200000.0; if(conf>1) conf=1;
     int pinned_total=0;
     for(int li=0; li<c->n_layers; li++){
@@ -4249,9 +4644,11 @@ static void pin_seed(Model *m, int64_t hist){
             lc->n++; cache_index(m,li,d); pinned_total++;
         }
     }
-    if(pinned_total)
-        fprintf(stderr,"[PIN] %d experts pinned from history (%lld selections, %.0f%% confidence)\n",
-                pinned_total,(long long)hist,100.0*conf);
+    if(pinned_total)   /* the reads are serial and the API waits: the line says what it cost */
+        fprintf(stderr,"[PIN] %d experts pinned from history (%lld selections, %.0f%% confidence) -- %.1fs, "
+                "%.1f GB read one after the other\n",
+                pinned_total,(long long)hist,100.0*conf,now_s()-t0,
+                (double)pinned_total*(double)m->e_slot/1e9);
 }
 
 #if defined(COLI_VULKAN) || defined(COLI_CUDA)
@@ -5126,11 +5523,178 @@ static void k3_embed(Model *m, const int *ids, int pos0, int C, float *hidden){
 #include "kimi_k3_chain.h"   /* COLI_VK_CHAIN: every layer's dense chain on the device */
 #endif
 
+/* ---- the RAM a grow takes, and the rows it takes it for -------------------------
+ * An evicted expert gives up its bytes and keeps its entry in the layer's cache: the
+ * next read of that expert finds the slot empty and allocates it again (expert_read_h0).
+ * A slot a reader is still filling, one a step is still computing, and the device's
+ * pinned staging are left where they are. */
+static void k3_kv_yield(Model *m,double bytes,const char *why){
+    if(bytes<=0.0) return;
+    double avail=k3_mem_avail()*1e9;
+    if(avail<=0.0||avail>=bytes+K3_KV_ROOM) return;   /* the machine has it: the experts keep theirs */
+    const double need=bytes+K3_KV_ROOM-avail;
+    const uint64_t slot=(uint64_t)m->e_slot;
+    int n=0,pins=0; double back=0.0;
+    for(int pass=0;pass<2&&back<need;pass++){   /* unpinned first; the seeded pins only once those run out */
+        for(;;){
+            int bli=-1,bsi=-1; uint64_t coldest=0;
+            for(int li=0;m->ecache&&li<m->c.n_layers;li++){
+                if(!m->L[li].sparse) continue;
+                LCache *lc=&m->ecache[li];
+                for(int i=0;i<lc->n;i++){
+                    Slot *s=&lc->s[i];
+                    if(!s->base||s->pin_mem||s->busy||!slot_ready(s)) continue;
+                    if(s->pinned&&pass==0) continue;
+                    if(bsi<0||s->used<coldest){ bsi=i; bli=li; coldest=s->used; }
+                }
+            }
+            if(bsi<0) break;
+            Slot *v=&m->ecache[bli].s[bsi];
+            if(v->eid>=0){ cache_unindex(m,bli,v); m->ebytes-=slot; v->eid=-1; }
+            compat_aligned_free(v->base);
+            v->base=NULL; v->buf=NULL; v->used=0;
+            if(v->pinned){ v->pinned=0; pins++; }
+            n++; back+=(double)slot;
+            if(back>=need) break;
+        }
+    }
+    if(n) fprintf(stderr,"[K3][RAM] %s wants %.2f GB with %.1f GB free: %d experts out of their slots, "
+            "%.2f GB back%s (%.2f of the %.2f GB needed)\n",
+            why,bytes/1e9,avail/1e9,n,back/1e9,pins?", their seeded pins dropped":"",back/1e9,need/1e9);
+    else fprintf(stderr,"[K3][RAM] %s wants %.2f GB, %.1f GB free and no expert left to ask: the grow "
+            "takes what the machine has\n",why,bytes/1e9,avail/1e9);
+}
+/* Every MLA cache and index key with room for `cap` positions, the positions already
+ * written copied over. Lc/Rc are [position][cols], so a grow is a straight prefix copy
+ * and the record of what fed them (kvp) survives with them; the 69 KDA layers are not
+ * here at all — their recurrent state does not scale with the context. */
+static void kv_rows_to(Model *m,int cap){
+    Cfg *c=&m->c;
+    float **oldL=m->Lc, **oldR=m->Rc;
+    int keep=(m->Lc && m->kvp.len>0 && m->kvp.len<=cap) ? m->kvp.len : 0;
+    m->Lc=calloc(c->n_layers,sizeof(float*));
+    m->Rc=calloc(c->n_layers,sizeof(float*));
+    if(!m->Lc||!m->Rc){ fprintf(stderr,"OOM KV cache\n"); exit(1); }
+    for(int i=0;i<c->n_layers;i++) if(!m->L[i].kda){
+        m->Lc[i]=falloc((int64_t)cap*c->kv_lora);
+        m->Rc[i]=falloc((int64_t)cap*c->qk_rope);
+        if(keep){
+            memcpy(m->Lc[i], oldL[i], (size_t)keep*c->kv_lora*sizeof(float));
+            memcpy(m->Rc[i], oldR[i], (size_t)keep*c->qk_rope*sizeof(float));
+        }
+    }
+    if(oldL) for(int i=0;i<c->n_layers;i++){ free(oldL[i]); free(oldR[i]); }
+    free(oldL); free(oldR);
+    if(!kv_prefix_grow(&m->kvp,cap,keep)) kv_prefix_clear(&m->kvp);
+    for(int i=0;i<c->n_layers;i++){
+        Mla *a=&m->L[i].m;
+        if(c->index_hd > 0 && c->idx_type[i] && k3_dsa_indexer_on()){
+            float *old=a->Ic;
+            a->Ic = falloc((int64_t)cap * c->index_hd);
+            if(old){
+                if(keep) memcpy(a->Ic,old,(size_t)keep*c->index_hd*sizeof(float));
+                free(old);
+            }
+        }
+    }
+    m->kv_cap=cap;
+}
+/* The caches may hold `max_t` positions and `cap` of them are allocated (K3_KV_GROW
+ * starts a conversation far below its ceiling; kv_alloc takes the whole thing). Serve
+ * calls this once per request, and it GROWS rather than restarts: freeing Lc/Rc also
+ * discards every position already computed, which is exactly the state KV prefix reuse
+ * exists to keep — a conversation whose prompt is longer every turn asks for a larger
+ * max_t every turn. */
+static void kv_alloc_cap(Model *m,int max_t,int cap){
+    Cfg *c=&m->c;
+    if(max_t<1) max_t=1;
+    if(cap>max_t) cap=max_t;
+    if(cap<m->kv_cap) cap=m->kv_cap;           /* never shrink: the rows written stand where they are */
+    if(m->Lc && max_t<=m->max_t && cap<=m->kv_cap){
+        /* a conversation swapped in (k3_seq_swap) whose caches came before K3.1's keys did */
+        for(int i=0;i<c->n_layers;i++) if(c->index_hd>0&&c->idx_type[i]&&k3_dsa_indexer_on()&&!m->L[i].m.Ic)
+            m->L[i].m.Ic=falloc((int64_t)m->kv_cap*c->index_hd);
+        return;
+    }
+    if(max_t>m->max_t) m->max_t=max_t;
+    k3_kv_yield(m,(double)(cap-m->kv_cap)*(g_k3_kv_row_bytes>0.0?g_k3_kv_row_bytes:k3_kv_rows_bytes(m)),
+                "a conversation's rows");
+    kv_rows_to(m,cap);
+}
+static void kv_alloc(Model *m,int max_t){ kv_alloc_cap(m,max_t,max_t); }
+/* A step about to write positions [pos0,pos0+C): room for them first, doubling so a long
+ * prompt grows a handful of times rather than once per chunk. Nothing else moves these
+ * arrays: every reader takes m->Lc/Rc/Ic at its own call, and the park parts are rebuilt
+ * from the current pointers at both save and restore. */
+static void k3_kv_need(Model *m,int rows){
+    if(!m->Lc||rows<=m->kv_cap) return;
+    if(rows>m->max_t) rows=m->max_t;
+    if(rows<=m->kv_cap) return;
+    int was=m->kv_cap, want=was*2>rows?was*2:rows;
+    if(want>m->max_t) want=m->max_t;
+    double add=(double)(want-was)*(g_k3_kv_row_bytes>0.0?g_k3_kv_row_bytes:k3_kv_rows_bytes(m));
+    k3_kv_yield(m,add,"the conversation's rows growing");
+    kv_rows_to(m,want);
+    fprintf(stderr,"[K3] KV: %d of the %d positions this context may reach (%.2f GB, was %d)\n",
+            want,m->max_t,(double)want*g_k3_kv_row_bytes/1e9,was);
+}
+/* A parked conversation's own caches, grown the same way: every conversation holds its
+ * Lc/Rc and its index keys, and a muxed step reads them straight from the row's seq. */
+static void kv_seq_rows_to(Model *m,K3Seq *q,int cap){
+    Cfg *c=&m->c;
+    float **oldL=q->Lc, **oldR=q->Rc;
+    int keep=(q->Lc && q->kvp.len>0 && q->kvp.len<=cap) ? q->kvp.len : 0;
+    if(!q->Ic&&!(q->Ic=calloc(c->n_layers,sizeof(float*)))){ fprintf(stderr,"[serve] out of memory\n"); exit(1); }
+    q->Lc=calloc(c->n_layers,sizeof(float*));
+    q->Rc=calloc(c->n_layers,sizeof(float*));
+    if(!q->Lc||!q->Rc){ fprintf(stderr,"OOM KV cache\n"); exit(1); }
+    for(int i=0;i<c->n_layers;i++) if(!m->L[i].kda){
+        q->Lc[i]=falloc((int64_t)cap*c->kv_lora);
+        q->Rc[i]=falloc((int64_t)cap*c->qk_rope);
+        if(keep){
+            memcpy(q->Lc[i], oldL[i], (size_t)keep*c->kv_lora*sizeof(float));
+            memcpy(q->Rc[i], oldR[i], (size_t)keep*c->qk_rope*sizeof(float));
+        }
+    }
+    if(oldL) for(int i=0;i<c->n_layers;i++){ free(oldL[i]); free(oldR[i]); }
+    free(oldL); free(oldR);
+    if(!kv_prefix_grow(&q->kvp,cap,keep)) kv_prefix_clear(&q->kvp);
+    for(int i=0;i<c->n_layers;i++){
+        if(c->index_hd > 0 && c->idx_type[i] && k3_dsa_indexer_on()){
+            float *old=q->Ic[i];
+            q->Ic[i] = falloc((int64_t)cap * c->index_hd);
+            if(old){
+                if(keep) memcpy(q->Ic[i],old,(size_t)keep*c->index_hd*sizeof(float));
+                free(old);
+            }
+        }
+    }
+    q->kv_cap=cap;
+}
+/* One row of a multiplexed step: its conversation's caches hold the position it writes.
+ * The step is what a parked conversation is read by, so this is where its rows grow. */
+static void k3_kv_need_rows(Model *m,const K3Row *rows,int S){
+    if(!k3_kv_grow_on()) return;
+    for(int t=0;t<S;t++){
+        K3Seq *q=rows[t].seq;
+        if(!q||rows[t].pos<q->kv_cap) continue;
+        int pos=rows[t].pos>=q->max_t?q->max_t-1:rows[t].pos;   /* the caller's context-full check decides the rest */
+        int rows_want=pos+1;
+        if(rows_want<=q->kv_cap) continue;
+        int was=q->kv_cap, want=was*2>rows_want?was*2:rows_want;
+        if(want>q->max_t) want=q->max_t;
+        k3_kv_yield(m,(double)(want-was)*(g_k3_kv_row_bytes>0.0?g_k3_kv_row_bytes:k3_kv_rows_bytes(m)),
+                    "a parked conversation's rows growing");
+        kv_seq_rows_to(m,q,want);
+    }
+}
+
 static float *step_chunk_ex(Model *m, const int *ids, int pos0, int C,
                             K3CancelPoll poll_cancel, void *cancel_context,
                             int *cancelled){
     Cfg *c=&m->c; int D=c->hidden;
     if(cancelled) *cancelled=0;
+    if(!m->mux_rows&&k3_kv_grow_on()) k3_kv_need(m,pos0+C);   /* the rows this step is about to write */
     int nbmax=(c->n_layers+c->res_bs-1)/c->res_bs;
     float *hidden=falloc((int64_t)C*D), *bres=falloc((int64_t)C*nbmax*D);
     float *mix=falloc(D);
@@ -5213,7 +5777,8 @@ static void k3_seq_swap(Model *m, K3Seq *q){
     K3_SEQ_SWAP(float**,m->kstate,q->kstate); K3_SEQ_SWAP(float**,m->cwq,q->cwq);
     K3_SEQ_SWAP(float**,m->cwk,q->cwk); K3_SEQ_SWAP(float**,m->cwv,q->cwv);
     K3_SEQ_SWAP(float**,m->Lc,q->Lc); K3_SEQ_SWAP(float**,m->Rc,q->Rc);
-    K3_SEQ_SWAP(int,m->max_t,q->max_t); K3_SEQ_SWAP(kv_prefix,m->kvp,q->kvp);
+    K3_SEQ_SWAP(int,m->max_t,q->max_t); K3_SEQ_SWAP(int,m->kv_cap,q->kv_cap);
+    K3_SEQ_SWAP(kv_prefix,m->kvp,q->kvp);
     if(!q->Ic&&!(q->Ic=calloc(m->c.n_layers,sizeof(float*)))){ fprintf(stderr,"[serve] out of memory\n"); exit(1); }   /* slot 0's place */
     for(int i=0;i<m->c.n_layers;i++) K3_SEQ_SWAP(float*,m->L[i].m.Ic,q->Ic[i]);
 #undef K3_SEQ_SWAP
@@ -5260,54 +5825,6 @@ static float *k3_step_rows(Model *m, const K3Row *rows, const int *ids, int S){
     return logits;
 }
 
-static void kv_alloc(Model *m, int max_t){
-    Cfg *c=&m->c;
-    /* Serve calls this once per request, and it used to calloc Lc/Rc over the
-     * old pointers without freeing them: n_layers x max_t x (kv_lora +
-     * qk_rope) floats leaked every turn, hundreds of MB over a conversation on
-     * the 24 MLA layers at 4k context.
-     *
-     * GROW, DO NOT RESTART. Freeing and re-allocating also discards every
-     * position already computed, which defeats KV prefix reuse in the one case
-     * it exists for: a conversation whose prompt is longer every turn asks for
-     * a larger max_t every turn, so the state would be thrown away immediately
-     * before the point of using it. (Caught by CI on the Inkling side, where
-     * the same shape of bug sat in the same place.)
-     *
-     * Lc/Rc are laid out [position][kv_lora] and [position][qk_rope], so unlike
-     * inkling's head-major K/V a grow is a straight prefix copy — no re-layout.
-     * The 69 KDA layers are untouched here: their recurrent state does not
-     * scale with max_t and survives on its own. */
-    if(m->Lc && max_t<=m->max_t) return;
-
-    float **oldL=m->Lc, **oldR=m->Rc;
-    int keep=(m->Lc && m->kvp.len>0 && m->kvp.len<=max_t) ? m->kvp.len : 0;
-
-    m->max_t=max_t;
-    m->Lc=calloc(c->n_layers,sizeof(float*));
-    m->Rc=calloc(c->n_layers,sizeof(float*));
-    for(int i=0;i<c->n_layers;i++) if(!m->L[i].kda){
-        m->Lc[i]=falloc((int64_t)max_t*c->kv_lora);
-        m->Rc[i]=falloc((int64_t)max_t*c->qk_rope);
-        if(keep){
-            memcpy(m->Lc[i], oldL[i], (size_t)keep*c->kv_lora*sizeof(float));
-            memcpy(m->Rc[i], oldR[i], (size_t)keep*c->qk_rope*sizeof(float));
-        }
-    }
-    if(oldL) for(int i=0;i<c->n_layers;i++){ free(oldL[i]); free(oldR[i]); }
-    free(oldL); free(oldR);
-
-    /* the record describes those same positions, so it survives with them */
-    if(!kv_prefix_grow(&m->kvp,max_t,keep)) kv_prefix_clear(&m->kvp);
-    /* DSA indexer cache — only for full layers (idx_type=1) */
-    for(int i=0;i<c->n_layers;i++){
-        Mla *a=&m->L[i].m;
-        if(c->index_hd > 0 && c->idx_type[i] && k3_dsa_indexer_on()){
-            a->Ic = falloc((int64_t)max_t * c->index_hd);
-        }
-    }
-}
-
 static void model_init(Model *m, const char *snap, int n_layers_env){
     model_init_range(m,snap,0,n_layers_env,1,1,1,0,0,0);
 }
@@ -5345,14 +5862,21 @@ static int sample_tok(const float *lo, int V, float temp, float top_p){
  * closes think, opens response, and finishes with <|end_of_msg|> (the eos). */
 typedef struct { Tok *T; int *ids; int n, cap;
                  int sp_open, sp_close, sp_sep, sp_eom;
-                 int cont; } ChatB;   /* cont: the final turn was left open (continuation) */
+                 int cont, over; } ChatB;   /* cont: the final turn was left open (continuation) */
+/* A prompt that does not fit its buffer is the conversation's, not the engine's, problem:
+ * `over` says so and the caller answers CONTEXT_EXCEEDED. This used to be exit(1) — the
+ * engine died mid-request, the gateway started it again (62s of weights and pins), the
+ * client resent the same conversation and it died again: a session that had simply grown
+ * past its context took the engine down with it, once a minute, forever. */
 static void cb_special(ChatB *b, int id){
-    if(b->n>=b->cap){ fprintf(stderr,"chat prompt too long\n"); exit(1); }
+    if(b->n>=b->cap){ b->over=1; return; }
     b->ids[b->n++]=id;
 }
 static void cb_text(ChatB *b, const char *s){
-    if(!*s) return;
-    b->n+=tok_encode(b->T,s,(int)strlen(s),b->ids+b->n,b->cap-b->n);
+    if(!*s||b->over) return;
+    int room=b->cap-b->n, w=tok_encode(b->T,s,(int)strlen(s),b->ids+b->n,room);
+    b->n+=w;
+    if(w>=room) b->over=1;   /* filled to the last slot: the text itself did not fit */
 }
 static void cb_open(ChatB *b, const char *tag, const char *role){
     cb_special(b,b->sp_open); cb_text(b,tag);
@@ -5368,12 +5892,13 @@ static int chat_special(Tok *T, const char *s){
         if(T->sp[i].len==l && !memcmp(T->sp[i].str,s,l)) return T->sp[i].id;
     return -1;
 }
-/* returns prompt length; sp[4] = {open, close, sep, end_of_msg} ids */
+/* returns prompt length, -2 when the tokenizer has no XTML tokens, -3 when the prompt
+ * does not fit `cap`; sp[4] = {open, close, sep, end_of_msg} ids */
 static int chat_build(Tok *T, const char *sys, const char *user, int thinking,
                       int *ids, int cap, int *sp){
     ChatB b={T,ids,0,cap,
         chat_special(T,"<|open|>"), chat_special(T,"<|close|>"),
-        chat_special(T,"<|sep|>"),  chat_special(T,"<|end_of_msg|>"), 0};
+        chat_special(T,"<|sep|>"),  chat_special(T,"<|end_of_msg|>"), 0, 0};
     if(b.sp_open<0||b.sp_close<0||b.sp_sep<0||b.sp_eom<0){
         fprintf(stderr,"chat: XTML special tokens not in tokenizer.json\n"); exit(1); }
     sp[0]=b.sp_open; sp[1]=b.sp_close; sp[2]=b.sp_sep; sp[3]=b.sp_eom;
@@ -5385,7 +5910,7 @@ static int chat_build(Tok *T, const char *sys, const char *user, int thinking,
     cb_close(&b,"message"); cb_special(&b,b.sp_eom);
     cb_open(&b,"message","assistant");
     cb_open(&b,thinking?"think":"response",NULL);
-    return b.n;
+    return b.over?-3:b.n;
 }
 
 static void chat_message(ChatB *b, const char *role, const char *text, int assistant){
@@ -5445,12 +5970,14 @@ static int k3_tool_tag(const char *t){
  *   K3CHAT1\n
  *   M <role> <utf8-bytes>\n<content> ...
  *   G <thinking>\n
- */
+ * Returns the prompt's length, -1 for a payload that does not parse, -2 for a
+ * tokenizer without the XTML tokens and -3 for a conversation that does not
+ * fit `cap` (the caller answers that one over the wire; the engine stays up). */
 static int chat_build_wire(Tok *T, const char *wire, int nwire, int *thinking,
                            int *ids, int cap, int *sp){
     ChatB b={T,ids,0,cap,
         chat_special(T,"<|open|>"), chat_special(T,"<|close|>"),
-        chat_special(T,"<|sep|>"),  chat_special(T,"<|end_of_msg|>"), 0};
+        chat_special(T,"<|sep|>"),  chat_special(T,"<|end_of_msg|>"), 0, 0};
     /* -2, not -1: the caller must be able to tell a bad payload from a snapshot
      * whose tokenizer has no XTML tokens. Serve reported both as "invalid K3
      * chat payload", which sent at least one user hunting through a request
@@ -5600,7 +6127,7 @@ static int chat_build_wire(Tok *T, const char *wire, int nwire, int *thinking,
         cb_open(&b,"message","assistant");
         cb_open(&b,*thinking?"think":"response",NULL);
     }
-    return b.n;
+    return b.over?-3:b.n;
 }
 
 /* ---------- serve mode: shared openai_server.py protocol ---------- */
@@ -5636,18 +6163,19 @@ static void model_state_reset(Model *m){
         }
     }
 #ifdef COLI_METAL
-    if(m->Lc && m->max_t>0 && g_k3_metal){
+    if(m->Lc && m->kv_cap>0 && g_k3_metal){
         /* KV cache is CPU-managed (host memory) even under Metal — clear in place and keep the
          * buffers for reuse. coli_metal_kv_clear() wrote to an unsynced GPU copy, so the host
-         * cache stayed stale across turns; memset zeroes the memory attention actually reads. */
+         * cache stayed stale across turns; memset zeroes the memory attention actually reads.
+         * kv_cap, not max_t: the rows past it are not allocated yet (K3_KV_GROW). */
         for(int i=0;i<c->n_layers;i++) if(!m->L[i].kda){
-            if(m->Lc[i]) memset(m->Lc[i],0,(size_t)m->max_t*c->kv_lora*sizeof(float));
-            if(m->Rc[i]) memset(m->Rc[i],0,(size_t)m->max_t*c->qk_rope*sizeof(float));
+            if(m->Lc[i]) memset(m->Lc[i],0,(size_t)m->kv_cap*c->kv_lora*sizeof(float));
+            if(m->Rc[i]) memset(m->Rc[i],0,(size_t)m->kv_cap*c->qk_rope*sizeof(float));
         }
         for(int i=0;i<c->n_layers;i++){
             Mla *a=&m->L[i].m;
             if(c->index_hd > 0 && c->idx_type[i] && a->Ic)
-                memset(a->Ic,0,(size_t)m->max_t*c->index_hd*sizeof(float));
+                memset(a->Ic,0,(size_t)m->kv_cap*c->index_hd*sizeof(float));
         }
     } else
 #endif
@@ -5656,11 +6184,11 @@ static void model_state_reset(Model *m){
             if(m->Lc && m->Lc[i]) free(m->Lc[i]);
             if(m->Rc && m->Rc[i]) free(m->Rc[i]);
             Mla *a=&m->L[i].m;
-            if(c->index_hd > 0 && c->idx_type[i] && a->Ic) free(a->Ic);
+            if(c->index_hd > 0 && c->idx_type[i] && a->Ic){ free(a->Ic); a->Ic=NULL; }
         }
         if(m->Lc) free(m->Lc);
         if(m->Rc) free(m->Rc);
-        m->Lc=NULL; m->Rc=NULL; m->max_t=0;
+        m->Lc=NULL; m->Rc=NULL; m->max_t=0; m->kv_cap=0;
     }
 }
 
@@ -5972,7 +6500,10 @@ static int prepare_request_state(Model *m, const int *ids, int np, int max_t){
      * checkpoint pool (a no-op unless COLI_K3_CKPT enabled it). */
     if(!reuse) reuse=k3_ckpt_restore_best(m,ids,np);
     if(!reuse && !k3_park(m,np,max_t)) model_state_reset(m);   /* a short request keeps the conversation (k3_unpark) */
-    kv_alloc(m,max_t);
+    /* The prompt's rows plus the first K3_KV_GEN of the answer's; the rest as they are
+     * written (k3_kv_need). max_t stays the context this request was given, and parking
+     * above already took it whole: park.h counts the rows a request may rewrite. */
+    kv_alloc_cap(m,max_t,k3_kv_grow_on()?np+k3_kv_gen_rows():max_t);
     return reuse;
 }
 
@@ -6101,6 +6632,31 @@ static void serve_hits(Model *m){
 
 /* When a request's prefill began, and the counters then: DONE and PROF report its share. */
 typedef struct { double t0, a0, e0, d0, h0; uint64_t hit0, miss0; } K3ReqClock;
+/* A served prompt's stages. "MoE 3291s" alone says only that the experts spent it: this says
+ * whether the CPU computed them, waited on a drive or summed them, and whether the reads the
+ * prefetcher made were the ones asked for. A step of thousands of rows runs for minutes, so
+ * the same two lines print for one step as for the whole prompt. */
+typedef struct { double attn,mla,dsa,moe,route,lat,shared,wave,eload,qx,wsum;
+                 uint64_t hit,miss,ra,ru; } K3StageClock;
+static void k3_stage_clock(Model *m, K3StageClock *c){
+    c->attn=m->t_attn; c->mla=m->t_mla; c->dsa=g_k3_dsa_t; c->moe=m->t_moe; c->route=m->t_route;
+    c->lat=m->t_lat; c->shared=m->t_shared; c->wave=m->t_wave; c->eload=m->t_eload;
+    c->qx=m->t_qx; c->wsum=m->t_wsum; c->hit=m->hits; c->miss=m->miss;
+    c->ra=g_k3ra_issued; c->ru=g_k3ra_used;
+}
+/* What the counters did between a and b, the whole of it on two lines. */
+static void k3_stage_span_log(const char *what, const K3StageClock *a, const K3StageClock *b){
+    uint64_t hit=b->hit-a->hit, miss=b->miss-a->miss, tot=hit+miss;
+    fprintf(stderr,"%s: attention %.1fs (MLA %.1f",what,b->attn-a->attn,b->mla-a->mla);
+    if(k3_dsa_indexer_on()) fprintf(stderr,", K3.1's index keys and picks %.1f",b->dsa-a->dsa);
+    fprintf(stderr,"), MoE %.1fs (router and reads issued %.1f, latent %.1f, shared %.1f, routed experts "
+            "computed %.1f, waiting for reads %.1f, their inputs %.1f, their sums %.1f)\n",
+            b->moe-a->moe,b->route-a->route,b->lat-a->lat,b->shared-a->shared,b->wave-a->wave,
+            b->eload-a->eload,b->qx-a->qx,b->wsum-a->wsum);
+    fprintf(stderr,"[K3]   its experts: cache hit %.1f%% (%llu of %llu asked), read ahead %llu experts, "
+            "%llu taken by a step\n",tot?100.0*hit/tot:0.0,(unsigned long long)hit,(unsigned long long)tot,
+            (unsigned long long)(b->ra-a->ra),(unsigned long long)(b->ru-a->ru));
+}
 /* What a request's decoding needs from its start: the chat framing it was given. */
 typedef struct { int chat, thinking, sp[4]; } K3ReqChat;
 
@@ -6111,7 +6667,16 @@ typedef struct { int chat, thinking, sp[4]; } K3ReqChat;
  * prefill (a lone serve), NULL to leave every command for later (serve_mux). */
 static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_out, float **lo_out,
                           K3ReqClock *clk, K3ReqChat *chatinfo, K3ServePoll *poll){
-    int cap=65536, *ids=malloc((size_t)cap*sizeof(int)), np=0;
+    /* The prompt buffer holds the WHOLE framed conversation, so it takes its size from
+     * the context this serve was given (K3_MAXT) rather than from a constant: the fixed
+     * 65,536 was a tighter ceiling than the -Context the RAM plan projects and the
+     * budget below checks against, and the chat builder that ran into it ended the
+     * process (see cb_special). The slack is XTML framing — an open/close tag and a few
+     * text segments per turn — which the wire's own 16 MB payload cap bounds anyway;
+     * a conversation longer than even that is CONTEXT_EXCEEDED like any other. */
+    int max_ctx=getenv("K3_MAXT")?atoi(getenv("K3_MAXT")):8192;
+    if(max_ctx<1) max_ctx=8192;
+    int cap=max_ctx+4096, *ids=malloc((size_t)cap*sizeof(int)), np=0;
     if(!ids){ coli_serve_write_error(stdout,q->id,"out of memory"); return 0; }
     int sp[4]={-1,-1,-1,-1}, chat=0, thinking=0;
     if(m->c.bos>=0) ids[np++]=m->c.bos;
@@ -6128,12 +6693,26 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
             fprintf(stderr,"[K3] chat: XTML special tokens not in tokenizer.json — "
                            "regenerate with tools/k3_tokenizer.py\n");
             free(ids); return 0; }
-        if(n<0){ coli_serve_write_error(stdout,q->id,"invalid K3 chat payload"); free(ids); return 0; }
-        np+=n; chat=1;
+        if(n==-3){
+            /* The framing stopped with its buffer full, so the conversation is `cap`
+             * tokens or longer -- over this context by construction, cap being the
+             * context plus framing. Say so by carrying that length down to the budget
+             * check, which answers it CONTEXT_EXCEEDED like any other over-long prompt
+             * and lets the client compact. What it did before was exit(1): the gateway
+             * started the engine again (62s of weights and pins), the client resent the
+             * same conversation, and it died again -- an over-long session took the
+             * engine down with it, once a minute, forever. */
+            np=cap;
+            fprintf(stderr,"[serve] a conversation of %d tokens or more does not fit this "
+                           "%d-token context: CONTEXT_EXCEEDED, and the engine keeps "
+                           "serving (raise -Context / K3_MAXT for a longer one)\n",
+                    cap,max_ctx);
+        } else if(n<0){
+            coli_serve_write_error(stdout,q->id,"invalid K3 chat payload"); free(ids); return 0;
+        } else { np+=n; chat=1; }
     } else {
         np+=tok_encode(T,q->payload,q->plen,ids+np,cap-np);
     }
-    int max_ctx=getenv("K3_MAXT")?atoi(getenv("K3_MAXT")):8192;
     int budget=coli_serve_budget(np,q->max_tok,max_ctx,q->logprobs>0);
     if(budget<0){
         if(np<1){
@@ -6224,11 +6803,25 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
     /* `i` is the ABSOLUTE position: attention and the MLA Lc/Rc slots are
      * position-indexed, so the loop starts at `reuse`, not at 0. */
     int prefill_cancelled=0;
+    K3StageClock p0,prev; k3_stage_clock(m,&p0); prev=p0;
     for(int i=reuse;i<np;i+=chunk){
         int C=np-i<chunk?np-i:chunk;
         free(lo); lo=step_chunk_ex(m,ids+i,i,C,poll?k3_serve_poll_cancel:NULL,poll,
                                    &prefill_cancelled);
         if(prefill_cancelled) break;
+        if(np-reuse>chunk){   /* a prompt of several steps: where it is (a step can take minutes) */
+            K3StageClock done; k3_stage_clock(m,&done);
+            char what[96];
+            snprintf(what,sizeof what,"[K3] prompt %d/%d (%.0fs)",i+C,np,now_s()-clk->t0);
+            k3_stage_span_log(what,&prev,&done);
+            prev=done;
+        }
+    }
+    if(!prefill_cancelled&&np>reuse){
+        K3StageClock end; k3_stage_clock(m,&end);
+        char what[128];
+        snprintf(what,sizeof what,"[K3] prompt of %d tokens (%d reused) in %.1fs",np,reuse,now_s()-clk->t0);
+        k3_stage_span_log(what,&p0,&end);
     }
     if(prefill_cancelled){
         free(lo); k3_cancel_unpublished_state(m); free(ids);
@@ -6576,6 +7169,7 @@ int main(int argc, char **argv){
         if(fread(wire,1,(size_t)wn,wf)!=(size_t)wn){ fprintf(stderr,"short wire read\n"); return 1; }
         fclose(wf); wire[wn]=0;
         int thinking=0, wsp[4], n=chat_build_wire(&wt,wire,(int)wn,&thinking,wid,65536,wsp);
+        if(n==-3){ fprintf(stderr,"the wire payload needs more than the 65,536-token buffer\n"); return 1; }
         if(n<0){ fprintf(stderr,"invalid K3 chat wire payload\n"); return 1; }
         for(int i=0;i<n;i++) printf("%s%d",i?" ":"",wid[i]);
         printf("\n"); free(wire); free(wid); return 0;
@@ -6663,7 +7257,9 @@ int main(int argc, char **argv){
         if(!has_tok){ fprintf(stderr,"--chat needs tokenizer.json\n"); return 1; }
         if(!prompt){ fprintf(stderr,"--chat needs a user message\n"); return 1; }
         if(m.c.bos>=0) ids[np++]=m.c.bos;
-        np+=chat_build(&T,sysmsg,prompt,think,ids+np,65536-np,sp);
+        int n=chat_build(&T,sysmsg,prompt,think,ids+np,65536-np,sp);
+        if(n<0){ fprintf(stderr,"--chat: the framed prompt does not fit the 65,536-token buffer\n"); return 1; }
+        np+=n;
         if(getenv("K3_CHAT_IDS")){
             fprintf(stderr,"[K3] chat ids:");
             for(int i=0;i<np;i++) fprintf(stderr," %d",ids[i]);
@@ -6707,6 +7303,10 @@ int main(int argc, char **argv){
             m.ebytes/1e9);
     fprintf(stderr,"[K3] the prompt's KDA on the CPU: f32 projections %.1fs, conv %.1fs, heads %.1fs; on the GPU %.1fs; "
             "%.0f page faults\n",m.t_kda_f32,m.t_kda_conv,m.t_kda_heads,m.t_kda_gpu,k3_page_faults()-pf0);
+    if(k3_dsa_indexer_on())
+        fprintf(stderr,"[K3-DSA] the prompt: index keys and selections %.1fs; %llu rows selected %d of their positions "
+                "(%llu on the GPU), %.0f M positions scored\n",g_k3_dsa_t,g_k3_dsa_rows,m.c.index_topk,g_k3_dsa_gpu_rows,
+                g_k3_dsa_pos/1e6);
 #ifdef COLI_CUDA
     k3_cuda_report("prompt");
 #endif
@@ -7168,6 +7768,7 @@ static int kimi_segment_session_run(void *session_impl,
     model->cwv = session->cwv;
     model->Lc = session->Lc; model->Rc = session->Rc;
     model->max_t = (int)session->context_tokens;
+    model->kv_cap = (int)session->context_tokens;   /* the session allocated these whole; nothing here grows another engine's buffers */
     for (uint32_t layer = engine->layer_begin; layer < engine->layer_end;
          layer++)
         if (!config->is_kda[layer]) model->L[layer].m.Ic = session->Ic[layer];
@@ -7181,7 +7782,7 @@ static int kimi_segment_session_run(void *session_impl,
          layer++)
         if (!config->is_kda[layer]) model->L[layer].m.Ic = NULL;
     model->kstate = NULL; model->cwq = NULL; model->cwk = NULL;
-    model->cwv = NULL; model->Lc = NULL; model->Rc = NULL; model->max_t = 0;
+    model->cwv = NULL; model->Lc = NULL; model->Rc = NULL; model->max_t = 0; model->kv_cap = 0;
     pthread_mutex_unlock(&engine->run_lock);
     if (result) {
         free(hidden); free(residuals);

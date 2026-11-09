@@ -14,6 +14,16 @@ engine emits under K3_TRACE: per token, per layer, hidden[hidden] f32.
 
 Pure numpy, no torch. Everything f32 (f64 only where the C engine also
 accumulates in double: AttnRes scores, RMS means).
+
+Kimi K3.1 (text_config.dsa_config): each gated MLA layer attends, for a query
+row t with more than index_topk positions, only the index_topk rows s <= t of
+the highest lightning-indexer score, in f64 here (an independent reading of
+TokenSpeed's KimiK31Indexer, lightseekorg/tokenspeed#3015):
+
+    I(t,s) = d^-0.5 H^-0.5 sum_h w_h(t) relu(q_h(t) . k(s))
+    q = wq_b(RMSNorm'd q latent), k = LayerNorm(wk(x)), w = weights_proj(x)
+
+--dense ignores dsa_config (K3's dense MLA on the same weights).
 """
 import argparse
 import json
@@ -30,8 +40,14 @@ E2M1 = np.array([0, .5, 1, 1.5, 2, 3, 4, 6, -0., -.5, -1, -1.5, -2, -3, -4, -6],
 class Shards:
     def __init__(self, d):
         self.dir = d
-        idx = json.load(open(os.path.join(d, "model.safetensors.index.json")))
-        self.wmap = idx["weight_map"]
+        ip = os.path.join(d, "model.safetensors.index.json")
+        if os.path.exists(ip):
+            self.wmap = json.load(open(ip))["weight_map"]
+        else:   # one model.safetensors (the tiny fixtures)
+            with open(os.path.join(d, "model.safetensors"), "rb") as f:
+                n = struct.unpack("<Q", f.read(8))[0]
+                names = [k for k in json.loads(f.read(n)) if k != "__metadata__"]
+            self.wmap = {k: "model.safetensors" for k in names}
         self.hdrs = {}
 
     def _hdr(self, fn):
@@ -106,8 +122,15 @@ def res_mix(prefix, bres, sw, eps):
     return out
 
 
+def layernorm(x, w, b, eps=1e-6):
+    x64 = x.astype(np.float64)
+    mu = x64.mean(-1, keepdims=True)
+    var = ((x64 - mu) ** 2).mean(-1, keepdims=True)
+    return ((x64 - mu) / np.sqrt(var + eps) * w + b).astype(np.float32)
+
+
 class K3Ref:
-    def __init__(self, hf_dir, n_layers):
+    def __init__(self, hf_dir, n_layers, dense=False):
         self.S = Shards(hf_dir)
         cfg = json.load(open(os.path.join(hf_dir, "config.json")))
         tc = cfg.get("text_config", cfg)
@@ -124,6 +147,9 @@ class K3Ref:
         self.lb = la["gate_lower_bound"]
         self.conv_k = la["short_conv_kernel_size"]
         self.n_layers = n_layers
+        dsa = None if dense else tc.get("dsa_config")
+        self.dsa_layers = set(x - 1 for x in dsa["dsa_layers"]) if dsa else set()
+        self.dsa = dsa
         self.pfx = "language_model." if any(
             k.startswith("language_model.") for k in list(self.S.wmap)[:5]) else ""
 
@@ -196,6 +222,8 @@ class K3Ref:
         sc = (np.einsum("thd,shd->hts", q[..., :nope], k_pass) +
               np.einsum("thd,sd->hts", q[..., nope:], k_rot)) * scale
         mask = np.tril(np.ones((T, T), dtype=bool))
+        if li in self.dsa_layers:
+            mask = mask & self.dsa_mask(li, x, qa)
         sc = np.where(mask[None], sc, -np.inf)
         sc = sc - sc.max(-1, keepdims=True)
         w = np.exp(sc)
@@ -204,6 +232,28 @@ class K3Ref:
         g = sigmoid(x @ self.t(p + "g_proj.weight").T)
         ctx = ctx.reshape(T, H * vh) * g
         return ctx @ self.t(p + "o_proj.weight").T
+
+    def dsa_mask(self, li, x, qa):
+        """[T,T] bool: the rows each query row attends (index_topk of the
+        highest scores, ties to the lower row; every row up to index_topk)"""
+        p = f"model.layers.{li}.self_attn.indexer."
+        H, d, K = (self.dsa["index_num_heads"], self.dsa["index_head_dim"],
+                   self.dsa["index_topk"])
+        T = x.shape[0]
+        q = (qa.astype(np.float64) @ self.t(p + "wq_b.weight").T.astype(np.float64)).reshape(T, H, d)
+        k = layernorm(x @ self.t(p + "wk.weight").T, self.t(p + "k_norm.weight"),
+                      self.t(p + "k_norm.bias")).astype(np.float64)
+        w = x.astype(np.float64) @ self.t(p + "weights_proj.weight").T.astype(np.float64)
+        dots = np.maximum(np.einsum("thd,sd->ths", q, k), 0.0)     # [T,H,T]
+        score = np.einsum("th,ths->ts", w, dots) * (d ** -0.5) * (H ** -0.5)
+        sel = np.zeros((T, T), dtype=bool)
+        for t in range(T):
+            if t + 1 <= K:
+                sel[t, :t + 1] = True
+            else:
+                order = np.argsort(-score[t, :t + 1], kind="stable")[:K]
+                sel[t, order] = True
+        return sel
 
     def moe(self, li, x):
         p = f"model.layers.{li}.block_sparse_moe."
@@ -307,6 +357,8 @@ def main():
     r.add_argument("--x0", required=True)
     r.add_argument("--layers", type=int, default=4)
     r.add_argument("--out", required=True)
+    r.add_argument("--dense", action="store_true",
+                   help="ignore dsa_config: dense MLA on every layer")
     c = sub.add_parser("cmp")
     c.add_argument("a")
     c.add_argument("b")
@@ -319,8 +371,10 @@ def main():
         x.tofile(a.out)
         print(f"wrote {a.out}: {a.tokens}x{a.dim}")
     elif a.cmd == "run":
-        x0 = np.fromfile(a.x0, dtype=np.float32).reshape(-1, 7168)
-        K3Ref(a.hf_dir, a.layers).run(x0, a.out)
+        cfg = json.load(open(os.path.join(a.hf_dir, "config.json")))
+        dim = cfg.get("text_config", cfg)["hidden_size"]
+        x0 = np.fromfile(a.x0, dtype=np.float32).reshape(-1, dim)
+        K3Ref(a.hf_dir, a.layers, dense=a.dense).run(x0, a.out)
     else:
         A = np.fromfile(a.a, dtype=np.float32).reshape(-1, a.layers, a.dim)
         B = np.fromfile(a.b, dtype=np.float32).reshape(-1, a.layers, a.dim)

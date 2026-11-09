@@ -1,0 +1,188 @@
+name: Kimi K3.1 Pro install (Windows, RTX 4090)
+
+# Builds Kimi K3.1 Pro's engine for the RTX 4090 install in deploy/kimi-k31 on a Windows runner
+# (the toolchains of ci.yml's windows-cuda-build: windows-2022, MSVC, CUDA 12.8.1, and MinGW-w64
+# built against msvcrt rather than MSYS2's ucrt64 gcc -- see the C runtime step):
+#   coli_cuda_k3.dll  c\build_k3_cuda.bat (nvcc + MSVC), CUDA_ARCH sm_89 by default
+#   kimi_k3.exe       make kimi_k3.exe CUDA_DLL=1 VK=0 ARCH=<cpu>, znver4 (Ryzen 7000/9000) by default
+# The runners have no GPU and no AVX-512: the checks run on the CPU, on an x86-64-v3 build of
+# the same source (the tiny K3 model against Moonshot's reference, the tiny K3.1 model against
+# the numpy DSA reference, the indexer's unit test). The GPU's own test of the masked attention
+# (tests\test_k3_cuda_experts.exe --dsa) needs a card: deploy\kimi-k31\build-windows.ps1 runs it.
+# The install (deploy/kimi-k31's with the new kimi_k3.exe and coli_cuda_k3.dll) is uploaded as
+# an artifact; a manual run with publish ticked also publishes it as a release.
+
+on:
+  push:
+    branches: [claude/kimi-k31-dsa]
+    paths:
+      - c/kimi_k3.c
+      - c/Makefile
+      - c/backend_cuda_k3.cu
+      - c/backend_cuda_k3.h
+      - c/backend_cuda_k3_dsa.cuh
+      - c/tools/check_k3_dsa_kernels.cpp
+      - c/backend_cuda_k3_loader.c
+      - c/tests/test_k3_dsa.c
+      - c/tests/test_kimi_k31_dsa.py
+      - c/tools/k3_ref.py
+      - c/tools/make_kimi_k3_tiny.py
+      - deploy/kimi-k31/**
+      - .github/workflows/kimi-k31-windows.yml
+  workflow_dispatch:
+    inputs:
+      cpu:
+        description: 'gcc -march of kimi_k3.exe (znver4: Ryzen 7000/9000; x86-64-v4: AVX-512; x86-64-v3: any AVX2 CPU)'
+        default: znver4
+      cuda_arch:
+        description: 'GPU architecture of coli_cuda_k3.dll (sm_89: RTX 40; sm_120: RTX 50; sm_86: RTX 30)'
+        default: sm_89
+      publish:
+        description: 'publish the install as a GitHub release'
+        type: boolean
+        default: false
+      tag:
+        description: 'the release tag'
+        default: kimi-k31-pro-4090-r1
+
+permissions:
+  contents: read
+
+env:
+  BUNDLE: colibri-kimi-k31-pro-4090-r1-windows-x86_64
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      CPU: ${{ inputs.cpu || 'znver4' }}
+      CUDA_ARCH: ${{ inputs.cuda_arch || 'sm_89' }}
+      MINGW: C:/winlibs-msvcrt
+    steps:
+      - uses: actions/checkout@v4
+      - name: MSVC environment (cl.exe for nvcc)
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+      - name: Install CUDA toolkit
+        uses: Jimver/cuda-toolkit@b8bf9c6c28f8a92fbb04dcfcaee872e60c57462d # v0.2.36
+        with:
+          cuda: '12.8.1'
+          method: network
+          sub-packages: '["nvcc", "cudart"]'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: numpy (the tiny models' generator and K3.1's reference)
+        run: python -m pip install -r c/tools/requirements-kimi-k3-tiny.txt
+      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        with:
+          msystem: UCRT64
+          update: false
+          path-type: inherit
+          install: >-
+            make
+      - name: MinGW-w64 GCC against msvcrt (a UCRT one cannot use the card)
+        shell: pwsh
+        run: |
+          # coli_cuda_k3.dll's tables hold MinGW's exp_f and tanhf bits. Against the UCRT the
+          # engine computes those two with different ones and refuses to hand the card anything:
+          # a prompt step's routed experts, its gated MLA and KDA layers and its index picks all
+          # stay on the CPU. MSYS2's ucrt64 gcc therefore builds a ten-times-slower engine, so
+          # the release's kimi_k3.exe is built with an msvcrt MinGW-w64 and checked here.
+          $ErrorActionPreference = 'Stop'
+          $tag = '16.2.0posix-23.1.3-14.0.0-msvcrt-r3'
+          $asset = 'winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64msvcrt-14.0.0-r3'
+          $url = "https://github.com/brechtsanders/winlibs_mingw/releases/download/$tag/$asset.7z"
+          $archive = Join-Path $env:RUNNER_TEMP 'winlibs-msvcrt.7z'
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $want = ((Invoke-WebRequest -Uri "$url.sha256").Content -split '\s+')[0].ToLower()
+          $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLower()
+          if ($want -ne $got) { throw "${asset}: sha256 $got, the release says $want" }
+          $dst = $env:MINGW -replace '/', '\'
+          & 7z x "-o$dst" $archive | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "unpacking $asset failed (exit $LASTEXITCODE)" }
+          $gcc = Join-Path $env:MINGW 'bin/gcc.exe'
+          (& $gcc --version)[0]
+          if ((& $gcc -dM -E -x c NUL) -match '#define _UCRT') { throw "$asset is a UCRT build after all" }
+      - name: coli_cuda_k3.dll (nvcc + MSVC)
+        shell: cmd
+        run: |
+          cd c
+          call build_k3_cuda.bat
+          if errorlevel 1 exit /b 1
+          if not exist coli_cuda_k3.dll (echo no coli_cuda_k3.dll & exit /b 1)
+          dir coli_cuda_k3.dll
+      - name: The checks on the CPU (an x86-64-v3 build of the same source)
+        shell: msys2 {0}
+        run: |
+          export PATH="$(cygpath -u "$MINGW")/bin:$PATH"
+          gcc -dM -E -x c /dev/null | grep -q '#define _UCRT' && {
+            echo 'gcc here targets the UCRT: this engine would keep a prompt step on the CPU' >&2; exit 1; }
+          gcc --version | head -1
+          cd c
+          make kimi_k3.exe tests/test_k3_dsa.exe CUDA_DLL=1 VK=0 ARCH=x86-64-v3
+          ./tests/test_k3_dsa.exe
+          make tools/check_k3_dsa_kernels.exe && ./tools/check_k3_dsa_kernels.exe
+          python tools/make_kimi_k3_tiny.py --output ./kimi_k3_tiny --force
+          python tools/make_kimi_k3_tiny.py --output ./kimi_k31_tiny --force --dsa
+          python tests/test_kimi_k3_tiny.py --binary ./kimi_k3.exe --fixture ./kimi_k3_tiny
+          python tests/test_kimi_k31_dsa.py --binary ./kimi_k3.exe --fixture ./kimi_k31_tiny --k3-fixture ./kimi_k3_tiny
+      - name: kimi_k3.exe for the target CPU
+        shell: msys2 {0}
+        run: |
+          export PATH="$(cygpath -u "$MINGW")/bin:$PATH"
+          cd c
+          rm -f kimi_k3.exe
+          make kimi_k3.exe CUDA_DLL=1 VK=0 ARCH="$CPU"
+          strings kimi_k3.exe | grep -q dsa_config || { echo "kimi_k3.exe does not read dsa_config" >&2; exit 1; }
+          ls -l kimi_k3.exe coli_cuda_k3.dll
+      - name: The install
+        shell: msys2 {0}
+        run: |
+          export PATH="$(cygpath -u "$MINGW")/bin:$PATH"
+          mkdir -p dist
+          cp -r "deploy/kimi-k31/$BUNDLE" dist/
+          cp c/kimi_k3.exe c/coli_cuda_k3.dll "dist/$BUNDLE/"
+          cp deploy/kimi-k31/build-windows.ps1 deploy/kimi-k31/build-windows.cmd "dist/$BUNDLE/"
+          {
+            echo "Kimi K3.1 Pro's engine, built by GitHub Actions run $GITHUB_RUN_ID ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+            echo "commit: $GITHUB_SHA (branch $GITHUB_REF_NAME)"
+            echo "kimi_k3.exe: make kimi_k3.exe CUDA_DLL=1 VK=0 ARCH=$CPU on the msvcrt C runtime, which coli_cuda_k3.dll's exp_f and tanhf tables match ($(gcc --version | head -1))"
+            echo "coli_cuda_k3.dll: c\\build_k3_cuda.bat, CUDA 12.8.1, CUDA_ARCH=$CUDA_ARCH"
+            echo "coli_cuda.dll and the other engines: release kimi-k3-4090-r1's (unchanged by K3.1)"
+            echo "checks on the runner's CPU (x86-64-v3 build): test_k3_dsa, test_kimi_k3_tiny, test_kimi_k31_dsa"
+            echo "not run here (no GPU): tests\\test_k3_cuda_experts.exe --dsa; build-windows.ps1 runs it on the card"
+            echo
+            (cd "dist/$BUNDLE" && sha256sum kimi_k3.exe coli_cuda_k3.dll coli_cuda.dll)
+          } > "dist/$BUNDLE/BUILD-INFO-K31.txt"
+          cat "dist/$BUNDLE/BUILD-INFO-K31.txt"
+          cd dist && 7z a "$BUNDLE.zip" "$BUNDLE" > /dev/null && ls -l "$BUNDLE.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BUNDLE }}
+          path: dist/${{ env.BUNDLE }}.zip
+          retention-days: 30
+
+  publish:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.BUNDLE }}
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          {
+            echo "Kimi K3.1 Pro and MiMo-V2.6-Pro on one RTX 4090 + 192 GB RAM + two NVMe drives, Windows x64: release kimi-k3-4090-r1's install with Kimi K3.1's engine (a DSA lightning indexer on every MLA layer). Weights are not included: tools\\download_kimi_k31_pro_4090.ps1 (moonshotai/Kimi-K3.1-Pro), then START-KIMI-K31-PRO.cmd (API model kimi-k3.1-pro). Details: README-KIMI-K31-PRO-4090.md, docs/kimi_k3.md (Kimi K3.1)."
+            echo
+            echo "Built by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID from $GITHUB_SHA; BUILD-INFO-K31.txt inside has the SHA-256 of the new binaries."
+          } > notes.md
+          gh release create "$TAG" "$BUNDLE.zip" --target "$GITHUB_SHA" \
+            --title "Kimi K3.1 Pro and MiMo-V2.6-Pro on an RTX 4090 — the whole install ($TAG)" --notes-file notes.md

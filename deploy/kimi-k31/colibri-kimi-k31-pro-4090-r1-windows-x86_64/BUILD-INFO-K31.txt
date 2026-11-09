@@ -1,0 +1,37 @@
+Kimi K3.1 Pro's engine, built 2026-11-08 08:18 on TAICHI
+commit: 30dbe151 plus an over-long conversation answered instead of fatal, and the load's quantization in finer row chunks
+kimi_k3.exe: mingw32-make -C c kimi_k3 CUDA_DLL=1 ARCH=native VK=0 on the msvcrt C runtime (gcc.exe (MinGW-W64 x86_64-msvcrt-posix-seh, built by Brecht Sanders, r3) 16.2.0)
+ARCH=native is AMD Ryzen 9 7950X3D 16-Core Processor: rebuild with ARCH=znver4 / x86-64-v3 before moving the binaries to another box
+coli_cuda_k3.dll: unchanged from the previous bundle (nothing here touches a kernel)
+coli_cuda.dll: release kimi-k3-4090-r1's (unchanged by K3.1)
+what changed:
+  1. A conversation longer than the context no longer stops the engine. The framed
+     conversation was built in a buffer of 65,536 tokens whatever -Context said, and the
+     builder that met the end of it printed "chat prompt too long" and called exit(1);
+     the gateway started the engine again (62s of weights and pins), the client resent the
+     same conversation, and it died again. That is this report's restart 3, restart 4, at
+     the ~63.5k-token conversation of a -Context 262144 serve. The buffer now takes its
+     size from K3_MAXT (+4096 of XTML framing) and an over-long one is answered
+     CONTEXT_EXCEEDED, which the API returns as a 400 the client may compact.
+  2. The load's quantization works on chunks of 128 rows instead of 1,024 (QCHUNK). A
+     chunk is one worker's, so a [7168,7168] matrix fed 7 of a 28-thread team: the load
+     took 44.5s for 89 layers (1.4 GB/s of BF16) in the same run whose [PIN] line moves
+     53.3 GB at 4.8 GB/s over the same two drives with one reader at a time. Rows
+     quantize alone -- int8 per row, int4 per 64-column group of one row -- so the chunk's
+     size cannot change a byte of what lands in RAM, only who carries it.
+  3. K3_LOAD_PARALLEL: the dense weights of several layers read at once, where that is
+     what the load waits for. 4 for a prepared U8/GGUF container, whose matrices are one
+     straight read each on the load loop's single thread; 1 for a BF16 checkpoint like
+     this profile's, which quantizes inside that loop and wants every core for it.
+     K3_MMAP=1 forces 1. Nothing here is measured on K3.1 Pro: the box is serving another
+     model, so this build was compiled (clean under -Wall -Wextra) and read, not run.
+     What to look for on the next start: "[K3] loaded layer N/93" reaching 89 in well
+     under the 44.5s of the log this fixes, and a conversation past -Context answered
+     400 context_length_exceeded with the engine still up (no "[gateway] the engine
+     stopped", no restart line).
+checks: none run on this build. The previous bundle's notes stand for what was tested
+        then; see README-KIMI-K31-PRO-4090.md for what each claim was measured against.
+
+e70764fe59d3bca4b20b82517ebfca45b6b0b5bcf0352158b6119bf5d322c43f  kimi_k3.exe
+2f9aa968e22e16c855dc21d08e526e4678accf9976d08f133948a782b30a8a61  coli_cuda_k3.dll
+0ae7268206e60c340c3b9faf3675a1d727580565ebd8fc69b187a4b48d3cccbc  coli_cuda.dll

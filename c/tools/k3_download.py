@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Download Kimi K3 from Hugging Face and lay it out over several drives.
 
+Kimi K3.1 Pro (--repo moonshotai/Kimi-K3.1-Pro, tools/download_kimi_k31_pro_4090.ps1)
+keeps K3's one-layer-a-shard checkpoint and adds a small DSA indexer to each MLA
+layer's shard, so everything below holds for it too. Each repository needs its own
+folders: k3_layout.json records the repo, and a folder of another one is refused.
+
 kimi_k3 reads each token's 16 routed experts of every MoE layer from the disks:
 about 25.8 GB a token on the full model, so the drives' read speed is the decode
 speed. The checkpoint keeps one layer per shard (model-000NN-of-000096 holds layer
@@ -607,6 +612,10 @@ class Downloader:
 
     def run(self):
         args = self.args
+        known_repo = self.layout.data.get("repo")
+        if known_repo and known_repo != self.repo:
+            raise Fail(f"{self.first} holds {known_repo} ({LAYOUT}), not {self.repo}; "
+                       "give this model its own --drive folders")
         known = self.layout.data.get("drives")
         if known and [k["path"] for k in known] != self.drives:
             raise Fail(f"{LAYOUT} was made for {[k['path'] for k in known]}; give the same --drive "

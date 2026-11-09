@@ -27,6 +27,12 @@ Two engine contracts the emission must honour byte-for-byte:
     load-bearing (w1 packed, w1 scale, w2 packed, w2 scale, w3 packed,
     w3 scale) and the safetensors writer must preserve insertion order.
 
+--dsa writes the Kimi K3.1 variant instead (tests/test_kimi_k31_dsa.py): the
+same weights, plus a DSA lightning indexer on every gated MLA layer drawn from a
+second stream (DSA_SEED), so up to DSA_TOPK positions the two fixtures compute
+the same model; the config nests the text model under text_config with its
+dsa_config, as moonshotai/Kimi-K3.1-Pro's config.json does.
+
 No tokenizer.json is written on purpose: without one the engine prints raw
 generated token ids on stdout, which is exactly what the token-exact test
 wants to parse.
@@ -131,6 +137,52 @@ CONFIG = {
     "bos_token_id": 0,
     "eos_token_id": EOS_ID,
 }
+
+# Kimi K3.1: a DSA lightning indexer on every gated MLA layer (dsa_config), its
+# own weights from DSA_SEED so the rest of the fixture is K3's byte for byte.
+DSA_SEED = 20261104
+DSA_HEADS = 4
+DSA_HD = 16
+DSA_TOPK = 16
+DSA_CONFIG = {
+    "dsa_layers": [x for x in range(1, LAYERS + 1) if x not in KDA_LAYERS],
+    "index_topk": DSA_TOPK,
+    "index_head_dim": DSA_HD,
+    "index_num_heads": DSA_HEADS,
+    "index_rope_dim": 0,
+    "index_k_norm_type": "layernorm",
+    "index_topk_freq": 1,
+    "index_skip_topk_offset": 1,
+}
+
+
+def k31_config():
+    """K3.1's layout: the K3 text config under text_config, with dsa_config."""
+    text = dict(CONFIG, dsa_config=DSA_CONFIG)
+    return {
+        "architectures": ["KimiK31ForConditionalGeneration"],
+        "model_type": "kimi_k31",
+        "text_config": text,
+        "bos_token_id": CONFIG["bos_token_id"],
+        "eos_token_id": CONFIG["eos_token_id"],
+    }
+
+
+def indexer_tensors(rng):
+    """The indexer of every MLA layer: wq_b [H*d, q_lora], wk [d, hidden],
+    weights_proj [H, hidden], k_norm weight and bias [d]."""
+    out = {}
+    for i in range(LAYERS):
+        if (i + 1) in KDA_LAYERS:
+            continue
+        a = f"model.layers.{i}.self_attn.indexer."
+        out[a + "wq_b.weight"] = (rng.standard_normal((DSA_HEADS * DSA_HD, Q_RANK)) * 0.3).astype(np.float32)
+        out[a + "wk.weight"] = (rng.standard_normal((DSA_HD, HIDDEN)) * 0.1).astype(np.float32)
+        out[a + "weights_proj.weight"] = (rng.standard_normal((DSA_HEADS, HIDDEN)) * 0.1).astype(np.float32)
+        out[a + "k_norm.weight"] = (1.0 + rng.standard_normal(DSA_HD) * 0.1).astype(np.float32)
+        out[a + "k_norm.bias"] = (rng.standard_normal(DSA_HD) * 0.1).astype(np.float32)
+    return out
+
 
 ST_DTYPE = {np.dtype("float32"): "F32", np.dtype("uint8"): "U8"}
 
@@ -275,6 +327,8 @@ def main():
     parser.add_argument("--output", default="./kimi_k3_tiny")
     parser.add_argument("--force", action="store_true",
                         help="overwrite an existing model.safetensors")
+    parser.add_argument("--dsa", action="store_true",
+                        help="the Kimi K3.1 variant: a DSA indexer on every MLA layer")
     args = parser.parse_args()
 
     out = Path(args.output)
@@ -287,8 +341,12 @@ def main():
 
     rng = np.random.default_rng(SEED)
     tensors = build_tensors(rng)
+    config = CONFIG
+    if args.dsa:
+        tensors.update(indexer_tensors(np.random.default_rng(DSA_SEED)))
+        config = k31_config()
     write_safetensors(model_path, tensors)
-    (out / "config.json").write_text(json.dumps(CONFIG, indent=2) + "\n")
+    (out / "config.json").write_text(json.dumps(config, indent=2) + "\n")
 
     total = sum(a.nbytes for a in tensors.values())
     print(f"{out}: {len(tensors)} tensors, {total / 1e6:.1f} MB, "
