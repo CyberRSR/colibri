@@ -9,14 +9,15 @@ row attends only the 2,048 earlier rows its layer's indexer scores highest. Ever
 format) is K3's. Sources: the model card and TokenSpeed's implementation,
 [lightseekorg/tokenspeed#3015](https://github.com/lightseekorg/tokenspeed/pull/3015).
 
-**The engine must be rebuilt.** Release kimi-k3-4090-r1's `kimi_k3.exe` does not read
-`dsa_config`: it would run every MLA layer dense, which is K3.1's attention up to 2,048
-positions and another one past them. The K3.1 engine (branch `claude/kimi-k31-dsa`:
-`c/kimi_k3.c`, `c/backend_cuda_k3.cu`) is built and put into this folder by
-`..\build-windows.ps1` (MinGW-w64 GCC, the CUDA toolkit, Visual Studio 2022's C++ tools; it
-also runs the tiny models' checks and the GPU's bit-for-bit test of the masked attention),
-and `START-KIMI-K31-PRO.cmd` refuses a `kimi_k3.exe` that predates `dsa_config`. What the
-engine does and how it was checked: `docs/kimi_k3.md`, section "Kimi K3.1".
+**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r2: `kimi_k3.exe` and
+`coli_cuda_k3.dll` here were built on the RTX 4090 machine and checked there on the model
+itself (BUILD-INFO-K31.txt: the commit, the toolchain, the checks). Release kimi-k3-4090-r1's
+`kimi_k3.exe` does not read `dsa_config`: it would run every MLA layer dense, which is K3.1's
+attention up to 2,048 positions and another one past them, and `START-KIMI-K31-PRO.cmd`
+refuses such a `kimi_k3.exe`. `..\build-windows.ps1` builds the pair again from a checkout
+(MinGW-w64 GCC built against msvcrt, the CUDA toolkit, Visual Studio 2022's C++ tools; it
+also runs the tiny models' checks and the GPU's bit-for-bit tests). What the engine does and
+how it was checked: `docs/kimi_k3.md`, section "Kimi K3.1".
 
 | | Kimi K3 (kimi-k3-4090-r1) | Kimi K3.1 Pro (this install) |
 |---|---|---|
@@ -39,16 +40,60 @@ by side; delete K3's folders first if the drives cannot hold both). `-Repo` and
 `-Revision` pick another repository or pin a commit. The tokenizer is built from the
 repository's `tiktoken.model` as for K3 (`tools\k3_tokenizer.py`, run by the download).
 
-Everything below is the K3 install's account, measured on Kimi K3. For K3.1 Pro the
-experts, the drives' shares and the prompt's expert reads are the same; up to 2,048
-positions the attention costs the same too (plus one 128 x 7168 matrix a row and a layer
-for the index keys). Past 2,048 positions each row and layer adds the indexer's scores
-(4,096 multiply-adds a position, on the CPU) and attends 2,048 rows instead of all of them;
-the index keys take 12 KB a position beside the MLA caches' 55 KB (`-Context 131072`: 8.8
-GB at the end of a full-length conversation, a few hundred MB while it starts -- the caches
-grow, see **RAM follows the conversation** below). The expert cache's hit rate depends on the
-router's new weights and may move a little.
-None of this has been measured on the real model yet.
+## Measured on Kimi K3.1 Pro (2026-11-10)
+
+[docs/experiments/kimi-k31-4090-2026-11-10](https://github.com/CyberRSR/colibri/tree/main/docs/experiments/kimi-k31-4090-2026-11-10),
+the launcher's settings, each run a fresh start:
+
+| | |
+|---|---:|
+| the start: the engine ready (the dense matrices from `k3_dense_cache.bin`) | **9.7 s** (the first start writes the file: 48 s; with `-NoDenseCache` 28 s every time) |
+| the API answering after `START-KIMI-K31-PRO.cmd` | 11 s |
+| a 35-token question, to the first token | 28-29 s (311 GB of experts read) |
+| a 5,862-token prompt | 110 s (one step, at the drives' pace) |
+| a 16,511-token prompt | **221 s** (one step; 375 s in release r1's steps of 8,192) |
+| a follow-up of 90 tokens on a 16,600-token conversation | 28 s to the first token |
+| the same request again (a regenerated reply, a retry) | **0.27 s** to the first token (27 s before) |
+| decode | 0.85-0.91 tok/s at a short context (the machine's own drift over a day), 0.73-0.80 right after a long prompt |
+
+The logits of the 5,862-token prompt are the same bytes at every position with this profile
+-- the routed experts, the KDA and MLA layers and the index picks on the card -- as with no
+GPU path at all (1,861 s on the CPU), three runs out of three and with `K3_CHECK=1`; those of
+the 16,511-token prompt are the same in one step as in steps of 8,192, and under
+`-RamGB 110`.
+
+What this release changed since r1's K3.1 pair (all of it keeps the bytes):
+
+- **The start.** The load ran on one core (138 s): a parallel region asked for one thread
+  around the layer loop made every matrix's quantization a team of one. Now 28 s, and 9.7 s
+  from the second start on: the quantized dense matrices are kept in
+  `<model folder>\k3_dense_cache.bin` (33.9 GB, `K3_DENSE_CACHE`), checked against the
+  checkpoint and written again when either changed. `-NoDenseCache` turns it off,
+  `-DenseCache <path>` puts it elsewhere.
+- **A long prompt.** A row past 2,048 positions is computed over the list of its 2,048 picks
+  on the card (`k3cu_mla_sel`), where r1 computed it against every position and weighed the
+  rest 0: the attention of a 16,511-token prompt 40.9 -> 9.6 s, and no longer growing with
+  the square of the context. A prompt's steps are of one size and none is short (127 rows
+  left after two steps of 8,192 cost 77 s on their own), and the launcher's step is 16,384
+  rows: a prompt up to 18,432 tokens is one pass over the drives.
+- **RAM.** The expert cache lends slots to the conversation's rows and to a large step's
+  activations and gets a step's back (`K3_LEND`): the process stays under `-RamGB` at any
+  length of conversation (r1 freed experts' bytes once and read them back), and decode has
+  the 10 GB that r1 kept aside for a prompt step it was not running.
+- **No pins from the history** (`-Pins` to have them): on this model they cost decode 8%
+  (0.78 against 0.85 tok/s) and 7 s of every start, for 5.7% of a prompt's experts found
+  among them.
+- **The same request again** is restored from the photo of its prompt's end, which now keeps
+  the logits its first token is sampled from.
+
+---
+
+Everything below is the K3 install's account, measured on Kimi K3: the experts, the drives'
+shares and a prompt's expert reads are the same for K3.1 Pro, and up to 2,048 positions so
+is the attention (plus one 128 x 7168 matrix a row and a layer for the index keys). The index
+keys take 12 KB a position beside the MLA caches' 55 KB (`-Context 131072`: 8.8 GB at the end
+of a full-length conversation, a few hundred MB while it starts -- the caches grow, see
+**RAM follows the conversation** below).
 
 ---
 
@@ -159,13 +204,15 @@ prompt step's experts, its other dense matrices, its KDA layers, its MLA attenti
 on the GPU too, in the CPU's arithmetic to the bit (`K3_GPU_EXPERTS`, `coli_cuda_k3.dll`; a 20 GB
 pool reads the next layer's experts ahead), gives the process 174 GB of RAM (the expert
 cache takes what the rest leaves), a 131,072-token context the caches grow into as the
-conversation does (the MLA caches: 55 KB a token, plus K3.1's 12 KB of index keys)
-and 8,192-token prompt steps (each expert a step needs is read once for all of them; 1.4 MB
-of RAM a token of the step past 512: decode 0.81 -> 0.80 tokens a second against steps of
-4,096, a 5,862-token prompt 254 -> 200 s; `-Chunk` takes up to 16,384). `-CpuExperts` keeps a prompt on the CPU;
+conversation does (the MLA caches: 55 KB a token, plus K3.1's 12 KB of index keys),
+prompt steps of up to 16,384 tokens (`-Chunk`; a prompt's steps are of one size, up to an
+eighth more in one step; a step's 1.4 MB of RAM a token past 512 is borrowed from the expert
+cache while it runs), the quantized dense matrices from `k3_dense_cache.bin`
+(`-NoDenseCache`, `-DenseCache <path>`) and no pins from the history (`-Pins`).
+`-CpuExperts` keeps a prompt on the CPU;
 `-Cpu` keeps the dense matrices on the CPU;
 `-DenseGB 21.5 -ReserveGB 1` puts 35 more on the GPU (0.78 -> 0.81 tokens a second
-measured) and leaves about 0.6 GiB of VRAM to other programs: past what is free, Windows
+measured on K3) and leaves about 0.6 GiB of VRAM to other programs: past what is free, Windows
 moves GPU memory to RAM without an error and every call slows down.
 
 **RAM follows the conversation.** The caches used to be allocated whole at the first request:
@@ -175,6 +222,30 @@ they grow with the conversation (on by default): the plan projects 4,096 positio
 (`K3_KV_MIN`), the rest of those 8.8 GB goes to experts while the session is idle, a request
 allocates its prompt's positions plus 1,024 of the answer's (`K3_KV_GEN`) and doubles as it
 writes them, and each grow says what the caches hold now:
+
+    [K3] KV: 642 of the 131072 positions this context may reach (0.04 GB, was 214)
+
+What the caches hold past the plan is lent by the expert cache: that many slots are retired,
+the coldest of every layer in turn -- their bytes freed and nothing read into them again -- and
+the line says which:
+
+    [K3][RAM] the conversation's caches hold 1.19 GB, 0.91 GB past the plan's: the expert
+    cache lends 52 slots for them (52 more, 0.00 GB of experts out; 84-85 slots a layer now)
+
+A large prompt step borrows its activations the same way and gives them back at its end:
+
+    [K3][RAM] a step of 16511 rows borrows 22.4 GB for its activations: the expert cache lends
+    1276 slots until it ends (0.0 GB of experts out; 70-71 slots a layer meanwhile)
+
+So the process stays under `-RamGB` at any length of conversation (measured with
+`-RamGB 110`: the cache down to its floor of 32 slots a layer under a 16,511-row step, the
+process at 105.6 GB, the same logits), and a conversation that really runs to 131k ends
+holding its 8.8 GB out of the expert cache; the hit rate then drops the way it does with a
+smaller cache. `K3_KV_GROW=0` and `K3_LEND=0` return the old behaviours, and a muxed serve
+(`KV_SLOTS` above 1) keeps them. What it changes is only where the RAM is: the answers are the
+bytes the whole-cache engine returns -- checked on the tiny fixtures
+(`tests/kimi_k3_lend_harness.py`, `K3_CHECK=1` finding every expert the engine kept where it
+left it) and on the model (above).
 
     [K3] KV: 642 of the 131072 positions this context may reach (0.04 GB, was 214)
 

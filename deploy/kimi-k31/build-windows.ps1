@@ -22,7 +22,7 @@ param(
     # The colibri checkout (this script's ..\..)
     [string]$Repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     # The install the binaries go into
-    [string]$Bundle = (Join-Path $PSScriptRoot 'colibri-kimi-k31-pro-4090-r1-windows-x86_64'),
+    [string]$Bundle = (Join-Path $PSScriptRoot 'colibri-kimi-k31-pro-4090-r2-windows-x86_64'),
     # The GPU's architecture: sm_89 = RTX 40xx, sm_120 = RTX 50xx, sm_86 = RTX 30xx
     [string]$CudaArch = 'sm_89',
     # Rebuild coli_cuda.dll too
@@ -118,6 +118,12 @@ try {
                 & $python tests/test_kimi_k3_tiny.py --binary ./kimi_k3.exe --fixture ./kimi_k3_tiny }
             Run 'the tiny K3.1 model against the numpy DSA reference' {
                 & $python tests/test_kimi_k31_dsa.py --binary ./kimi_k3.exe --fixture ./kimi_k31_tiny --k3-fixture ./kimi_k3_tiny }
+            Run 'the expert cache lending its slots (the caches grown, a large step): the same logits' {
+                & $python tests/kimi_k3_lend_harness.py --binary ./kimi_k3.exe --fixture ./kimi_k31_tiny }
+            Run 'the dense cache written, read, stale and damaged: the same logits' {
+                & $python tests/kimi_k3_dense_cache_harness.py --binary ./kimi_k3.exe --fixture ./kimi_k31_tiny }
+            Run 'the photos: divergent turns, and a request sent again' {
+                & $python tests/test_kimi_k3_ckpt.py --binary ./kimi_k3.exe --fixture ./kimi_k31_tiny }
         }
         Run 'tests\test_k3_cuda_experts.exe (build)' { & $make tests/test_k3_cuda_experts.exe @flags }
         Run 'coli_cuda_k3.dll against the CPU, K3.1''s masked attention' { & .\tests\test_k3_cuda_experts.exe --dsa }
