@@ -149,9 +149,14 @@ static int check_dense(int fmt, int S, int I, int O, int gs){
  *    sigmoidf_): every output the same bytes. K > 0: Kimi K3.1's sparse rows, k3cu_mla_mask
  *    against the loop over each row's K picked positions (k3_dsa_pick of random scores; a row
  *    with no more than K positions attends all of them). */
-static int check_mla_k(int H, int qn, int qr, int vh, int kvl, int pos0, int C, int K);
-static int check_mla(int H, int qn, int qr, int vh, int kvl, int pos0, int C){ return check_mla_k(H, qn, qr, vh, kvl, pos0, C, 0); }
+static int check_mla_ks(int H, int qn, int qr, int vh, int kvl, int pos0, int C, int K, int lists);
+static int check_mla(int H, int qn, int qr, int vh, int kvl, int pos0, int C){ return check_mla_ks(H, qn, qr, vh, kvl, pos0, C, 0, 0); }
+/* K3.1's rows: k3cu_mla_mask (every position, the unselected weighing 0), then k3cu_mla_sel (the
+ * selecting rows over their lists), each against the CPU's loop */
 static int check_mla_k(int H, int qn, int qr, int vh, int kvl, int pos0, int C, int K){
+    return check_mla_ks(H, qn, qr, vh, kvl, pos0, C, K, 0) + check_mla_ks(H, qn, qr, vh, kvl, pos0, C, K, 1);
+}
+static int check_mla_ks(int H, int qn, int qr, int vh, int kvl, int pos0, int C, int K, int lists){
     const int N = pos0 + C, qh = qn + qr, O = H * (qn + vh);
     float *Lc = malloc((size_t)N * kvl * sizeof(float)), *Rc = malloc((size_t)N * (qr ? qr : 1) * sizeof(float));
     float *qv = malloc((size_t)C * H * qh * sizeof(float)), *gv = malloc((size_t)C * H * vh * sizeof(float));
@@ -228,7 +233,8 @@ static int check_mla_k(int H, int qn, int qr, int vh, int kvl, int pos0, int C, 
             if(ns[tt] < 0) for(int t = 0; t < pos0 + tt + 1; t++) mrow[t >> 5] |= 1u << (t & 31);
             else for(int j = 0; j < ns[tt]; j++){ const int t = sel[(int64_t)tt * K + j]; mrow[t >> 5] |= 1u << (t & 31); }
         }
-        ok = k3cu_mla_mask(Lc, Rc, N, pos0, C, qv, gv, kvb.q8, kvb.s, H, qn, qr, vh, kvl, scale, mask, mw, cg);
+        ok = lists ? k3cu_mla_sel(Lc, Rc, N, pos0, C, qv, gv, kvb.q8, kvb.s, H, qn, qr, vh, kvl, scale, mask, mw, K, cg)
+                   : k3cu_mla_mask(Lc, Rc, N, pos0, C, qv, gv, kvb.q8, kvb.s, H, qn, qr, vh, kvl, scale, mask, mw, cg);
         free(mask);
     } else
         ok = k3cu_mla(Lc, Rc, N, pos0, C, qv, gv, kvb.q8, kvb.s, H, qn, qr, vh, kvl, scale, cg);
@@ -236,7 +242,8 @@ static int check_mla_k(int H, int qn, int qr, int vh, int kvl, int pos0, int C, 
     for(size_t i = 0; i < (size_t)C * H * vh; i++) if(memcmp(cc + i, cg + i, 4)){ if(first == (size_t)-1) first = i; diff++; }
     if(diff) printf("  output %zu: CPU %a, device %a\n", first, cc[first], cg[first]);
     printf("MLA %d heads (%d+%d, v %d, latent %d), rows %d..%d%s: %s%zu of %zu differ\n", H, qn, qr, vh, kvl,
-           pos0, N - 1, K ? ", K3.1's picks (k3cu_mla_mask)" : "", ok ? "" : "FAILED to run; ", diff, (size_t)C * H * vh);
+           pos0, N - 1, !K ? "" : lists ? ", K3.1's picks over their lists (k3cu_mla_sel)" : ", K3.1's picks (k3cu_mla_mask)",
+           ok ? "" : "FAILED to run; ", diff, (size_t)C * H * vh);
     free(Lc); free(Rc); free(qv); free(gv); free(cc); free(cg); free(kvb.q8); free(kvb.s); free(sel); free(ns);
     return !ok || diff;
 }
@@ -543,7 +550,11 @@ static int mla_dsa(void){
          + check_mla_k(96, 128, 64, 128, 512, 3000, 200, 2048)   /* every row picks 2,048 of 3,001..3,200 */
          + check_mla_k(96, 128, 64, 128, 512, 1900, 300, 2048)   /* rows 0..147 attend all, the rest pick */
          + check_mla_k(8, 16, 8, 16, 32, 10, 60, 16)             /* the tiny K3.1 fixture's shapes */
-         + check_mla_k(8, 16, 8, 16, 32, 50, 600, 16);           /* three chunks, masks of 21 words */
+         + check_mla_k(8, 16, 8, 16, 32, 50, 600, 16)            /* three chunks, masks of 21 words */
+         + check_mla_k(96, 128, 64, 128, 512, 30000, 40, 2048)   /* a long context: lists of 2,048 out of 30,000 */
+         + check_mla_k(96, 128, 64, 128, 512, 2040, 400, 2048)   /* 8 rows attend all, 392 pick: three list chunks */
+         + check_mla_k(8, 16, 8, 16, 32, 0, 300, 20)             /* a K that is no multiple of 8, from position 0 */
+         + check_mla_k(8, 16, 8, 16, 32, 700, 3, 16);            /* three rows */
 }
 int main(int argc, char **argv){
     int all = argc > 1 && !strcmp(argv[1], "--all-floats");

@@ -16,6 +16,10 @@ What is asserted, all deterministic:
   - RESTORE DEPTH: with checkpoints on, the divergent turns restore at
     exactly turn 1's ACCEPT np (the prompt-boundary photo), and the engine
     recomputes prompt_len - np tokens instead of prompt_len.
+  - THE SAME REQUEST AGAIN (a regenerated reply, a retry): turn 3's prompt
+    and then turn 1's, sent once more, restore the photo of their own end
+    and recompute nothing -- that photo keeps the logits the first token is
+    sampled from -- and answer what they answered the first time.
 
 The serve protocol needs a tokenizer, and the base fixture ships none on
 purpose (the oracle test parses raw-id stdout). So this test builds a derived
@@ -100,7 +104,9 @@ def run_session(binary, model, extra_env, stderr_path):
     try:
         results = [serve.submit(PROMPT_BASE, MAX_NEW),
                    serve.submit(PROMPT_BASE + TAIL_A, MAX_NEW),
-                   serve.submit(PROMPT_BASE + TAIL_B, MAX_NEW)]
+                   serve.submit(PROMPT_BASE + TAIL_B, MAX_NEW),
+                   serve.submit(PROMPT_BASE + TAIL_B, MAX_NEW),   # turn 3 again
+                   serve.submit(PROMPT_BASE, MAX_NEW)]            # turn 1 again
     finally:
         serve.close()
     return results, Path(stderr_path).read_text(errors="replace")
@@ -152,7 +158,11 @@ def main():
                 raise AssertionError(
                     f"request {index}: prompt token count differs between "
                     f"modes ({off_result[1]} vs {on_result[1]})")
-        print("ok identity: all 3 requests byte-identical across modes")
+        print(f"ok identity: all {len(on)} requests byte-identical across modes")
+        if on[3][0] != on[2][0] or on[4][0] != on[0][0] or not on[0][0]:
+            raise AssertionError(
+                f"a request sent again answered something else: turn 3 {on[2][0]!r} then "
+                f"{on[3][0]!r}, turn 1 {on[0][0]!r} then {on[4][0]!r}")
 
         # scenario validity: in the baseline the divergent turns really are
         # the case kv-prefix reuse cannot serve
@@ -168,11 +178,21 @@ def main():
                     for pos, total, recompute in re.findall(
                         r"\[K3-CKPT\] restored pos=(\d+) of (\d+) prompt "
                         r"tokens \(recompute (\d+)\)", err_on)]
-        if len(restores) != 2:
+        if len(restores) != 4:
             raise AssertionError(
-                f"expected 2 checkpoint restores (turns 2 and 3), saw "
-                f"{len(restores)}:\n{err_on}")
-        for turn, (pos, total, recompute) in zip((2, 3), restores):
+                f"expected 4 checkpoint restores (turns 2 and 3, then each of turns 3 "
+                f"and 1 again), saw {len(restores)}:\n{err_on}")
+        for turn, (pos, total, recompute) in zip((4, 5), restores[2:]):
+            whole = on[turn - 1][1]
+            if pos != whole or total != whole or recompute != 0:
+                raise AssertionError(
+                    f"turn {turn} (a request sent again): restored pos={pos} of {total} "
+                    f"(recompute {recompute}), expected the whole prompt, {whole}")
+        if err_on.count("nothing to compute") != 2 or "nothing to compute" in err_off:
+            raise AssertionError("the requests sent again were not restored whole:\n" + err_on)
+        print(f"ok again: turns 3 and 1 sent again restore their own end ({restores[2][0]} and "
+              f"{restores[3][0]} tokens), compute nothing and answer the same")
+        for turn, (pos, total, recompute) in zip((2, 3), restores[:2]):
             expect_total = on[turn - 1][1]
             if pos != np1 or total != expect_total or \
                     recompute != expect_total - np1:

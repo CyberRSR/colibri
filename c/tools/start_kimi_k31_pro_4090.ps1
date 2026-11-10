@@ -35,14 +35,14 @@ param(
     [ValidateRange(512,1048576)][int]$Context = 131072,
     # The most tokens a reply may have when a request does not ask for fewer (reasoning included)
     [ValidateRange(256,1048576)][int]$MaxOutput = 32768,
-    # Prompt tokens a prefill step takes at once: each expert a step needs is read once for
-    # all of them (a step of 4,096 or more reads nearly every one, 1.4 TB), so larger steps
-    # read the disks less per prompt token (a 2,637-token prompt 352 s in steps of 2,048, 268 s
-    # in one of 4,096; a 5,862-token one 254 s in steps of 4,096, 200 s in one of 8,192); past
-    # 512 a step's token holds 1.4 MB of RAM, taken from the expert cache (with the read-ahead
-    # pool 84 slots a layer at 512, 81 at 4,096, 78 at 8,192: decode 0.81 -> 0.80 tok/s; about
-    # 71 at 16,384)
-    [ValidateRange(1,16384)][int]$Chunk = 8192,
+    # Prompt tokens a prefill step takes at once. A step reads each expert it needs once for all
+    # its rows, and a few hundred rows already need most of them (1.4 TB at 4,096 rows), so a
+    # prompt costs about one pass over the drives per step: the fewer steps, the better. The
+    # steps of a prompt are of one size and none is short: a prompt up to an eighth longer than
+    # this is one step (18,432 rows), a longer one equal steps. Past 512 rows a step borrows 1.4
+    # MB of RAM a row from the expert cache while it runs and gives it back at its end
+    # (K3_LEND), so the size of a step costs decode nothing.
+    [ValidateRange(1,16384)][int]$Chunk = 16384,
     # A long prompt's read-ahead pool, GB: the next MoE layer's experts read while this one
     # computes (2,637 tokens 170 -> 137 s at 20); its RAM comes out of the expert cache
     # (decode 0.83 -> 0.81 tok/s), 0 gives decode all of it
@@ -53,6 +53,19 @@ param(
     # prefills only the rest, instead of the whole conversation again; 0 = off
     [ValidateRange(0,8)][int]$Photos = 4,
     [ValidateRange(1,65535)][int]$Port = 18080,
+    # The quantized dense matrices kept in a file (K3_DENSE_CACHE): the first start writes it
+    # (33 GB beside the model, or at this path), the next ones read it instead of reading and
+    # quantizing the checkpoint's 115 GB of BF16. The bytes are the same; the file is checked
+    # against the checkpoint and written again when either changed. -NoDenseCache: off
+    [string]$DenseCache = '',
+    [switch]$NoDenseCache,
+    # Half of every layer's expert cache seeded at the start from the experts the history used
+    # most (AUTOPIN) and never evicted. Off here: K3's router spreads its use evenly, so the
+    # history's favourites are found little more often than any others (5.7% of a prompt's
+    # experts against 4.7% at random) while the half of the cache they hold is taken from the
+    # one that follows the conversation -- decode 0.78 against 0.85 tok/s measured, and 7 s of
+    # reads (68 GB) at every start. -Pins turns it on
+    [switch]$Pins,
     # No GPU: the dense matrices stay on the CPU (a CPU build, or to compare)
     [switch]$Cpu,
     # A prompt step's routed experts and other dense matrices on the CPU alone (K3_GPU_EXPERTS=0)
@@ -124,6 +137,8 @@ $env:K3_CUDA_RELEASE_HOST = '1'
 $env:K3_EXPERT_GB = '1000'             # the cache takes what RamGB leaves (the engine clamps it)
 $env:K3_MAXT = [string]$Context
 $env:K3_CHUNK = [string]$Chunk
+$env:K3_DENSE_CACHE = $(if ($NoDenseCache) { '0' } elseif ($DenseCache) { $DenseCache } else { '1' })
+$env:AUTOPIN = $(if ($Pins) { '1' } else { '0' })
 $env:K3_DIRECT = '1'
 $env:K3_PIPE = '1'
 $env:K3_IO_PER_DRIVE = [string]$IoPerDrive
@@ -143,6 +158,7 @@ Write-Host "Kimi K3.1 Pro: $ModelDir$(if ($shardDirs.Count) { '; experts also fr
 Write-Host "RAM $RamGB GB, CPU $Threads, readers $IoPerDrive per drive, prefetch $Prefetch, $(if ($env:K3_CUDA_DENSE -eq '1') { "dense matrices on the GPU up to $DenseGB GiB" } else { 'dense matrices on the CPU' })$(if ($env:K3_GPU_EXPERTS -eq '1') { ', a prompt step''s experts on the GPU too' })"
 Write-Host "K3.1's index scores and picks: $(if ($indexerOnGpu) { 'on the GPU (k3cu_dsa_mask)' } elseif ($Cpu -or $CpuExperts) { 'on the CPU, as asked' } else { 'ON THE CPU: a long prompt waits here, see coli_cuda_k3.dll' })"
 Write-Host "Context $Context tokens, replies up to $MaxOutput tokens, prompt steps of $Chunk (read-ahead $($env:K3_READAHEAD_GB) GB), $Photos turn photos"
+Write-Host "Dense matrices' quantization: $(if ($NoDenseCache) { 'from the checkpoint at every start (-NoDenseCache)' } else { 'kept in ' + $(if ($DenseCache) { $DenseCache } else { Join-Path $ModelDir 'k3_dense_cache.bin' }) + ' (33 GB, written by the first start)' })"
 Write-Host "API: http://127.0.0.1:$Port/v1, model $ModelId"
 & python (Join-Path $EngineDir 'coli') serve --model $ModelDir --ram $RamGB --ctx $Context `
     --ngen $MaxOutput --host 127.0.0.1 --port $Port --model-id $ModelId --kv-slots 1 `

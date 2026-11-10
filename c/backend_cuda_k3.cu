@@ -924,14 +924,15 @@ __global__ void __launch_bounds__(256, 2) k3_mla_scores(const float *__restrict_
 // step's in order while the others load the next step's.
 #define MS_R 32
 #define MS_W 128
+// nfix > 0: every row has nfix entries (k3cu_mla_sel's lists; an entry past a row's own count holds -inf)
 __global__ void __launch_bounds__(256) k3_mla_soft(float *__restrict__ S, int ldS, const float *__restrict__ pm, int ldp,
-                                                   int M, int H, int first, float *__restrict__ sm) {
+                                                   int M, int H, int first, int nfix, float *__restrict__ sm) {
     __shared__ float es[2][MS_R][MS_W + 1];
     __shared__ float mxs[MS_R];
     __shared__ int nts[MS_R];
     const int m0 = blockIdx.x * MS_R, c = threadIdx.x & (MS_W - 1), r0 = (threadIdx.x >> 7) * (MS_R / 2);
     if (threadIdx.x < MS_R) {
-        const int m = m0 + threadIdx.x, nt = m < M ? first + m / H + 1 : 0;
+        const int m = m0 + threadIdx.x, nt = m < M ? (nfix > 0 ? nfix : first + m / H + 1) : 0;
         float mx = -INFINITY;
         if (m < M) {
             const float x0 = S[(size_t)m * ldS];
@@ -942,7 +943,7 @@ __global__ void __launch_bounds__(256) k3_mla_soft(float *__restrict__ S, int ld
         mxs[threadIdx.x] = mx; nts[threadIdx.x] = nt;
     }
     __syncthreads();
-    const int ntb = first + min(m0 + MS_R - 1, M - 1) / H + 1;   // the block's longest row
+    const int ntb = nfix > 0 ? nfix : first + min(m0 + MS_R - 1, M - 1) / H + 1;   // the block's longest row
     float x[MS_R / 2], s = 0.0f;
 #pragma unroll
     for (int r = 0; r < MS_R / 2; r++) x[r] = c < nts[r0 + r] ? S[(size_t)(m0 + r0 + r) * ldS + c] : 0.0f;
@@ -1001,6 +1002,109 @@ __global__ void __launch_bounds__(256, 2) k3_mla_clat(const float *__restrict__ 
             for (int j = 0; j < 8; j++) {
                 const int n = ld.n0 + mg_at(tx, j);
                 if (n < kvl) cl[(size_t)m * kvl + n] = acc[i][j];
+            }
+    }
+}
+// ---- Kimi K3.1's selecting rows over their lists (k3cu_mla_sel) ---------------------------------
+// A row past K positions attends K of them. k3_mla_scores with a mask computes such a row against
+// every position and gives the others a weight of exactly 0: the work grows with the context (a
+// row at position 16,000 pays for 16,000 positions to use 2,048), a long prompt's with its square.
+// Here a row's set bits become a list, ascending, and the three position-wide kernels run over the
+// list: the scores against the listed rows of the cache, the exps and their in-order sum over the
+// list, clat's fused sum over the list. Each is the masked kernel's arithmetic with its zero terms
+// left out -- adding e = 0 to the sum and 0 x L to clat changes neither -- so the bytes are
+// k3cu_mla_mask's, the CPU loop's over the list. A block's rows are the H heads of ONE query row,
+// which share its list (H <= MG_T; the rows past H idle).
+// idx[row][j]: the j-th set bit of the row's mask below its nt; cnt[row]: how many, at most K
+__global__ void k3_sel_list(const uint32_t *__restrict__ msk, int mw, int rows, int first, int K, int ldK,
+                            int *__restrict__ idx, int *__restrict__ cnt) {
+    const int r = blockIdx.x * blockDim.x + threadIdx.x;
+    if (r >= rows) return;
+    const int nt = first + r + 1, nw = (nt + 31) / 32;
+    const uint32_t *m = msk + (size_t)r * mw;
+    int *o = idx + (size_t)r * ldK, n = 0;
+    for (int i = 0; i < nw && n < K; i++) {
+        uint32_t w = m[i];
+        if (i == nw - 1 && (nt & 31)) w &= (1u << (nt & 31)) - 1u;
+        while (w && n < K) { o[n++] = i * 32 + (__ffs((int)w) - 1); w &= w - 1u; }
+    }
+    cnt[r] = n;
+    for (; n < ldK; n++) o[n] = 0;
+}
+struct MgSs {
+    const float *Q, *LR; int H, KD, m0, pos;   // pos: this thread's listed position, -1 past the list
+    __device__ void get(int kt, float4 &a, float4 &b) const {
+        const int r = threadIdx.x >> 1, k = kt * MG_K + (threadIdx.x & 1) * 4;
+        a = r < H ? *(const float4 *)&Q[(size_t)(m0 + r) * KD + k] : make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+        b = pos >= 0 ? *(const float4 *)&LR[(size_t)pos * KD + k] : make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+    }
+    __device__ void put(float (*As)[MG_P], float (*Bs)[MG_P], float4 a, float4 b) const { mg_put_t(As, a); mg_put_t(Bs, b); }
+};
+// S[row H + h][j] = k3_mla_scores's score of head h against the row's j-th listed position; grid
+// (list blocks, query rows)
+__global__ void __launch_bounds__(256, 2) k3_mla_scores_sel(const float *__restrict__ Q, const float *__restrict__ LR,
+                                                            const int *__restrict__ idx, const int *__restrict__ cnt,
+                                                            int ldK, int H, int KD, float scale, float *__restrict__ S,
+                                                            int ldS, float *__restrict__ pm, int ldp) {
+    const int row = blockIdx.y, c = cnt[row], n0 = (int)blockIdx.x * MG_T, m0 = row * H;
+    const int jl = n0 + (int)(threadIdx.x >> 1);
+    const MgSs ld = {Q, LR, H, KD, m0, jl < c ? idx[(size_t)row * ldK + jl] : -1};
+    float acc[8][8];
+    mg_run<0>(ld, KD / MG_K, acc);
+    const int tx = threadIdx.x & 15, ty = threadIdx.x >> 4;
+#pragma unroll
+    for (int i = 0; i < 8; i++) {
+        const int ml = mg_at(ty, i);
+        float mx = -INFINITY;
+#pragma unroll
+        for (int j = 0; j < 8; j++) {
+            const int n = n0 + mg_at(tx, j);
+            if (ml < H && n < ldS) {
+                if (n < c) {
+                    const float v = __fmul_rn(acc[i][j], scale);
+                    S[(size_t)(m0 + ml) * ldS + n] = v; mx = v > mx ? v : mx;
+                } else S[(size_t)(m0 + ml) * ldS + n] = -INFINITY;
+            }
+        }
+#pragma unroll
+        for (int o = 1; o < 16; o <<= 1) { const float v = __shfl_xor_sync(0xffffffffu, mx, o); mx = v > mx ? v : mx; }
+        if (tx == 0 && ml < H) pm[(size_t)(m0 + ml) * ldp + blockIdx.x] = mx;
+    }
+}
+// cl[row H + h][i] = sum over the list, in order, fused, of (e[j] / sm) times LR[idx[j]][i]
+struct MgCs {
+    const float *S, *sm, *LR; const int *idx; int H, KD, kvl, ldS, m0, n0, cnt;
+    __device__ void get(int kt, float4 &a, float4 &b) const {
+        const int r = threadIdx.x >> 1, t = kt * MG_K + (threadIdx.x & 1) * 4;
+        a = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+        if (r < H) {
+            const float4 v = *(const float4 *)&S[(size_t)(m0 + r) * ldS + t];
+            const float s = sm[m0 + r];
+            a = make_float4(t < cnt ? __fdiv_rn(v.x, s) : 0.0f, t + 1 < cnt ? __fdiv_rn(v.y, s) : 0.0f,
+                            t + 2 < cnt ? __fdiv_rn(v.z, s) : 0.0f, t + 3 < cnt ? __fdiv_rn(v.w, s) : 0.0f);
+        }
+        const int k = kt * MG_K + (threadIdx.x >> 5), i = n0 + (threadIdx.x & 31) * 4;
+        b = k < cnt && i < kvl ? *(const float4 *)&LR[(size_t)idx[k] * KD + i] : make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+    }
+    __device__ void put(float (*As)[MG_P], float (*Bs)[MG_P], float4 a, float4 b) const { mg_put_t(As, a); mg_put_n(Bs, b); }
+};
+__global__ void __launch_bounds__(256, 2) k3_mla_clat_sel(const float *__restrict__ S, int ldS, const float *__restrict__ sm,
+                                                          const float *__restrict__ LR, const int *__restrict__ idx,
+                                                          const int *__restrict__ cnt, int ldK, int H, int KD, int kvl,
+                                                          float *__restrict__ cl) {
+    const int row = blockIdx.y, c = cnt[row];
+    const MgCs ld = {S, sm, LR, idx + (size_t)row * ldK, H, KD, kvl, ldS, row * H, (int)blockIdx.x * MG_T, c};
+    float acc[8][8];
+    mg_run<1>(ld, (c + MG_K - 1) / MG_K, acc);
+    const int tx = threadIdx.x & 15, ty = threadIdx.x >> 4;
+#pragma unroll
+    for (int i = 0; i < 8; i++) {
+        const int ml = mg_at(ty, i);
+        if (ml < H)
+#pragma unroll
+            for (int j = 0; j < 8; j++) {
+                const int n = ld.n0 + mg_at(tx, j);
+                if (n < kvl) cl[(size_t)(ld.m0 + ml) * kvl + n] = acc[i][j];
             }
     }
 }
@@ -1382,12 +1486,26 @@ static int ml_chunk(long long first, int n, int H) {   // the rows of the chunk 
     while (r > 1 && (long long)r * H * ml_ld(first + r) * 4 > ML_SCORES) r = r * 7 / 8;
     return r;
 }
+// K > 0 (k3cu_mla_sel): the rows past K positions go over their lists of K, the rows before them as
+// k3cu_mla's. ml_next: the rows of the chunk at row c0 and whether it is a list chunk.
+static int ml_sel_rows(int n, int H, int K) {
+    int r = n < ML_ROWS ? n : ML_ROWS;
+    while (r > 1 && (long long)r * H * ml_ld(K) * 4 > ML_SCORES) r = r * 7 / 8;
+    return r;
+}
+static int ml_next(int pos0, int c0, int C, int H, int K, int *sel) {
+    *sel = K > 0 && pos0 + c0 + 1 > K;
+    if (*sel) return ml_sel_rows(C - c0, H, K);
+    int r = ml_chunk(pos0 + c0, C - c0, H);
+    if (K > 0 && pos0 + c0 + r > K) r = K - (pos0 + c0);   // up to the first row that selects
+    return r;
+}
 // the largest chunk's rows, scores and score blocks' maxima over a step of C rows from pos0
-static void ml_plan(int pos0, int C, int H, size_t *rmax, size_t *smax, size_t *pmax) {
+static void ml_plan(int pos0, int C, int H, int K, size_t *rmax, size_t *smax, size_t *pmax) {
     *rmax = *smax = *pmax = 1;
-    for (int c0 = 0, r; c0 < C; c0 += r) {
-        r = ml_chunk(pos0 + c0, C - c0, H);
-        const long long n = pos0 + c0 + r;
+    for (int c0 = 0, r, sel; c0 < C; c0 += r) {
+        r = ml_next(pos0, c0, C, H, K, &sel);
+        const long long n = sel ? K : pos0 + c0 + r;
         const size_t s = (size_t)r * H * ml_ld(n), p = (size_t)r * H * ((n + MG_T - 1) / MG_T);
         if ((size_t)r > *rmax) *rmax = (size_t)r;
         if (s > *smax) *smax = s;
@@ -1412,30 +1530,46 @@ static void ml_core(const float *LR, const int8_t *w, const float *s, float *Q, 
     const unsigned it = (unsigned)((kvl + MG_T - 1) / MG_T), dt = (unsigned)((vh + MG_T - 1) / MG_T);
     k3_mla_q<<<dim3(it, rt, (unsigned)H), 256, 0, st>>>(qv, rows, H, qn, qr, vh, kvl, w, s, Q);
     k3_mla_scores<<<dim3((unsigned)ldp, mt), 256, 0, st>>>(Q, LR, M, Nc, KD, H, first, scale, S, ldS, pm, ldp, msk, mw);
-    k3_mla_soft<<<(unsigned)((M + MS_R - 1) / MS_R), 256, 0, st>>>(S, ldS, pm, ldp, M, H, first, sm);
+    k3_mla_soft<<<(unsigned)((M + MS_R - 1) / MS_R), 256, 0, st>>>(S, ldS, pm, ldp, M, H, first, 0, sm);
     k3_mla_clat<<<dim3(it, mt), 256, 0, st>>>(S, ldS, sm, LR, M, Nc, KD, kvl, H, first, cl);
     k3_mla_out<<<dim3(dt, rt, (unsigned)H), 256, 0, st>>>(cl, gv, rows, H, qn, vh, kvl, w, s, ctx);
 }
+// a list chunk's core on st: the rows' masks [rows][mw] -> their lists, then the kernels over the lists
+static void ml_core_sel(const float *LR, const int8_t *w, const float *s, float *Q, float *S, float *pm, float *sm, float *cl,
+                        const float *qv, const float *gv, float *ctx, int rows, int first, int H, int qn, int qr, int vh,
+                        int kvl, float scale, cudaStream_t st, const uint32_t *msk, int mw, int K, int *idx, int *cnt) {
+    const int M = rows * H, KD = kvl + qr, ldK = ml_ld(K), ldp = (K + MG_T - 1) / MG_T;
+    const unsigned rt = (unsigned)((rows + MG_T - 1) / MG_T);
+    const unsigned it = (unsigned)((kvl + MG_T - 1) / MG_T), dt = (unsigned)((vh + MG_T - 1) / MG_T);
+    k3_sel_list<<<(unsigned)((rows + 255) / 256), 256, 0, st>>>(msk, mw, rows, first, K, ldK, idx, cnt);
+    k3_mla_q<<<dim3(it, rt, (unsigned)H), 256, 0, st>>>(qv, rows, H, qn, qr, vh, kvl, w, s, Q);
+    k3_mla_scores_sel<<<dim3((unsigned)ldp, (unsigned)rows), 256, 0, st>>>(Q, LR, idx, cnt, ldK, H, KD, scale, S, ldK, pm, ldp);
+    k3_mla_soft<<<(unsigned)((M + MS_R - 1) / MS_R), 256, 0, st>>>(S, ldK, pm, ldp, M, H, first, K, sm);
+    k3_mla_clat_sel<<<dim3(it, (unsigned)rows), 256, 0, st>>>(S, ldK, sm, LR, idx, cnt, ldK, H, KD, kvl, cl);
+    k3_mla_out<<<dim3(dt, rt, (unsigned)H), 256, 0, st>>>(cl, gv, rows, H, qn, vh, kvl, w, s, ctx);
+}
 static uint32_t *ml_mk[2]; static unsigned long long n_mlm; // the masks' chunks; steps masked (K3.1)
+static int *ml_idx, *ml_cnt; static unsigned long long n_mls, n_mls_rows;   // a list chunk's lists; steps and rows over lists
 static int ml_attn(const float *Lc, const float *Rc, int N, int pos0, int C, const float *qv, const float *gv,
                    const int8_t *kvb, const float *kvbs, int H, int qn, int qr, int vh, int kvl, float scale,
-                   const uint32_t *mask, int mw, float *ctx) {
+                   const uint32_t *mask, int mw, int K, float *ctx) {
     if (!ready || failed || !Lc || !qv || !gv || !kvb || !kvbs || !ctx || C < 1 || N != pos0 + C || H < 1 ||
         kvl < 8 || kvl % MG_K || qn < MG_K || qn % MG_K || qr % MG_K || vh < 1 || (qr && !Rc) ||
-        (mask && mw < (N + 31) / 32) || !on_device()) return 0;
+        (mask && mw < (N + 31) / 32) || (K > 0 && (!mask || H > MG_T)) || !on_device()) return 0;
     double t0 = now_s();
     const int qh = qn + qr, KD = kvl + qr, O = H * (qn + vh);
     if (!ml_streams()) return 0;
     size_t rmax, smax, pmax;
-    ml_plan(pos0, C, H, &rmax, &smax, &pmax);
-    void **const mp[15] = {(void **)&ml_LR, (void **)&ml_w, (void **)&ml_s, (void **)&ml_Q, (void **)&ml_S, (void **)&ml_pm,
+    ml_plan(pos0, C, H, K, &rmax, &smax, &pmax);
+    void **const mp[17] = {(void **)&ml_LR, (void **)&ml_w, (void **)&ml_s, (void **)&ml_Q, (void **)&ml_S, (void **)&ml_pm,
                            (void **)&ml_sm, (void **)&ml_cl, (void **)&ml_qv[0], (void **)&ml_qv[1], (void **)&ml_gv[0],
-                           (void **)&ml_gv[1], (void **)&ml_ctx[0], (void **)&ml_mk[0], (void **)&ml_mk[1]};
+                           (void **)&ml_gv[1], (void **)&ml_ctx[0], (void **)&ml_mk[0], (void **)&ml_mk[1],
+                           (void **)&ml_idx, (void **)&ml_cnt};
     const size_t mkb = mask ? rmax * (size_t)mw * 4 : 0;
-    const size_t mb[15] = {(size_t)N * KD * 4, (size_t)O * kvl, (size_t)O * 4, rmax * H * KD * 4, smax * 4, pmax * 4, rmax * H * 4,
+    const size_t mb[17] = {(size_t)N * KD * 4, (size_t)O * kvl, (size_t)O * 4, rmax * H * KD * 4, smax * 4, pmax * 4, rmax * H * 4,
                            rmax * H * kvl * 4, rmax * H * qh * 4, rmax * H * qh * 4, rmax * H * vh * 4, rmax * H * vh * 4,
-                           2 * rmax * H * vh * 4, mkb, mkb};
-    if (!ar_carve(mp, mb, 15)) return 0;
+                           2 * rmax * H * vh * 4, mkb, mkb, K > 0 ? rmax * (size_t)ml_ld(K) * 4 : 0, K > 0 ? rmax * 4 : 0};
+    if (!ar_carve(mp, mb, 17)) return 0;
     ml_ctx[1] = ml_ctx[0] + rmax * H * vh;
     cudaStream_t st = s_mla, sc = s_mlc;
     if (!checked(cudaMemcpy2DAsync(ml_LR, (size_t)KD * 4, Lc, (size_t)kvl * 4, (size_t)kvl * 4, (size_t)N, cudaMemcpyHostToDevice, st), "attention cache") ||
@@ -1443,18 +1577,25 @@ static int ml_attn(const float *Lc, const float *Rc, int N, int pos0, int C, con
         !checked(cudaMemcpyAsync(ml_w, kvb, (size_t)O * kvl, cudaMemcpyHostToDevice, st), "kv_b") ||
         !checked(cudaMemcpyAsync(ml_s, kvbs, (size_t)O * 4, cudaMemcpyHostToDevice, st), "kv_b")) return 0;
     int pc0 = 0, prows = 0, b = 0;   // the chunk before, its outputs still on the card
-    for (int c0 = 0, rows; c0 < C; c0 += rows, b ^= 1) {
-        rows = ml_chunk(pos0 + c0, C - c0, H);
+    unsigned long long lrows = 0;
+    for (int c0 = 0, rows, sel; c0 < C; c0 += rows, b ^= 1) {
+        rows = ml_next(pos0, c0, C, H, K, &sel);
         const int M = rows * H;
+        const int masked = mask && (K <= 0 || sel);   // the chunk reads its rows' masks (k3cu_mla_sel's rows before K: none)
         // buffer b's last chunk is done and its outputs down: the host waited for them
         if (!checked(cudaMemcpyAsync(ml_qv[b], qv + (size_t)c0 * H * qh, (size_t)M * qh * 4, cudaMemcpyHostToDevice, sc), "attention rows") ||
             !checked(cudaMemcpyAsync(ml_gv[b], gv + (size_t)c0 * H * vh, (size_t)M * vh * 4, cudaMemcpyHostToDevice, sc), "attention rows") ||
-            (mask && !checked(cudaMemcpyAsync(ml_mk[b], mask + (size_t)c0 * mw, (size_t)rows * mw * 4, cudaMemcpyHostToDevice, sc),
-                              "attention mask")) ||
+            (masked && !checked(cudaMemcpyAsync(ml_mk[b], mask + (size_t)c0 * mw, (size_t)rows * mw * 4, cudaMemcpyHostToDevice, sc),
+                                "attention mask")) ||
             !checked(cudaEventRecord(ml_up[b], sc), "attention rows") || !checked(cudaStreamWaitEvent(st, ml_up[b], 0), "attention rows"))
             return 0;
+        if (sel) {
+            ml_core_sel(ml_LR, ml_w, ml_s, ml_Q, ml_S, ml_pm, ml_sm, ml_cl, ml_qv[b], ml_gv[b], ml_ctx[b], rows, pos0 + c0, H, qn,
+                        qr, vh, kvl, scale, st, ml_mk[b], mw, K, ml_idx, ml_cnt);
+            lrows += (unsigned long long)rows;
+        } else
         ml_core(ml_LR, ml_w, ml_s, ml_Q, ml_S, ml_pm, ml_sm, ml_cl, ml_qv[b], ml_gv[b], ml_ctx[b], rows, pos0 + c0, H, qn, qr, vh,
-                kvl, scale, st, mask ? ml_mk[b] : nullptr, mw);
+                kvl, scale, st, masked ? ml_mk[b] : nullptr, mw);
         if (!checked(cudaGetLastError(), "attention kernels") || !checked(cudaEventRecord(ml_done[b], st), "attention kernels")) return 0;
         if (prows && (!checked(cudaStreamWaitEvent(sc, ml_done[b ^ 1], 0), "attention outputs") ||
                       !checked(cudaMemcpyAsync(ctx + (size_t)pc0 * H * vh, ml_ctx[b ^ 1], (size_t)prows * H * vh * 4,
@@ -1467,18 +1608,25 @@ static int ml_attn(const float *Lc, const float *Rc, int N, int pos0, int C, con
         !checked(cudaStreamSynchronize(sc), "attention") || !checked(cudaStreamSynchronize(st), "attention")) return 0;
     n_mla++; n_mla_rows += (unsigned long long)C; t_mla += now_s() - t0;
     if (mask) n_mlm++;
+    if (lrows) { n_mls++; n_mls_rows += lrows; }
     return 1;
 }
 extern "C" int k3cu_mla(const float *Lc, const float *Rc, int N, int pos0, int C, const float *qv, const float *gv,
                         const int8_t *kvb, const float *kvbs, int H, int qn, int qr, int vh, int kvl, float scale,
                         float *ctx) {
-    return ml_attn(Lc, Rc, N, pos0, C, qv, gv, kvb, kvbs, H, qn, qr, vh, kvl, scale, nullptr, 0, ctx);
+    return ml_attn(Lc, Rc, N, pos0, C, qv, gv, kvb, kvbs, H, qn, qr, vh, kvl, scale, nullptr, 0, 0, ctx);
 }
 extern "C" int k3cu_mla_mask(const float *Lc, const float *Rc, int N, int pos0, int C, const float *qv, const float *gv,
                              const int8_t *kvb, const float *kvbs, int H, int qn, int qr, int vh, int kvl, float scale,
                              const uint32_t *mask, int mw, float *ctx) {
     if (!mask) return 0;
-    return ml_attn(Lc, Rc, N, pos0, C, qv, gv, kvb, kvbs, H, qn, qr, vh, kvl, scale, mask, mw, ctx);
+    return ml_attn(Lc, Rc, N, pos0, C, qv, gv, kvb, kvbs, H, qn, qr, vh, kvl, scale, mask, mw, 0, ctx);
+}
+extern "C" int k3cu_mla_sel(const float *Lc, const float *Rc, int N, int pos0, int C, const float *qv, const float *gv,
+                            const int8_t *kvb, const float *kvbs, int H, int qn, int qr, int vh, int kvl, float scale,
+                            const uint32_t *mask, int mw, int K, float *ctx) {
+    if (!mask || K < 1) return 0;
+    return ml_attn(Lc, Rc, N, pos0, C, qv, gv, kvb, kvbs, H, qn, qr, vh, kvl, scale, mask, mw, K, ctx);
 }
 
 // ---- Kimi K3.1's lightning indexer for a prompt step (k3cu_dsa_mask, backend_cuda_k3.h) ------------
@@ -1859,7 +2007,7 @@ extern "C" int k3cu_mla_layer(const K3cuMlaLayer *a, const float *x, float *out)
     double t0 = now_s();
     if (!ml_streams()) return 0;
     size_t rmax, smax, pmax;
-    ml_plan(pos0, C, H, &rmax, &smax, &pmax);
+    ml_plan(pos0, C, H, 0, &rmax, &smax, &pmax);
     uint8_t *dw[5]; float *dsc[5];
     float *LR, *ks, *ln, *dx[2], *dqa, *dqv, *dckv, *dgv, *dctx, *dout[2], *Q, *S, *pm, *sm, *cl;
     int8_t *kw;
@@ -1923,8 +2071,8 @@ extern "C" void k3cu_report(void) {
                 n_steps, n_experts, n_rows, t_copy, t_wait, failed ? "; the device failed" : "");
     if (n_mm) fprintf(stderr, "[K3-CUDA] the dense matrices the GPU does not hold: %llu matmuls, %llu rows, %.1fs\n", n_mm, n_mm_rows, t_mm);
     if (n_mmd) fprintf(stderr, "[K3-CUDA] the dense matrices the GPU holds, one by one: %llu matmuls, %llu rows, %.1fs\n", n_mmd, n_mmd_rows, t_mmd);
-    if (n_mla) fprintf(stderr, "[K3-CUDA] the gated MLA's attention: %llu layer steps (%llu of them K3.1's selections), %llu rows, %.1fs\n",
-                       n_mla, n_mlm, n_mla_rows, t_mla);
+    if (n_mla) fprintf(stderr, "[K3-CUDA] the gated MLA's attention: %llu layer steps (%llu of them K3.1's selections, %llu rows of "
+                       "%llu steps over their lists), %llu rows, %.1fs\n", n_mla, n_mlm, n_mls_rows, n_mls, n_mla_rows, t_mla);
     if (n_mll) fprintf(stderr, "[K3-CUDA] the gated MLA layers: %llu layer steps, %llu rows, %.1fs\n", n_mll, n_mll_rows, t_mll);
     if (n_dsa) fprintf(stderr, "[K3-CUDA] K3.1's indexer: %llu layer steps, %llu rows picked, %.1fs\n", n_dsa, n_dsa_rows, t_dsa);
     if (n_rt) fprintf(stderr, "[K3-CUDA] the routers: %llu steps, %.1fs\n", n_rt, t_rt);

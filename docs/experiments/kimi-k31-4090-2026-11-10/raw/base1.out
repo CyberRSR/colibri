@@ -1,0 +1,3 @@
+[think] I need respond to user simple factual question. Should have one short sentence. Capital of France is Paris. Respond "The capital of France is Paris." Ensure one short sentence. No extra.
+
+[response] TheTUNE decode: 45 tokens in 55.149s

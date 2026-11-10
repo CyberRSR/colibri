@@ -1,0 +1,65 @@
+{
+ "ready_after_s": 147.8,
+ "turns": [
+  {
+   "name": "short question",
+   "ttft_s": 29.98,
+   "total_s": 48.16,
+   "usage": {
+    "prompt_tokens": 35,
+    "completion_tokens": 13,
+    "total_tokens": 48
+   },
+   "text": "The capital of France is Paris.",
+   "reasoning": ""
+  },
+  {
+   "name": "follow-up, history without reasoning",
+   "ttft_s": 18.13,
+   "total_s": 37.32,
+   "usage": {
+    "prompt_tokens": 78,
+    "completion_tokens": 13,
+    "total_tokens": 91
+   },
+   "text": "The capital of Italy is Rome.",
+   "reasoning": ""
+  },
+  {
+   "name": "a long message appended",
+   "ttft_s": 229.57,
+   "total_s": 298.18,
+   "usage": {
+    "prompt_tokens": 16602,
+    "completion_tokens": 48,
+    "total_tokens": 16650
+   },
+   "text": "Colibri is a lightweight, open-source inference engine that runs very large mixture-of-experts models on ordinary hardware by keeping dense weights in RAM and streaming routed experts from disk, with optional Vulkan, CUDA, and Metal acceleration. It",
+   "reasoning": ""
+  },
+  {
+   "name": "follow-up past index_topk",
+   "ttft_s": 30.05,
+   "total_s": 94.91,
+   "usage": {
+    "prompt_tokens": 16695,
+    "completion_tokens": 43,
+    "total_tokens": 16738
+   },
+   "text": "The document implies the engine was first written for **GLM-5.2**, described as “the reference model” and run on “the 25 GB laptop where this started.”",
+   "reasoning": ""
+  },
+  {
+   "name": "the same request again",
+   "ttft_s": 28.45,
+   "total_s": 93.56,
+   "usage": {
+    "prompt_tokens": 16695,
+    "completion_tokens": 43,
+    "total_tokens": 16738
+   },
+   "text": "The document implies the engine was first written for **GLM-5.2**, described as “the reference model” and run on “the 25 GB laptop where this started.”",
+   "reasoning": ""
+  }
+ ]
+}

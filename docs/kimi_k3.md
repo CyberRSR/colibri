@@ -219,7 +219,8 @@ Judge quantization choices on real-text logits, not synthetic-vector norms.
 | `K3_PIPE` | 1 | expert reads on reader threads, beside the compute |
 | `K3_IO_PER_DRIVE` | 2 | readers per storage device the shards are on |
 | `K3_IO_THREADS` | — | that many readers on one queue instead (`K3_LOAD_THREADS`, the old loader's size, is read as this); 0 = reads on the caller |
-| `K3_LOAD_PARALLEL` | 4 prepared / 1 BF16 | the dense weights of this many layers read at once while the model loads: 4 where each matrix is one straight read (a repacked U8 or GGUF container), 1 where the load loop is busy quantizing a BF16 checkpoint on every core instead; `K3_MMAP=1` forces it |
+| `K3_LOAD_PARALLEL` | 4 prepared / 1 BF16 | the dense weights of this many layers read at once while the model loads: 4 where each matrix is one straight read (a repacked U8 or GGUF container), 1 where the load loop is busy quantizing a BF16 checkpoint on every core instead (the layers then go one after the other, each matrix over the whole team); `K3_MMAP=1` forces it |
+| `K3_DENSE_CACHE` | off | `1`: `<model dir>/k3_dense_cache.bin`, or a path. The quantized dense matrices written by the first start and read by the next ones instead of reading and quantizing a BF16 checkpoint (Kimi K3.1 Pro: 33.9 GB; the start 28 -> 9.7 s on the RTX 4090 machine). A matrix comes from the file only when its name, shape, bits and its source's place in the checkpoint are the record's and its bytes sum to what was written ([the start](#kimi-k31)) |
 | `K3_PREFETCH` | 1 | read the next MoE layer's predicted experts ahead (decode steps) |
 | `K3_PREFETCH_ROWS` | 4 | the most rows a step may have for its prediction |
 | `K3_PREFETCH_LIMIT` | 64 | prefetches queued at once |
@@ -233,13 +234,15 @@ Judge quantization choices on real-text logits, not synthetic-vector norms.
 | `K3_DSA` | 1 | Kimi K3.1: 0 runs the MLA layers dense, the indexer neither loaded nor run (exact up to `index_topk` positions, another attention past them; see [Kimi K3.1](#kimi-k31)) |
 | `K3_DSA_BITS` | `K3_MLA_BITS` | Kimi K3.1: load-time bits of the indexer's three matrices |
 | `K3_DSA_GPU` | 1 | Kimi K3.1, a CUDA build: a prompt step's scores and picks on the GPU (`k3cu_dsa_mask`); 0 = on the CPU (the same bytes) |
-| `K3_CHUNK` | 32 | prefill chunk size, at most 16384 (1 = token-at-a-time; forced 1 under `K3_TRACE`); past 512 rows the RAM budget reserves 1.4 MB of activations a row |
+| `K3_MLA_SEL` | 1 | Kimi K3.1, a CUDA build: a prompt step's selecting rows over the lists of their picks (`k3cu_mla_sel`); 0 = against every position with the unpicked ones weighing 0 (`k3cu_mla_mask`: the same bytes, a cost that grows with the context) |
+| `K3_CHUNK` | 32 | the most prompt tokens a prefill step takes, at most 16384 (1 = token-at-a-time; forced 1 under `K3_TRACE`). A prompt's steps are of one size and none is short: up to an eighth past `K3_CHUNK` is one step, more is equal steps. Past 512 rows a step holds 1.4 MB of activations a row, borrowed from the expert cache while it runs (`K3_LEND`) |
 | `K3_THINK` | 1 | chat mode: open the structural think channel (0 = response-only) |
 | `K3_DIRS` | — | extra shard directories (multi-drive split, no duplication; `tools/k3_download.py` cuts every layer over them) |
 | `K3_MAXT` | prompt+ngen | context capacity |
-| `K3_KV_GROW` | 1 | the MLA caches and the index keys grow with the conversation: a request allocates its prompt's positions plus `K3_KV_GEN` of the answer's, doubles as it writes them, and a grow the machine cannot pay for comes out of the experts touched longest ago (0 = the whole `K3_MAXT` at the first request; off under `KV_SLOTS>1`) |
+| `K3_KV_GROW` | 1 | the MLA caches and the index keys grow with the conversation: a request allocates its prompt's positions plus `K3_KV_GEN` of the answer's and doubles as it writes them; what they hold past `K3_KV_MIN` positions comes out of the expert cache for as long as they hold it (`K3_LEND`) (0 = the whole `K3_MAXT` at the first request; off under `KV_SLOTS>1`) |
 | `K3_KV_GEN` | 1024 | answer positions allocated with the prompt's, before the caches start doubling |
 | `K3_KV_MIN` | 4096 | positions the RAM plan projects the caches for while the session is still idle — what it does not project, the expert cache is allowed to hold |
+| `K3_LEND` | 1 | the expert cache lends slots to what the RAM plan did not count -- the conversation's rows past `K3_KV_MIN` (they stay) and a prompt step's activations past 512 rows (until the step ends): a lent slot is retired, its bytes freed and nothing read into it, and comes back with the bytes (0 = the plan reserves a whole `K3_CHUNK` step's activations instead; off under `KV_SLOTS>1`) |
 | `K3_LAYERS` | all | truncate the stack (validation) |
 | `K3_TRACE` | — | dump f32 hidden state after every layer (validation) |
 | `K3_X0` | — | inject input rows, bypass embedding (validation) |
@@ -607,26 +610,33 @@ gets its pick -- in a decode step on the CPU (`k3_dsa_scores`: 16 positions a pa
 blocks of keys transposed in registers; `k3_dsa_pick`: quickselect, ties to the lower
 position, the list ascending), in a prompt step of a CUDA build on the GPU (`k3cu_dsa_mask`,
 `backend_cuda_k3_dsa.cuh`: the same chain of fused multiply-adds a score, a radix select a
-row, so the same bits as the CPU's pick); then its attention runs over the picked rows only -- on the CPU's loop (the
-scores and the latent sum over the list) or, for a prompt step, on the GPU's core with the
-pick as a bit mask (`k3cu_mla_mask` in `coli_cuda_k3.dll`: a masked position's weight is
-exactly 0, which changes neither the softmax's sum nor the latent's, so the GPU's bytes are
-the CPU loop's over the picked rows). A step all of whose rows have at most `index_topk`
-positions is K3's to the bit, the GPU's whole-layer path included (the keys then on the
-CPU). `K3_DSA=0` runs a K3.1 checkpoint dense.
+row, so the same bits as the CPU's pick); then its attention runs over the picked rows only
+-- on the CPU's loop (the scores and the latent sum over the list) or, for a prompt step, on
+the GPU's core over the same list (`k3cu_mla_sel` in `coli_cuda_k3.dll`: the pick's bits
+become each row's ascending list on the card, and the scores, the exps with their in-order
+sum and the latent's fused sum run over the listed rows of the cache -- the CPU loop's sums,
+term for term). `k3cu_mla_mask`, the form before it (`K3_MLA_SEL=0`), computes a row against
+every position and weighs the unpicked ones exactly 0, which changes neither the softmax's
+sum nor the latent's: the same bytes, at a cost that grows with the context. A step all of
+whose rows have at most `index_topk` positions is K3's to the bit, the GPU's whole-layer
+path included (the keys then on the CPU). `K3_DSA=0` runs a K3.1 checkpoint dense.
 
 **What it costs.** Up to 2,048 positions: one 128 x 7168 matrix a row and a layer (the
-keys), nothing else. Past them a prompt's scores grow with the square of its length (a
-32,768-token prompt: 44 T multiply-adds over the 24 layers): on the CPU alone that kept the
-first K3.1 build's prompts on the CPU for minutes with the drives and the card idle, hence
-the GPU's pick. Past them, for each row and layer: the projections (32 x 128 by 1536,
-32 by 7168), 4,096 multiply-adds a position for the scores, a quickselect, and then the
-attention over 2,048 rows instead of all of them -- at long contexts much less than K3's
-dense attention reads. On the 4-core test machine of this change (Xeon, 2.1 GHz) the scores
-ran at about 100 GMAC/s for a prompt step's rows and 50-78 for a decode row
-(`tests/test_k3_dsa bench`); the keys add 12 KB a position to the 55 KB of the MLA caches.
-The prompt's selections are reported (`[K3-DSA] the prompt: ...`) and the GPU's masked steps
-(`[K3-CUDA] the gated MLA's attention: ... K3.1's selections`).
+keys), nothing else. Past them, for each row and layer: the projections (32 x 128 by 1536,
+32 by 7168), 4,096 multiply-adds a position for the scores, a select, and then the attention
+over 2,048 rows instead of all of them. A prompt's scores grow with the square of its length
+(a 32,768-token prompt: 44 T multiply-adds over the 24 layers): on the CPU alone that kept
+the first K3.1 build's prompts there for minutes with the drives and the card idle, hence the
+GPU's pick -- on the RTX 4090 machine a 16,511-token prompt's 347,112 selecting rows are
+scored and picked in 2.1 s (3.2 G positions), 4.4 s with the keys and the projections. The
+attention itself no longer grows that way once it runs over the lists: the same prompt's MLA
+core took 40.9 s with the masks (every row against every position) and takes 9.6 s over the
+lists; at 5,862 tokens 4.3 and 3.0 s. A decode row's pick stays on the CPU (4,096
+multiply-adds a position: about 25 ms a token at 16,000 positions over the 24 layers), and
+its attention reads 2,048 rows whatever the context. The keys add 12 KB a position to the
+55 KB of the MLA caches. The prompt's selections are reported (`[K3-DSA] the prompt: ...`)
+and the GPU's steps (`[K3-CUDA] the gated MLA's attention: ... K3.1's selections, N rows
+of M steps over their lists`).
 
 **Both binaries, or none of the card.** The GPU's pick is in `coli_cuda_k3.dll`, not in
 `kimi_k3.exe`, and the loader binds `k3cu_dsa_mask` as an *optional* export: a DLL older than
@@ -666,19 +676,86 @@ photos, parking, dashboard and multiplexed-slot checks pass on it as on K3's fix
 `tests/test_k3_dsa` checks the scores (bit for bit against the fused chain), the pick and the
 LayerNorm; `tools/check_k3_dsa_kernels.cpp` runs the GPU's indexer kernels on the CPU (a thread
 a CUDA thread) against the same chain and a stable sort, ties and NaN included.
-`tests/test_k3_cuda_experts --dsa` checks `k3cu_dsa_mask` and `k3cu_mla_mask` on a card against
-the CPU, bit for bit; it was not run on one in this change.
+`tests/test_k3_cuda_experts --dsa` checks `k3cu_dsa_mask`, `k3cu_mla_mask` and `k3cu_mla_sel`
+on a card against the CPU, bit for bit: K3.1's widths at 3,000 and at 30,000 positions, rows
+on both sides of `index_topk`, a pick that is no multiple of 8, the tiny fixture's shapes.
 
-**Context.** The keys and the MLA caches take 67 KB a position. They used to be counted against
-the RAM whole before the expert cache got the rest, so `-Context 1048576` reserved 71 GB whether
-or not a conversation ever reached them, leaving the 4090 machine's cache about 33 experts a layer
-instead of about 85 at the profile's 131,072. Now the caches grow with the conversation
-(`K3_KV_GROW=1`, the default): the RAM plan projects `K3_KV_MIN` positions, the rest of an idle
-machine goes to experts, and a request takes its positions as it writes them, doubling — a grow
-the machine cannot pay for frees the coldest experts' slots and says so (`[K3][RAM]`). What the
-caches may still reach (`max_t`) is unchanged, so a long conversation ends up taking its 71 GB
-and pushing the experts out on the way; ask for the context the conversations need.
-`K3_KV_GROW=0` is the old behaviour, and a muxed serve (`KV_SLOTS>1`) keeps it.
+**On the real model** (Kimi K3.1 Pro, the RTX 4090 machine, 2026-11-10;
+[the record](experiments/kimi-k31-4090-2026-11-10/README.md)). A 5,862-token prompt's logits
+at every position are the same bytes with the launcher's profile -- the routed experts, the
+KDA and MLA layers, the index picks and the selecting rows' lists all on the card -- as with
+no GPU path at all (`K3_GPU_EXPERTS=0 K3_CUDA_DENSE=0`, 1,861 s on the CPU against 110 s),
+in three runs of the release build and with `K3_CHECK=1` (no finding). A 16,511-token
+prompt's are the same bytes in one step over the lists as in steps of 8,192 with the masks,
+and under `RAM_GB=110`, where the step's activations take the expert cache down to its
+floor of 32 slots a layer and the process stays at 105.6 GB. Upstream's K3.1 reference (JustVugg/colibri#2713, `tools/k3_ref.py` there: an indexer
+written from the definition, apart from both engines) agrees with this engine on the tiny
+fixture to float32 noise (rel-L2 1.2e-5 a layer, 4e-5 past `index_topk`).
+
+**Context.** The keys and the MLA caches take 67 KB a position. They used to be counted
+against the RAM whole before the expert cache got the rest, so `-Context 1048576` reserved
+71 GB whether or not a conversation ever reached them, leaving the 4090 machine's cache about
+33 experts a layer instead of about 85 at the profile's 131,072. Now the caches grow with the
+conversation (`K3_KV_GROW=1`, the default): the RAM plan projects `K3_KV_MIN` positions, the
+rest of an idle machine goes to experts, and a request takes its positions as it writes
+them, doubling. What the caches hold past the plan is lent by the expert cache (`K3_LEND`):
+that many slots are retired -- the coldest of every layer in turn, their bytes freed and
+nothing read into them again -- so the process stays under `RAM_GB` at any length of
+conversation, and the line says what it took:
+
+    [K3][RAM] the conversation's caches hold 1.19 GB, 0.91 GB past the plan's: the expert
+    cache lends 52 slots for them (52 more, 0.00 GB of experts out; 84-85 slots a layer now)
+
+(The first form of this freed the coldest experts' bytes and left their slots in place; the
+next misses read into those same slots, and a minute later the process stood above `RAM_GB`
+by everything the conversation had grown.) A large prompt step borrows the same way for as
+long as it runs -- 1.4 MB of activations a row past 512, 22.4 GB for a step of 16,511 rows --
+and gives the slots back at its end, so a step's size costs decode nothing: the plan no
+longer reserves a `K3_CHUNK` step's activations (85 slots a layer instead of 78 with the
+launcher's old 8,192-row steps). A slot a reader is filling, one a step is computing, a
+waiting prefetch and the card's pinned staging are never lent, and a layer keeps 32 slots
+(two tokens' experts); when the layers cannot give all that is asked the line says so.
+`K3_KV_GROW=0` and `K3_LEND=0` are the old behaviours, and a muxed serve (`KV_SLOTS>1`)
+keeps them. `tests/kimi_k3_lend_harness.py`: the logits and tokens with the caches grown and
+slots lent are those of the whole caches with nothing lent, `K3_CHECK` clean.
+
+**The start.** An HF checkpoint's dense matrices are 115 GB of BF16, read and quantized at
+every start (int4-g64 and int8, 31 GiB in RAM). Three things about that, measured on the
+4090 machine: (1) the layer loop's `parallel for ... if(par>1)` was a region to omp_spin.c
+even with one thread, so `w_load`'s own regions ran as teams of one and the whole load on one
+core: 138 s; with the loop outside a region it is 28 s (every core, C: at 4 GB/s). (2)
+`K3_DENSE_CACHE` keeps the quantized bytes in a file (33.9 GB), written by the first start
+(18 s more, once) and read by the next ones unbuffered, in 2 MiB pieces over every worker:
+5.6 s, and the start 9.7 s. A matrix comes from the file only when its name, shape and bits
+and its source's place in the checkpoint (the shard's size and time of writing, the tensor's
+offset, bytes and type) are the record's and its bytes sum to what was written; anything else
+is quantized as before and the file written again (`tests/kimi_k3_dense_cache_harness.py`:
+other bits, a changed byte, a touched checkpoint, a cut file -- the same logits every time).
+A start from the file also leaves the page cache alone, and the first prompt after it is
+sooner (28 against 34 s for 35 tokens). (3) A serve seeds half of every layer's cache from
+the experts the history used most (`AUTOPIN`). They are read by the drives' readers now (68
+GB in 7.2 s, 9.4 GB/s, where one after the other they came at 4.8) -- but on this model they
+are worth little: K3's router spreads its use evenly, a prompt finds 5.7% of its experts among the
+pinned 4.7%, and the half of the cache they hold is taken from the one that follows the
+conversation: decode 0.78 against 0.85 tok/s. The 4090 launcher starts without them
+(`-Pins` to have them back).
+
+**A prompt's steps.** A step reads the experts its rows route to once for all of them, and
+a few rows route to most of a layer's: the 127 rows that a 16,511-token prompt leaves after
+two steps of 8,192 read 850 GB for themselves, 77 s where the same rows inside a step cost
+2. So a prompt's steps are of one size and none is short (`k3_prompt_step`): up to an eighth
+past `K3_CHUNK` is one step, more is equal steps of at most that. With the lists and one
+step of 16,384 the 16,511-token prompt takes 221 s where three steps with the masks took
+375 (the launcher's old 8,192), the same logits at every position.
+
+**The same request again** (a regenerated reply, a client's retry). The photo taken at a
+prompt's end now keeps that position's logits, and a prompt that is exactly a photographed
+one is restored whole: nothing is computed and the first token is sampled from the kept
+logits. Before, at least one token had to be prefilled, which meant the deepest photo before
+the prompt's end -- the previous reply's -- and the 90 tokens after it: 27 s on Kimi K3.1 Pro
+for a request the engine had just answered (`tests/test_kimi_k3_ckpt.py`: turns sent again
+restore their own end, recompute 0 and answer the same; through the API on the real model
+the same 16,695-token request again starts its reply in 0.27 s and says the same).
 
 Download and run on the 4090 machine: `tools/download_kimi_k31_pro_4090.ps1` (folders
 `C:\AI\Kimi-K3.1-Pro`, `D:\AI\Models\Kimi-K3.1-Pro`) and

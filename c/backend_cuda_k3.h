@@ -70,6 +70,15 @@ K3CU_API int k3cu_mla(const float *Lc, const float *Rc, int N, int pos0, int C, 
 K3CU_API int k3cu_mla_mask(const float *Lc, const float *Rc, int N, int pos0, int C, const float *qv, const float *gv,
                            const int8_t *kvb, const float *kvbs, int H, int qn, int qr, int vh, int kvl, float scale,
                            const uint32_t *mask, int mw, float *ctx);
+/* k3cu_mla_mask's bytes with the rows past K positions computed over their lists: such a row's
+ * mask has K bits set and the kernels run over those K positions alone, where k3cu_mla_mask runs
+ * over all of the row's and weighs the rest 0 -- the same sums without their zero terms, at a
+ * cost that no longer grows with the context. The rows up to K positions attend all of theirs
+ * (their mask rows are not read). H at most 128. 0 when it cannot, or when coli_cuda_k3.dll is
+ * older than this call (the loader): k3cu_mla_mask then. */
+K3CU_API int k3cu_mla_sel(const float *Lc, const float *Rc, int N, int pos0, int C, const float *qv, const float *gv,
+                          const int8_t *kvb, const float *kvbs, int H, int qn, int qr, int vh, int kvl, float scale,
+                          const uint32_t *mask, int mw, int K, float *ctx);
 /* Kimi K3.1's lightning indexer for a prompt step: the mask [C][mw] k3cu_mla_mask takes, for the
  * rows past K positions (rows r0 = max(0, K-pos0) .. C-1; the rows before are left as they are):
  * the K positions of the highest scores, ties to the lower position, kimi_k3.c's k3_dsa_scores and

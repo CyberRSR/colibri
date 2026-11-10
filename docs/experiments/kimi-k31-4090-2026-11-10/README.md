@@ -1,0 +1,143 @@
+# Kimi K3.1 Pro on the RTX 4090 machine, 2026-11-10: the first measurements, and what they changed
+
+[moonshotai/Kimi-K3.1-Pro](https://huggingface.co/moonshotai/Kimi-K3.1-Pro) laid out by
+`tools/download_kimi_k31_pro_4090.ps1` (61.4% of every MoE layer's experts on `C:`, the rest
+on `D:`), on the Ryzen 9 7950X3D, 192 GB DDR5-5400, RTX 4090. The engine is `c/kimi_k3.c`
+with `coli_cuda_k3.dll`, built with MinGW-w64 GCC 14.2 (msvcrt) and CUDA 13.4 for sm_89.
+Until this day the K3.1 engine (branch `claude/kimi-k31-dsa-gpu-indexer-fix`) had been
+compiled and tested on tiny fixtures only: nothing in it had run on the model, and its GPU
+tests had not run on a card.
+
+Each run is `k31run.sh NAME NGEN [VAR=value ...]` (this folder): a fresh `kimi_k3.exe` with
+the 4090 launcher's settings (`K3_CUDA_DENSE=1` 20 GiB with the host copies released,
+`K3_GPU_EXPERTS=1`, `RAM_GB=174`, `K3_MAXT=131072`, two readers a drive, 16 threads,
+`AUTOPIN=0` unless a row says otherwise), `monitor.ps1` sampling the drives, the CPU, the
+GPU and the engine's memory every 2 s (`raw/*.csv`). Prompts: the chat question "What is the
+capital of France? Answer in one short sentence." (35 tokens; every run answered "The capital
+of France is Paris."), `long6k_prompt.txt` (5,862 tokens) and `p15k.txt` (16,511 tokens of
+this repository's own documentation and a request to summarize it). The 5,862 tokens are what
+Git Bash hands over when the text is an argument (it rewrites a few path-like words);
+`--prompt-file` reads the file itself, 5,847 tokens, and is what `p15k.txt` goes through.
+
+## What was wrong, in the order it was found
+
+| | found | now |
+|---|---|---|
+| the load | 138.5 s for 93 layers on one core (`raw/base1`): the layer loop was `#pragma omp parallel for ... if(par>1)`, and a region asked for one thread is still a region to omp_spin.c, so `w_load`'s own regions inside it were teams of one | the loop outside a region unless several layers load at once: 28 s (`raw/load1`, `f_dec_nodc*`) |
+| a grow's eviction | the conversation's rows past the plan freed the coldest experts' bytes but left their slots, which the next misses filled again: the process ended above `RAM_GB` by everything the caches had grown | the cache lends slots (`K3_LEND`): retired for as long as the bytes are held. Under `RAM_GB=110` a 16,511-row step takes the cache to its floor and the process stays at 105.6 GB (`raw/f_15k_ram110`) |
+| a prompt's last step | 127 rows after two steps of 8,192 read 850 GB for themselves: 77 s (`raw/p15k_8k`: 154.7 + 171.5 + 77.0 s) | steps of one size, none short (`k3_prompt_step`); the launcher's step 16,384 |
+| the selecting rows' attention | every row against every position, the unpicked ones weighing 0 (`k3cu_mla_mask`): 40.9 s of a 16,511-token prompt, growing with the square of the context | over the lists of the picks (`k3cu_mla_sel`): 9.6 s, the same bytes |
+| the start, every time | 115 GB of BF16 read and quantized | `K3_DENSE_CACHE`: the quantized bytes in a file, 5.6 s to read: the start 9.7 s |
+| the history's pins (a serve's default) | half of every layer's cache seeded from the history, read one expert after the other (4.8 GB/s) | read by the drives' readers (9.4 GB/s) -- and off in the launcher: they cost decode 8% (below) |
+| the same request again | at least one token had to be prefilled: the photo before the prompt's end and the 90 tokens after it, 27 s | the photo of a prompt's end keeps its logits: 0.27 s |
+
+Two of this day's own changes were wrong at first and are in the table as fixed, not found:
+the pins read through the readers picked one expert for every slot of a layer (the pick's
+"taken" test asked for a completed read: a prompt's cache hits 0.2%, `raw/serve1.log`; with
+the index asked instead 5.7%, and `pin_seed` now checks every pinned slot against the
+index), and a stale dense-cache file was deleted before its replacement was written, the
+drive trimming 34 GB under the load (the start that rewrote it took 134 s, `raw/serve1.log`;
+the old file now stays until the new one takes its name).
+
+## The same bytes
+
+Logits at every position of a prompt (`K3_LOGITS`), compared as files.
+
+| prompt | run | against | |
+|---|---|---|---|
+| 5,862 tokens | the launcher's profile, the first build (`g6k_1`, 124.0 s) | no GPU path at all, `K3_GPU_EXPERTS=0 K3_CUDA_DENSE=0` (`g6k_cpu`, 1,861.0 s) | the same 3,841,720,320 bytes |
+| 5,862 tokens | with the lending (`n6k_logits2`), with the lists (`s2_6k`) | the CPU alone | the same |
+| 5,862 tokens | the release build with `K3_CHECK=1` (`f_6k_ck`: no finding), and twice more (`f_6k_2`, `f_6k_3`) | the CPU alone | the same, three times |
+| 16,511 tokens | one step of 16,384 and 127 rows, masks (`p15k_16k`) | steps of 8,192, masks (`p15k_8k`) | the same 10,820,648,960 bytes |
+| 16,511 tokens | one step over the lists (`s2_15k`; the release build `f_15k`) | steps of 8,192, masks | the same |
+| 16,511 tokens | the release build under `RAM_GB=110` (`f_15k_ram110`) | steps of 8,192, masks, unpressed | the same |
+| 35 tokens + 20 of decode | the start that writes the dense cache (`s2_dcB`), the start that reads it (`s2_dcC`) | a start without it (`s2_dcA`) | the same |
+
+On a card, `tests/test_k3_cuda_experts.exe` (every case, `--dsa` among them: the picks, the
+masked attention and the attention over the lists against the CPU's loop at 3,000 and 30,000
+positions) reports 0 differing values. On the tiny K3.1 fixture the engine's hidden states
+agree with upstream's independent numpy reference (JustVugg/colibri#2713's
+`tools/k3_ref.py`, run here as `upstream_cross.py`) to rel-L2 1.2e-5 a layer and 4.0e-5 on the
+rows past `index_topk`.
+
+## The start
+
+| | init | of which |
+|---|---:|---|
+| the branch as it was (`base1`) | 138.5 s | the layers 135.1 s on one core, C: at 0.75 GB/s |
+| the layer loop outside a region (`load1`, `f_dec_nodc1/2`) | 28.0-29.6 s | the layers 24.5-27.7 s, C: at 3.7-4.4 GB/s, 13 cores busy |
+| `K3_DENSE_CACHE=1`, the start that writes the file (`s2_dcB`) | 48.0 s | 18.3 s writing 33.9 GB |
+| `K3_DENSE_CACHE=1`, the starts after (`f_dec_dc1/2`, `f_t15k`, ...) | 9.6-9.9 s | 5.3-5.8 s reading 33.9 GB (2 MiB pieces; 6.3-7.0 s with 8 MiB ones, `s2_dcC`) |
+| a serve with the history's pins, on top (`serve2.log`) | +7.2 s | 3,864 experts, 67.8 GB, by the drives' readers |
+
+Through the API (`coli serve`, the launcher's settings, `raw/serve3*`): the server answers
+`/v1/models` 11.3 s after its start.
+
+## Prompts
+
+| prompt | | prefill |
+|---|---|---:|
+| 35 tokens | after a start that quantized the checkpoint (`f_dec_nodc1/2`) | 33.4-34.8 s |
+| 35 tokens | after a start from the dense cache (`f_dec_dc1/2`: the page cache was left alone) | 28.3-28.7 s |
+| 5,862 tokens, one step | the release build (`f_t6k`) | 109.5 s |
+| 16,511 tokens | steps of 8,192, masks: the build before the lists at the launcher's old step (`s2_t15k_old`) | 375.1 s |
+| 16,511 tokens | one step over the lists: the release build (`s2_t15k_new`, `f_t15k`) | 221.5, 220.8 s |
+
+Where the 16,511-token step's 220.8 s go: attention 66.9 s (KDA 41.6, MLA 25.3 of which the
+core over the lists 9.5 and the index keys and picks 4.4), MoE 133.4 s (the routed experts
+53.9, the shared experts 42.8, the latent projections 13.2, the routers 8.4, the weighted
+sums 7.1). It reads 1,446 GB, which the two drives deliver in about 105 s: a step of this
+size waits for the card's exact kernels, not for the drives (a 5,862-token step, 109.5 s, is
+at the drives' pace). A step's activations are borrowed from the expert cache while it runs:
+22.4 GB for 16,511 rows, 1,276 slots lent and returned.
+
+## Decode
+
+Each pair alternated twice; 58 tokens of the 35-token prompt's reply.
+
+| | a token | tok/s | cache hit | read a token |
+|---|---:|---:|---:|---:|
+| the plan that reserved a step's activations, 78 slots a layer (`dec_old1/2`) | 1,113 / 1,110 ms | 0.90 | 65.2% | 12.3 GB |
+| the lending, 85 slots a layer (`dec_new1/2`) | 1,095 / 1,096 ms | 0.91 | 65.8% | 11.9 GB |
+| the history's pins, `AUTOPIN=1` (`pin_on1/2`) | 1,278 / 1,279 ms | 0.78 | 63.7% | 14.0 GB |
+| none, `AUTOPIN=0` (`pin_off1/2`) | 1,174 / 1,177 ms | 0.85 | 65.8% | 11.9 GB |
+| the dense cache read at the start (`f_dec_dc1/2`) | 1,181 / 1,173 ms | 0.85 | 65.8% | 11.9 GB |
+| the checkpoint quantized at the start (`f_dec_nodc1/2`) | 1,171 / 1,174 ms | 0.85 | 65.8% | 11.9 GB |
+
+The first two pairs ran in the morning and the others in the evening: the machine's own
+drift between them is 7% (the same build, 1,095 and 1,174 ms), so only the rows of a pair
+compare. Past `index_topk` positions a decode row's attention is the CPU's loop over 2,048
+picked rows in every MLA layer plus the index scores: 224 ms a token at 5,900 positions
+(`f_t6k`) and 244 at 16,500 (`f_15k_ram110`) against 120 at 35.
+
+## Through the API
+
+`api_session.py` against `coli serve` with the launcher's settings (`raw/serve3.log`, the
+engine's own lines; `raw/serve3_session.json`), `max_tokens` 48:
+
+| turn | prompt | reused | to the first token | the whole turn |
+|---|---:|---:|---:|---:|
+| a short question | 35 | 0 | 28.7 s | 45.0 s |
+| a follow-up, the history sent back | 78 | 48 | 15.4 s | 32.9 s |
+| a 16,511-token message appended | 16,602 | 91 | 228.6 s | 289.1 s |
+| a follow-up past `index_topk` | 16,695 | 16,649 | 27.6 s | 86.1 s |
+| the same request again | 16,695 | 16,695 (the photo of its end) | **0.27 s** | 58.2 s |
+
+The same session against the build before the photo kept its logits (`raw/serve2*`): the
+last turn 27.0 s to the first token. Both gave the same texts. A conversation longer than the
+served context (`api_overlong.py`, `-Context 8192`: 10,186 tokens, and 16,511, past the
+framing buffer too) is answered HTTP 400 `context_length_exceeded` in 0.2 s, twice, and the
+short question after it is answered: no restart (`raw/serve4.log`).
+
+## Not done
+
+- **A large step waits for the card.** 16,511 rows take 221 s where the drives need 105:
+  the exact kernels run the KDA layers, the shared and the routed experts one after the
+  other at about half of what the tile kernels reach alone.
+- **Decode past 2,048 positions** pays about 100 ms a token for the MLA layers' loop over
+  the picked rows on the CPU, and 2 ms more per 1,000 positions for the index scores (99
+  GMAC/s for one row, `tests/test_k3_dsa bench`).
+- **The dense cache reads at 6 GB/s**, the drive at 10: the matrices are read one after the
+  other, each over the team.
+- The numbers of `docs/kimi_k3-4090.md` are Kimi K3's; its shards are no longer on this
+  machine, so nothing here compares the two models on the same day.
