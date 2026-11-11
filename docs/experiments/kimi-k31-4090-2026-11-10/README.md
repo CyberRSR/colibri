@@ -145,7 +145,9 @@ framing), sent as a fresh conversation; `max_tokens` 32.
 The photo is taken by making each KDA layer's call in two at the position. With
 `K3_SNAP_TEST=3000` the CLI cuts the 5,862-token prompt's step the same way (138 KDA calls on
 the card instead of 69): the logits are `g6k_cpu.f32`'s at every position, the prompt 117.3 s
-with its logits written (`raw/root_6k_cut`).
+with its logits written (`raw/root_6k_cut`). Release r3's `kimi_k3.exe` (0fb3905d, this build)
+on the same prompt with no cut: `g6k_cpu.f32`'s logits again, 5,862 positions of 5,862
+(`raw/r3_6k`, 120.6 s with its logits written).
 
 ## Not done
 

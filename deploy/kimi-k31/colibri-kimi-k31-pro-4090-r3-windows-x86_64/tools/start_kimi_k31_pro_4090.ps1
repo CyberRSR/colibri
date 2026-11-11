@@ -50,8 +50,11 @@ param(
     # Photos of the recurrent state at every prompt's and reply's end (COLI_K3_CKPT, about
     # 434 MB each): a turn whose client sends the history back without its reasoning, or
     # edits a tool result, resumes from the deepest photo its prompt still matches and
-    # prefills only the rest, instead of the whole conversation again; 0 = off
-    [ValidateRange(0,8)][int]$Photos = 4,
+    # prefills only the rest, instead of the whole conversation again. One of them is the end
+    # of the system prompt (the instructions and tool declarations every conversation of a
+    # client begins with), taken inside the first prompt's step and kept: a new conversation
+    # starts after it instead of reading it again (K3_ROOT_PHOTO; four are the turns'). 0 = off
+    [ValidateRange(0,8)][int]$Photos = 5,
     [ValidateRange(1,65535)][int]$Port = 18080,
     # The quantized dense matrices kept in a file (K3_DENSE_CACHE): the first start writes it
     # (33 GB beside the model, or at this path), the next ones read it instead of reading and
@@ -157,7 +160,7 @@ foreach ($key in @('K3_LAYERS', 'K3_TRACE', 'K3_LOGITS', 'K3_X0', 'K3_MMAP', 'K3
 Write-Host "Kimi K3.1 Pro: $ModelDir$(if ($shardDirs.Count) { '; experts also from ' + ($shardDirs -join '; ') })"
 Write-Host "RAM $RamGB GB, CPU $Threads, readers $IoPerDrive per drive, prefetch $Prefetch, $(if ($env:K3_CUDA_DENSE -eq '1') { "dense matrices on the GPU up to $DenseGB GiB" } else { 'dense matrices on the CPU' })$(if ($env:K3_GPU_EXPERTS -eq '1') { ', a prompt step''s experts on the GPU too' })"
 Write-Host "K3.1's index scores and picks: $(if ($indexerOnGpu) { 'on the GPU (k3cu_dsa_mask)' } elseif ($Cpu -or $CpuExperts) { 'on the CPU, as asked' } else { 'ON THE CPU: a long prompt waits here, see coli_cuda_k3.dll' })"
-Write-Host "Context $Context tokens, replies up to $MaxOutput tokens, prompt steps of $Chunk (read-ahead $($env:K3_READAHEAD_GB) GB), $Photos turn photos"
+Write-Host "Context $Context tokens, replies up to $MaxOutput tokens, prompt steps of $Chunk (read-ahead $($env:K3_READAHEAD_GB) GB), $Photos photos (the system prompt's end and the turns')"
 Write-Host "Dense matrices' quantization: $(if ($NoDenseCache) { 'from the checkpoint at every start (-NoDenseCache)' } else { 'kept in ' + $(if ($DenseCache) { $DenseCache } else { Join-Path $ModelDir 'k3_dense_cache.bin' }) + ' (33 GB, written by the first start)' })"
 Write-Host "API: http://127.0.0.1:$Port/v1, model $ModelId"
 & python (Join-Path $EngineDir 'coli') serve --model $ModelDir --ram $RamGB --ctx $Context `

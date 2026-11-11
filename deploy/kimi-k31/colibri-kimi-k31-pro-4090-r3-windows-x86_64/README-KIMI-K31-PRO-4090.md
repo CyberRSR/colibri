@@ -9,7 +9,7 @@ row attends only the 2,048 earlier rows its layer's indexer scores highest. Ever
 format) is K3's. Sources: the model card and TokenSpeed's implementation,
 [lightseekorg/tokenspeed#3015](https://github.com/lightseekorg/tokenspeed/pull/3015).
 
-**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r2: `kimi_k3.exe` and
+**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r3: `kimi_k3.exe` and
 `coli_cuda_k3.dll` here were built on the RTX 4090 machine and checked there on the model
 itself (BUILD-INFO-K31.txt: the commit, the toolchain, the checks). Release kimi-k3-4090-r1's
 `kimi_k3.exe` does not read `dsa_config`: it would run every MLA layer dense, which is K3.1's
@@ -54,6 +54,7 @@ the launcher's settings, each run a fresh start:
 | a 16,511-token prompt | **221 s** (one step; 375 s in release r1's steps of 8,192) |
 | a follow-up of 90 tokens on a 16,600-token conversation | 28 s to the first token |
 | the same request again (a regenerated reply, a retry) | **0.27 s** to the first token (27 s before) |
+| a new conversation with the same system prompt (16,501 tokens of instructions) | **19.9 s** to the first token (219 s in release r2: the instructions read again) |
 | decode | 0.85-0.91 tok/s at a short context (the machine's own drift over a day), 0.73-0.80 right after a long prompt |
 
 The logits of the 5,862-token prompt are the same bytes at every position with this profile
@@ -62,7 +63,7 @@ GPU path at all (1,861 s on the CPU), three runs out of three and with `K3_CHECK
 the 16,511-token prompt are the same in one step as in steps of 8,192, and under
 `-RamGB 110`.
 
-What this release changed since r1's K3.1 pair (all of it keeps the bytes):
+What release r2 changed since r1's K3.1 pair (all of it keeps the bytes):
 
 - **The start.** The load ran on one core (138 s): a parallel region asked for one thread
   around the layer loop made every matrix's quantization a team of one. Now 28 s, and 9.7 s
@@ -85,6 +86,23 @@ What this release changed since r1's K3.1 pair (all of it keeps the bytes):
   among them.
 - **The same request again** is restored from the photo of its prompt's end, which now keeps
   the logits its first token is sampled from.
+
+What release r3 adds (2026-11-11; the bytes kept again):
+
+- **A new conversation.** Every conversation of one client begins with the same system prompt
+  -- an agent's instructions and tool declarations, 10-20 thousand tokens -- and the turns'
+  photos are all past the first user message, where two conversations already differ: a new
+  conversation read the instructions again, 220 s for 16.5k tokens. The state at the end of
+  the leading system messages is now photographed once and kept (`K3_ROOT_PHOTO`, from
+  `K3_ROOT_MIN`, 1,024, tokens; the launcher keeps five photos, `-Photos`, one of them this
+  one). It is taken inside the first prompt's step, at no cost: nothing of a step carries
+  from row to row but the KDA layers' state, so each KDA layer's call is made in two at the
+  position and its state copied between them -- the one call's bytes (the 5,862-token prompt
+  with the calls cut at row 3,000 has the CPU's logits at every position). A new conversation
+  then starts after the instructions: 19.9 and 20.3 s to the first token where it took 219 s,
+  the same replies. One system prompt at a time: a conversation with other instructions
+  takes the caches' rows, and the first client's next conversation reads its instructions
+  once more. `K3_ROOT_PHOTO=0` turns it off.
 
 ---
 
@@ -283,8 +301,9 @@ everywhere else:
 which the API returns as a 400 the client may compact. Nothing about a request stops the
 engine any more.
 
-**Agent turns.** The profile keeps four photos of the recurrent state (`COLI_K3_CKPT=4`,
-about 434 MB each), taken at every prompt's and every reply's end. OpenAI-compatible
+**Agent turns.** The profile keeps five photos of the recurrent state (`COLI_K3_CKPT=5`,
+about 434 MB each): the system prompt's end (above) and four taken at every prompt's and
+every reply's end. OpenAI-compatible
 agents send the model's earlier replies back without their reasoning; the conversation
 then differs from what the engine holds right after the previous prompt, and without a
 photo the whole conversation would be computed again -- on K3 here, hours for a long
