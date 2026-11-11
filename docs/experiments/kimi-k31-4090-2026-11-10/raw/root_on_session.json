@@ -1,0 +1,35 @@
+{
+ "ready_after_s": 10.9,
+ "turns": [
+  {
+   "ttft_s": 222.59,
+   "total_s": 262.89,
+   "usage": {
+    "prompt_tokens": 16539,
+    "completion_tokens": 19,
+    "total_tokens": 16558
+   },
+   "text": "The engine was first written for GLM-5.2."
+  },
+  {
+   "ttft_s": 19.93,
+   "total_s": 34.36,
+   "usage": {
+    "prompt_tokens": 16534,
+    "completion_tokens": 10,
+    "total_tokens": 16544
+   },
+   "text": "Vulkan and CUDA."
+  },
+  {
+   "ttft_s": 20.34,
+   "total_s": 50.28,
+   "usage": {
+    "prompt_tokens": 16535,
+    "completion_tokens": 21,
+    "total_tokens": 16556
+   },
+   "text": "The routed experts stream from disk, read when the router asks for them."
+  }
+ ]
+}

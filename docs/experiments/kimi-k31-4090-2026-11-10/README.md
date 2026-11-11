@@ -30,6 +30,7 @@ Git Bash hands over when the text is an argument (it rewrites a few path-like wo
 | the start, every time | 115 GB of BF16 read and quantized | `K3_DENSE_CACHE`: the quantized bytes in a file, 5.6 s to read: the start 9.7 s |
 | the history's pins (a serve's default) | half of every layer's cache seeded from the history, read one expert after the other (4.8 GB/s) | read by the drives' readers (9.4 GB/s) -- and off in the launcher: they cost decode 8% (below) |
 | the same request again | at least one token had to be prefilled: the photo before the prompt's end and the 90 tokens after it, 27 s | the photo of a prompt's end keeps its logits: 0.27 s |
+| a new conversation (2026-11-11, below) | the system prompt read again: every photo is past the first user message | the system prompt's end photographed inside the first prompt's step and kept: 219 -> 20 s to the first token after 16,501 tokens of instructions |
 
 Two of this day's own changes were wrong at first and are in the table as fixed, not found:
 the pins read through the readers picked one expert for every slot of a layer (the pick's
@@ -128,6 +129,23 @@ last turn 27.0 s to the first token. Both gave the same texts. A conversation lo
 served context (`api_overlong.py`, `-Context 8192`: 10,186 tokens, and 16,511, past the
 framing buffer too) is answered HTTP 400 `context_length_exceeded` in 0.2 s, twice, and the
 short question after it is answered: no restart (`raw/serve4.log`).
+
+## A new conversation with the same system prompt (2026-11-11)
+
+`api_root.py` against `coli serve` with the launcher's settings (`serve_root.sh`): each
+conversation is `[system, user]`, the system message `p15k.txt` (16,501 tokens with its
+framing), sent as a fresh conversation; `max_tokens` 32.
+
+| conversation | `K3_ROOT_PHOTO=0` (`raw/root_off*`) | with the photo (`raw/root_on*`) | reply |
+|---|---:|---:|---|
+| 1 | 221.3 s to the first token | 222.6 s (the photo taken inside the step, at 16,501 tokens) | the same |
+| 2, a new one | 219.2 s (16,534 tokens computed) | **19.9 s** (33 computed) | the same |
+| 3, a new one | -- | 20.3 s (34 computed) | |
+
+The photo is taken by making each KDA layer's call in two at the position. With
+`K3_SNAP_TEST=3000` the CLI cuts the 5,862-token prompt's step the same way (138 KDA calls on
+the card instead of 69): the logits are `g6k_cpu.f32`'s at every position, the prompt 117.3 s
+with its logits written (`raw/root_6k_cut`).
 
 ## Not done
 

@@ -1,0 +1,47 @@
+Kimi K3.1 Pro: C:\AI\Kimi-K3.1-Pro; experts also from D:\AI\Models\Kimi-K3.1-Pro
+RAM 174 GB, CPU 16, readers 2 per drive, prefetch 1, dense matrices on the GPU up to 20 GiB, a prompt step's experts on the GPU too
+K3.1's index scores and picks: on the GPU (k3cu_dsa_mask)
+Context 131072 tokens, replies up to 4096 tokens, prompt steps of 16384 (read-ahead 20 GB), 4 turn photos
+Dense matrices' quantization: kept in C:\AI\Kimi-K3.1-Pro\k3_dense_cache.bin (33 GB, written by the first start)
+API: http://127.0.0.1:18090/v1, model kimi-k3.1-pro
+[CUDA] device 0: NVIDIA GeForce RTX 4090, 25.8 GB VRAM, sm_89
+[gateway] input modalities: text
+OpenAI-compatible API listening on http://127.0.0.1:18090/v1
+[api] 127.0.0.1 - "POST /v1/chat/completions HTTP/1.1" 200 -
+[SPLIT] +D:\AI\Models\Kimi-K3.1-Pro -> 92 shard(s)
+[SPLIT] model across 2 dir(s): 188 shard(s) total (primary C:\AI\Kimi-K3.1-Pro -> 96 shard(s)), no duplication
+[OMP] spinning team: 16 threads spin 2000 us between regions (COLI_OMP_SPIN_US; COLI_OMP_SPIN=0: libgomp's team)
+[K3] loaded layer 8/93 (1.1s, RSS 3.2 GB)
+[K3] loaded layer 16/93 (1.6s, RSS 6.0 GB)
+[K3] loaded layer 24/93 (2.1s, RSS 8.7 GB)
+[K3] loaded layer 32/93 (2.6s, RSS 11.5 GB)
+[K3] loaded layer 40/93 (3.1s, RSS 14.3 GB)
+[K3] loaded layer 48/93 (3.6s, RSS 17.1 GB)
+[K3] loaded layer 56/93 (4.1s, RSS 19.8 GB)
+[K3] loaded layer 64/93 (4.6s, RSS 22.6 GB)
+[K3] loaded layer 72/93 (5.1s, RSS 25.4 GB)
+[K3] loaded layer 80/93 (5.6s, RSS 28.2 GB)
+[K3] loaded layer 88/93 (6.1s, RSS 30.9 GB)
+[K3] loaded layer 93/93 (6.5s, RSS 32.7 GB)
+[K3] dense cache: 1025 matrices, 33.9 GB read from C:\AI\Kimi-K3.1-Pro/k3_dense_cache.bin in 5.7s (K3_DENSE_CACHE=0: quantized from the checkpoint at every start)
+[K3-CUDA] dense: 372 of 1001 matrices on GPU 0, 20.00 of 31.32 GiB (budget 20.00 GiB, 22.49 free); their host copies released; the CPU's arithmetic there (coli_cuda_k3.dll)
+[K3-CUDA] experts: a prompt step's routed experts (steps of 32 rows or more) on GPU 0 beside the CPU, the CPU's bytes (K3_GPU_EXPERTS=0: the CPU's alone)
+[K3][RAM_GB=174.0] resident 12.4 GB + reserve 25.9 GB (page cache 2.5, activations 1.2, read-ahead 20.0, KV 24x4096 0.3, checkpoints 4 1.9) -> 135.7 GB for experts; cache 619->84/layer (17.5 MB/slot, 92 layers; projected peak 173.9 GB)
+[K3] K3_EXPERT_GB=1000 does not fit alongside the 12.4 GB already resident. It is a request, not a reservation.
+[K3] KV: the caches grow with the conversation (K3_KV_GROW=0: allocated whole at the first request). 66.0 KB a position, a request starts at its prompt plus 1024 answer positions and doubles, and a grow the machine cannot pay for comes out of the coldest experts' slots
+[K3] init done in 9.4s | 93 layers | expert cache 84/layer (17.5 MB/slot) | RSS 33.9 GB
+[K3-CKPT] enabled: 4 recurrent-state slots (452.8 MB each, RAM)
+[USAGE] expert history: 512426224 selections (C:\AI\Kimi-K3.1-Pro/.coli_usage)
+[K3] expert readers: 4 on 2 device(s)
+[PIN] 3864 experts pinned from history (512426224 selections, 100% confidence) -- 7.2s, 67.8 GB read by the drives' readers
+[K3] tokenizer.json loaded (family=kimi)
+[KDA] L0 metal=0 P=12288 H=96 hd=128 K=4
+[K3-PATH] L0 attn=KDA metal=0
+[K3] prompt of 35 tokens (0 reused) in 25.2s: attention 0.7s (MLA 0.1, K3.1's index keys and picks 0.0), MoE 24.4s (router and reads issued 0.1, latent 0.2, shared 1.0, routed experts computed 0.7, waiting for reads 21.3, their inputs 0.0, their sums 0.0)
+[K3]   its experts: cache hit 5.7% (1000 of 17685 asked), read ahead 0 experts, 0 taken by a step
+[K3-FMT] L0 KDA: q.fmt=4 gs=64 k.fmt=4 gs=64 v.fmt=4 gs=64 g.fmt=4 gs=64
+[K3-FMT] L3 MLA: qa.fmt=1 gs=0 qb.fmt=1 gs=0 kva.fmt=1 gs=0
+[api] 127.0.0.1 - "POST /v1/chat/completions HTTP/1.1" 200 -
+[api] 127.0.0.1 - "POST /v1/chat/completions HTTP/1.1" 200 -
+[api] 127.0.0.1 - "POST /v1/chat/completions HTTP/1.1" 200 -
+[api] 127.0.0.1 - "POST /v1/chat/completions HTTP/1.1" 200 -

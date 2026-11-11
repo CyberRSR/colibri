@@ -113,13 +113,14 @@ over every worker and once a step: a reply after a 25,000-token prompt comes at 
 second, against 2.6 at a short context ([Decode at long contexts](docs/mimo-cuda.md#decode-at-long-contexts)).
 
 **Kimi K3.1 Pro on the same machine** (moonshotai/Kimi-K3.1-Pro: 2.8T parameters, 1.56 TB,
-a DSA indexer on every MLA layer; release `kimi-k31-pro-4090-r2`, `START-KIMI-K31-PRO.cmd`,
+a DSA indexer on every MLA layer; release `kimi-k31-pro-4090-r3`, `START-KIMI-K31-PRO.cmd`,
 model id `kimi-k3.1-pro`). The card computes a prompt in the CPU's arithmetic: the logits of
 a 5,862-token prompt are the same bytes at every position as a run with no GPU path at all
 (1,861 s there, 110 s here). The engine is ready 10 s after its start, a 16,511-token prompt
 takes 221 s in one pass over the drives, a reply comes at 0.85-0.9 tokens a second (12 GB of
-experts read per token: the drives' pace), and the same request sent again starts answering in
-0.3 s. [How it runs](docs/kimi_k3.md#kimi-k31) ·
+experts read per token: the drives' pace), the same request sent again starts answering in
+0.3 s, and a new conversation with the same system prompt (16,500 tokens of instructions) in
+20 s instead of 220. [How it runs](docs/kimi_k3.md#kimi-k31) ·
 [the measurements](docs/experiments/kimi-k31-4090-2026-11-10/README.md).
 
 <details>

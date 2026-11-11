@@ -243,6 +243,8 @@ Judge quantization choices on real-text logits, not synthetic-vector norms.
 | `K3_KV_GEN` | 1024 | answer positions allocated with the prompt's, before the caches start doubling |
 | `K3_KV_MIN` | 4096 | positions the RAM plan projects the caches for while the session is still idle — what it does not project, the expert cache is allowed to hold |
 | `K3_LEND` | 1 | the expert cache lends slots to what the RAM plan did not count -- the conversation's rows past `K3_KV_MIN` (they stay) and a prompt step's activations past 512 rows (until the step ends): a lent slot is retired, its bytes freed and nothing read into it, and comes back with the bytes (0 = the plan reserves a whole `K3_CHUNK` step's activations instead; off under `KV_SLOTS>1`) |
+| `K3_ROOT_PHOTO` | 1 | with `COLI_K3_CKPT` of 2 or more: the state at the end of a chat's leading system records photographed inside the step that crosses it and kept, so a new conversation with the same system prompt starts after it (0 = off) |
+| `K3_ROOT_MIN` | 1024 | the fewest tokens of leading system records worth that photo |
 | `K3_LAYERS` | all | truncate the stack (validation) |
 | `K3_TRACE` | — | dump f32 hidden state after every layer (validation) |
 | `K3_X0` | — | inject input rows, bypass embedding (validation) |
@@ -756,6 +758,24 @@ the prompt's end -- the previous reply's -- and the 90 tokens after it: 27 s on 
 for a request the engine had just answered (`tests/test_kimi_k3_ckpt.py`: turns sent again
 restore their own end, recompute 0 and answer the same; through the API on the real model
 the same 16,695-token request again starts its reply in 0.27 s and says the same).
+
+**A new conversation.** Every conversation of one client begins with the same system
+records -- an agent's instructions and tool declarations, 10-20 thousand tokens -- and the
+turns' photos are all past the first user message, where two conversations already differ:
+a new conversation read the instructions again, a whole pass over the drives. The state at
+the end of the leading system records is now photographed once and kept pinned
+(`K3_ROOT_PHOTO`, on with two photo slots or more; from `K3_ROOT_MIN`, 1,024, tokens). It is
+taken inside the step that crosses the position, at no cost: nothing of a step carries
+from row to row but the KDA layers' state, so each KDA layer's call is made in two there
+-- the rows before the position, then the rest -- and its state copied between them. A row
+is computed alone in any call of two rows or more, so the two calls give the one call's
+bytes (`K3_SNAP_TEST`: a 5,862-token prompt with the calls cut at row 3,000 on the card
+has the CPU's logits at every position). On Kimi K3.1 Pro, a 16,501-token system message
+and a question: the first conversation 222.6 s to its first token as before, each new one
+after it **19.9 s** (33 tokens to compute) where it took 219.2 s, the same replies. One
+system prompt at a time: another client's conversation takes the caches' rows, and the
+first client's next conversation reads its instructions once more
+(`tests/kimi_k3_root_harness.py`).
 
 Download and run on the 4090 machine: `tools/download_kimi_k31_pro_4090.ps1` (folders
 `C:\AI\Kimi-K3.1-Pro`, `D:\AI\Models\Kimi-K3.1-Pro`) and

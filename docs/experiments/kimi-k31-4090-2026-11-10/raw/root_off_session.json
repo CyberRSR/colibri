@@ -1,0 +1,25 @@
+{
+ "ready_after_s": 10.2,
+ "turns": [
+  {
+   "ttft_s": 221.27,
+   "total_s": 252.68,
+   "usage": {
+    "prompt_tokens": 16539,
+    "completion_tokens": 19,
+    "total_tokens": 16558
+   },
+   "text": "The engine was first written for GLM-5.2."
+  },
+  {
+   "ttft_s": 219.2,
+   "total_s": 233.02,
+   "usage": {
+    "prompt_tokens": 16534,
+    "completion_tokens": 10,
+    "total_tokens": 16544
+   },
+   "text": "Vulkan and CUDA."
+  }
+ ]
+}

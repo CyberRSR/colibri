@@ -2740,7 +2740,7 @@ static int k3_kda_gpu(Model *m, Kda *a, int li, const float *x, int C, float *ou
     return ok;
 }
 #endif
-static void kda_forward(Model *m, Layer *l, int li, const float *x, int C, float *out){
+static void kda_forward_rows(Model *m, Layer *l, int li, const float *x, int C, float *out){
     Cfg *c=&m->c; Kda *a=&l->a;
     int P=c->kda_proj, H=c->kda_heads, hd=c->kda_hd, K=c->conv_k;
     { static int once=0; if(li==0 && !once){ once=1;
@@ -2927,6 +2927,38 @@ static void kda_forward(Model *m, Layer *l, int li, const float *x, int C, float
         free(meta_oh); free(meta_alpha); free(meta_beta);
     }
 #endif
+}
+/* A photo taken inside a step: the recurrent state after the step's first g_k3_snap_rows
+ * rows, layer by layer into g_k3_snap_blob (K3Ckpt's layout: every KDA layer's state, then
+ * its three conv windows). The state lives nowhere between two rows of a layer's call, so
+ * the layer's call is made in two -- the rows before the photo's position, then the rest --
+ * and the state copied between them. A row is computed alone in any call of two rows or
+ * more, on the card as on the CPU, so the two calls give the one call's bytes; a part of one
+ * row would run the one-row kernels, and is not cut (the photo is then not taken). Nothing
+ * else of a step carries from row to row: the MLA caches and the index keys are indexed by
+ * position and stay where they are written. */
+static float *g_k3_snap_blob; static int g_k3_snap_rows;
+static void k3_snap_layer(Model *m, int li){
+    const Cfg *c=&m->c;
+    const size_t ks=(size_t)c->kda_heads*c->kda_hd*c->kda_hd, cw=(size_t)c->kda_proj*c->conv_k;
+    size_t o=0;
+    for(int i=0;i<li;i++) if(m->L[i].kda) o+=ks+3*cw;
+    float *b=g_k3_snap_blob+o;
+    memcpy(b,m->kstate[li],ks*sizeof(float)); b+=ks;
+    memcpy(b,m->cwq[li],cw*sizeof(float)); b+=cw;
+    memcpy(b,m->cwk[li],cw*sizeof(float)); b+=cw;
+    memcpy(b,m->cwv[li],cw*sizeof(float));
+}
+static void kda_forward(Model *m, Layer *l, int li, const float *x, int C, float *out){
+    const int r=g_k3_snap_rows;
+    if(g_k3_snap_blob&&!m->mux_rows&&r>=2&&C-r>=2){
+        const int64_t D=m->c.hidden;
+        kda_forward_rows(m,l,li,x,r,out);
+        k3_snap_layer(m,li);
+        kda_forward_rows(m,l,li,x+(int64_t)r*D,C-r,out+(int64_t)r*D);
+        return;
+    }
+    kda_forward_rows(m,l,li,x,C,out);
 }
 
 /* ---------- gated MLA layer (chunk of C tokens, NoPE, absorb; projections
@@ -6371,6 +6403,22 @@ static int k3_tool_tag(const char *t){
  * Returns the prompt's length, -1 for a payload that does not parse, -2 for a
  * tokenizer without the XTML tokens and -3 for a conversation that does not
  * fit `cap` (the caller answers that one over the wire; the engine stays up). */
+/* The tokens of a conversation's leading system records (its instructions and tool
+ * declarations: what every conversation of one client begins with), counted from the
+ * builder's first token; 0 when it begins with something else. K3_ROOT_PHOTO (default 1)
+ * photographs the state there once and keeps it (k3_serve_start), from K3_ROOT_MIN tokens
+ * (1,024) on: a new conversation with the same instructions starts after them. */
+static int g_k3_chat_root;
+static int k3_root_photo_on(void){
+    static int on=-1;
+    if(on<0){ const char *e=getenv("K3_ROOT_PHOTO"); on=!e||!*e||atoi(e)!=0; }
+    return on;
+}
+static int k3_root_min(void){
+    static int n=-1;
+    if(n<0){ const char *e=getenv("K3_ROOT_MIN"); n=e&&*e?atoi(e):1024; if(n<2) n=2; }
+    return n;
+}
 static int chat_build_wire(Tok *T, const char *wire, int nwire, int *thinking,
                            int *ids, int cap, int *sp){
     ChatB b={T,ids,0,cap,
@@ -6386,6 +6434,8 @@ static int chat_build_wire(Tok *T, const char *wire, int nwire, int *thinking,
     const char *p=wire, *end=wire+nwire;
     if(nwire<8||memcmp(p,"K3CHAT1\n",8)) return -1;
     p+=8; *thinking=0;
+    int lead=1;   /* still in the leading system records */
+    g_k3_chat_root=0;
     while(p<end){
         const char *nl=memchr(p,'\n',(size_t)(end-p));
         if(!nl) return -1;
@@ -6395,6 +6445,7 @@ static int chat_build_wire(Tok *T, const char *wire, int nwire, int *thinking,
             if(sscanf(p,"G %d",&v)!=1) return -1;
             *thinking=!!v; p=nl+1; break;
         }
+        if(*p!='Y'&&*p!='M') lead=0;
         if(*p=='A'){
             int nr=-1, nt=-1;
             if(sscanf(p,"A %d %d",&nr,&nt)!=2||nr<0||nt<0||nl+1+nr+nt>end) return -1;
@@ -6434,6 +6485,7 @@ static int chat_build_wire(Tok *T, const char *wire, int nwire, int *thinking,
             cb_open_begin(&b,"message"); cb_attr(&b,"role","system"); cb_attr(&b,"type",typ); cb_end(&b);
             cb_text(&b,body);
             cb_close(&b,"message"); cb_special(&b,b.sp_eom);
+            if(lead) g_k3_chat_root=b.n;
             free(typ); free(body); p=nl+1+ntp+nb; continue;
         }
         if(*p=='O'){                /* tool result (#1143): O <index> <name-len> <content-len> */
@@ -6519,6 +6571,7 @@ static int chat_build_wire(Tok *T, const char *wire, int nwire, int *thinking,
         const char *r=!strcmp(role,"developer")?"system":role;
         if(strcmp(r,"system")&&strcmp(r,"user")&&strcmp(r,"assistant")){ free(text); return -1; }
         chat_message(&b,r,text,!strcmp(r,"assistant"));
+        if(lead&&!strcmp(r,"system")) g_k3_chat_root=b.n; else lead=0;
         free(text); p=nl+1+nb;
     }
     if(!b.cont){                 /* a continuation already emitted the open final turn */
@@ -6685,13 +6738,14 @@ static int k3_ckpt_iobuf_ready(const Model *m){
     return g_k3_ckpt_iobuf!=NULL;
 }
 
-static int k3_ckpt_disk_write(Model *m, int slot, int pos){
+static int k3_ckpt_disk_write(Model *m, int slot, int pos, const float *src){
     char path[512], tmp[524];
     k3_ckpt_file(path,sizeof path,slot);
     snprintf(tmp,sizeof tmp,"%s.tmp",path);
     size_t floats=k3_ckpt_blob_floats(m);
     if(!k3_ckpt_iobuf_ready(m)) return 0;
-    k3_ckpt_copy(g_k3_ckpt_iobuf,m,1);
+    if(src) memcpy(g_k3_ckpt_iobuf,src,floats*sizeof(float));   /* a photo taken inside a step */
+    else k3_ckpt_copy(g_k3_ckpt_iobuf,m,1);
     FILE *f=fopen(tmp,"wb"); if(!f) return 0;
     uint64_t header[3]={K3_CKPT_FILE_MAGIC,(uint64_t)pos,(uint64_t)floats};
     int ok=fwrite(header,sizeof header,1,f)==1 &&
@@ -6760,7 +6814,7 @@ static void k3_ckpt_save(Model *m, const float *logit, int pin){
     k->fed=fed;
     memcpy(k->fed,m->kvp.fed,(size_t)pos*sizeof(int));
     if(g_k3_ckpt_dir){
-        if(!k3_ckpt_disk_write(m,victim,pos)){ k->pos=0; return; }
+        if(!k3_ckpt_disk_write(m,victim,pos,NULL)){ k->pos=0; return; }
     } else k3_ckpt_copy(k->blob,m,1);
     if(logit){
         if(!k->logit) k->logit=(float*)malloc((size_t)m->c.vocab*sizeof(float));
@@ -6786,6 +6840,49 @@ static const float *k3_ckpt_logit_at(const int *ids, int pos){
         return k->logit;
     }
     return NULL;
+}
+
+/* the slot of the photo that covers exactly ids[0..pos), or -1 */
+static int k3_ckpt_at(const int *ids, int pos){
+    if(g_k3_ckpt_slots<1||pos<1) return -1;
+    for(int s=0;s<g_k3_ckpt_slots;s++){
+        const K3Ckpt *k=&g_k3_ckpt[s];
+        if(k3_ckpt_slot_full(k)&&k->pos==pos&&!memcmp(k->fed,ids,(size_t)pos*sizeof(int))) return s;
+    }
+    return -1;
+}
+/* A photo of ids[0..pos) from a blob filled inside a step (k3_snap_layer): the system
+ * prompt's end. It is pinned -- the turns' photos do not take its slot -- and takes the
+ * least recently used slot that is not pinned itself, or the oldest pinned one. */
+static void k3_ckpt_put(Model *m, const float *blob, const int *ids, int pos){
+    if(g_k3_ckpt_slots<1||pos<1||!blob) return;
+    int victim=k3_ckpt_at(ids,pos);
+    if(victim>=0){ g_k3_ckpt[victim].pinned=1; g_k3_ckpt[victim].used=++g_k3_ckpt_clock; return; }
+    for(int pass=0;pass<2&&victim<0;pass++)
+        for(int s=0;s<g_k3_ckpt_slots;s++){
+            K3Ckpt *cand=&g_k3_ckpt[s];
+            if(!pass&&cand->pinned) continue;
+            if(!k3_ckpt_slot_full(cand)){ victim=s; break; }
+            if(victim<0||cand->used<g_k3_ckpt[victim].used) victim=s;
+        }
+    if(victim<0) return;
+    K3Ckpt *k=&g_k3_ckpt[victim];
+    const size_t floats=k3_ckpt_blob_floats(m);
+    if(!g_k3_ckpt_dir&&!k->blob){
+        k->blob=malloc(floats*sizeof(float));
+        if(!k->blob) return;                  /* optimisation, never a failure */
+    }
+    int *fed=realloc(k->fed,(size_t)pos*sizeof(int));
+    if(!fed) return;
+    k->fed=fed;
+    memcpy(k->fed,ids,(size_t)pos*sizeof(int));
+    if(g_k3_ckpt_dir){
+        if(!k3_ckpt_disk_write(m,victim,pos,blob)){ k->pos=0; return; }
+    } else memcpy(k->blob,blob,floats*sizeof(float));
+    free(k->logit); k->logit=NULL;
+    k->pinned=1; k->pos=pos; k->used=++g_k3_ckpt_clock;
+    fprintf(stderr,"[K3-CKPT] the system prompt's end photographed at %d tokens: a conversation that "
+            "begins with them starts after them (K3_ROOT_PHOTO=0: off)\n",pos);
 }
 
 /* Deepest valid photo for this prompt; restores it and returns the covered
@@ -7088,6 +7185,7 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
     int cap=max_ctx+4096, *ids=malloc((size_t)cap*sizeof(int)), np=0;
     if(!ids){ coli_serve_write_error(stdout,q->id,"out of memory"); return 0; }
     int sp[4]={-1,-1,-1,-1}, chat=0, thinking=0;
+    int chat_root=0;   /* the position after the conversation's leading system records, 0: none */
     if(m->c.bos>=0) ids[np++]=m->c.bos;
     if(q->plen>=8&&!memcmp(q->payload,"K3CHAT1\n",8)){
         int n=chat_build_wire(T,q->payload,q->plen,&thinking,ids+np,cap-np,sp);
@@ -7118,7 +7216,7 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
                     cap,max_ctx);
         } else if(n<0){
             coli_serve_write_error(stdout,q->id,"invalid K3 chat payload"); free(ids); return 0;
-        } else { np+=n; chat=1; }
+        } else { chat_root=g_k3_chat_root>0?np+g_k3_chat_root:0; np+=n; chat=1; }
     } else {
         np+=tok_encode(T,q->payload,q->plen,ids+np,cap-np);
     }
@@ -7175,6 +7273,18 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
                 n,k3_ckpt_reserve_gb(m,n));
     }
     int reuse=prepare_request_state(m,ids,np,np+q->max_tok+8);
+    /* The system prompt's end, photographed once and kept: every conversation of a client
+     * begins with the same instructions and tool declarations (10-20 thousand tokens for an
+     * agent, a whole pass over the drives), and without a photo there a new conversation
+     * read them again -- the turns' photos are all past the first user message, where the
+     * conversations already differ. The photo is taken inside the step that crosses the
+     * position (kda_forward), so the first conversation pays nothing for it. */
+    int root=0;
+    if(chat_root>=k3_root_min()&&chat_root<np-1&&k3_root_photo_on()&&g_k3_ckpt_slots>=2&&g_k3_mux_slots==1){
+        const int have=k3_ckpt_at(ids,chat_root);
+        if(have>=0){ g_k3_ckpt[have].pinned=1; g_k3_ckpt[have].used=++g_k3_ckpt_clock; }
+        else if(chat_root>reuse) root=chat_root;
+    }
     /* Il riporto per il primo token fresco: i logit salvati con la foto che si
      * e appena rimessa. Senza foto resta spento e la prima posizione esce con
      * " nan 0", come deve. */
@@ -7221,9 +7331,15 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
     const int several=k3_prompt_step(np-reuse,chunk)<np-reuse;
     for(int i=reuse,C;i<np;i+=C){
         C=k3_prompt_step(np-i,chunk);
+        float *snap=NULL;   /* the root's photo, when this step crosses it two rows or more from either end */
+        if(root>i+1&&root<i+C-1&&(snap=malloc(k3_ckpt_blob_floats(m)*sizeof(float)))){
+            g_k3_snap_blob=snap; g_k3_snap_rows=root-i; }
         free(lo); lo=step_chunk_ex(m,ids+i,i,C,poll?k3_serve_poll_cancel:NULL,poll,
                                    &prefill_cancelled);
-        if(prefill_cancelled) break;
+        g_k3_snap_blob=NULL; g_k3_snap_rows=0;
+        if(prefill_cancelled){ free(snap); break; }
+        if(snap){ k3_ckpt_put(m,snap,ids,root); free(snap); }
+        else if(root==i+C) k3_ckpt_save(m,NULL,1);   /* the step ended there: the live state is the root's */
         if(several){   /* a prompt of several steps: where it is (a step can take minutes) */
             K3StageClock done; k3_stage_clock(m,&done);
             char what[96];
@@ -7712,10 +7828,19 @@ int main(int argc, char **argv){
         fprintf(stderr,"[K3] K3_TRACE set: prefill chunk forced to 1\n");
     }
     double t0=now_s(), pf0=k3_page_faults(); float *lo=NULL;
+    /* K3_SNAP_TEST=N (tests): the KDA layers' calls of the step that crosses position N made in
+     * two, as the system prompt's photo makes them (kda_forward) -- the logits must not move */
+    const int snap_at=getenv("K3_SNAP_TEST")?atoi(getenv("K3_SNAP_TEST")):0;
     for(int i=0,Cc;i<np;i+=Cc){
         Cc=k3_prompt_step(np-i,chunk);
         if(lo) free(lo);
+        float *snap=NULL;
+        if(snap_at>i+1&&snap_at<i+Cc-1&&(snap=malloc(k3_ckpt_blob_floats(&m)*sizeof(float)))){
+            g_k3_snap_blob=snap; g_k3_snap_rows=snap_at-i;
+            fprintf(stderr,"[K3] K3_SNAP_TEST: the KDA layers' calls of the step at %d cut after %d rows\n",i,snap_at-i);
+        }
         lo=step_chunk(&m,ids+i,i,Cc);
+        g_k3_snap_blob=NULL; g_k3_snap_rows=0; free(snap);
         fprintf(stderr,"\r[K3] prefill %d/%d (%.1fs)",i+Cc,np,now_s()-t0);
     }
     if(g_lfp){ fclose(g_lfp); g_lfp=NULL; }
