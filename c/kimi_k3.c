@@ -113,6 +113,16 @@
  *                        COLI_K3_CKPT (0 included) always wins. Photos never
  *                        outlive the process: after a restart the MLA rows
  *                        are gone, so no restore could be valid.
+ *   K3_SESSIONS=N        serve: up to N conversations kept beside the live one
+ *                        (k3_sessions.h): a request of another conversation puts
+ *                        the live one aside instead of writing over it, and its
+ *                        next turn takes it back. 0/unset = off
+ *   K3_SESSION_DIR=dir   ... and in files there, read again after a restart
+ *   K3_SESSION_GB=F      RAM for the kept ones together with the live one's rows
+ *                        past the plan (8; 0 with K3_SESSION_DIR: files only)
+ *   K3_SESSION_DISK_GB=F the files' bytes at most (64)
+ *   K3_SESSION_MIN=N     the fewest tokens of a conversation worth keeping (1024)
+ *   K3_SESSION_IDLE=S    the live conversation written after S s with no request (30)
  *   COLI_TEMP=F          0 = greedy (default), else softmax temperature
  */
 #define _GNU_SOURCE
@@ -5914,6 +5924,11 @@ static void k3_embed(Model *m, const int *ids, int pos0, int C, float *hidden){
  * A slot a reader is still filling, one a step is computing, a waiting prefetch and the
  * device's pinned staging (pin_mem: cudaHostAlloc's, which is not given back) stay. */
 static double g_k3_kv_bytes;               /* the caches' bytes allocated now */
+static double g_k3_sess_rows, g_k3_sess_extra;   /* the kept conversations' rows (in g_k3_kv_bytes too) and the
+                                                  * rest they hold, their KDA state and photos (k3_sessions.h) */
+static int g_k3_live_saved, g_k3_live_dirty;     /* the live conversation: the positions its file holds, and
+                                                  * whether it changed since it was written */
+static void k3_sess_yield(Model *m);
 static double g_k3_lend_step;              /* the running step's activations past the plan's, bytes */
 static int g_k3_gone, g_k3_lend_rr;        /* slots lent, and the layer the next one comes from */
 static double k3_slot_bytes(const Model *m){ return (double)m->e_slot+8192.0; }
@@ -5921,12 +5936,21 @@ static double k3_slot_bytes(const Model *m){ return (double)m->e_slot+8192.0; }
  * slot, else the coldest one that can go (pass 0: not the history's pins) */
 static int k3_cache_retire_one(Model *m,int li,int pass,double *back){
     LCache *lc=&m->ecache[li];
-    if(lc->cap-lc->gone<=2*m->c.topk) return 0;   /* a decode token's experts and its read-ahead stay */
-    if(lc->n<lc->cap){ lc->cap--; lc->cut++; return 1; }
+    /* A decode token's experts and its read-ahead stay, in slots the history's pins do not hold:
+     * counting the pins among them, a layer lent down to 2*topk slots of which the pins held
+     * half had too few for a token and its read-ahead, and the step waited for a slot forever
+     * (a tiny model with AUTOPIN's pins and its rows past the plan). At that floor only a pin
+     * may go, which leaves the open slots as they are. */
+    int pins=0;
+    for(int i=0;i<lc->n;i++) if(lc->s[i].pinned==1) pins++;
+    const int floor_=2*m->c.topk, open=lc->cap-lc->gone-pins, pins_only=open<=floor_;
+    if(lc->cap-lc->gone<=floor_||(pins_only&&(pass==0||!pins))) return 0;
+    if(lc->n<lc->cap&&!pins_only){ lc->cap--; lc->cut++; return 1; }
     int v=-1;
     for(int i=0;i<lc->n;i++){
         Slot *s=&lc->s[i];
         if(s->pinned==K3_SLOT_GONE||s->pin_mem||s->busy||s->pref||!slot_ready(s)) continue;
+        if(pins_only&&s->pinned!=1) continue;
         if(!s->base&&s->eid<0){ v=i; break; }
         if(!s->base||(s->pinned&&pass==0)) continue;
         if(v<0||s->used<lc->s[v].used) v=i;
@@ -5949,8 +5973,10 @@ static int k3_cache_revive_one(Model *m,int li){
 /* The cache as large as the plan less what is lent now. Called between steps only (the
  * main thread; no step holds a slot then). Returns the bytes freed (0 on a give-back). */
 static double k3_cache_lent_sync(Model *m){
+    k3_sess_yield(m);   /* kept conversations leave RAM first: the live one's rows and the experts come before them */
     if(!m->ecache||!k3_lend_on()) return 0.0;
-    const double lent=g_k3_lend_step+(g_k3_kv_bytes>g_k3_kv_plan_bytes?g_k3_kv_bytes-g_k3_kv_plan_bytes:0.0);
+    const double held=g_k3_kv_bytes+g_k3_sess_extra;
+    const double lent=g_k3_lend_step+(held>g_k3_kv_plan_bytes?held-g_k3_kv_plan_bytes:0.0);
     const int target=lent>0.0?(int)ceil(lent/k3_slot_bytes(m)):0, L=m->c.n_layers;
     double back=0.0;
     for(int pass=0;pass<2&&g_k3_gone<target;pass++)
@@ -6113,6 +6139,7 @@ static float *step_chunk_ex(Model *m, const int *ids, int pos0, int C,
     Cfg *c=&m->c; int D=c->hidden;
     if(cancelled) *cancelled=0;
     if(!m->mux_rows&&k3_kv_grow_on()) k3_kv_need(m,pos0+C);   /* the rows this step is about to write */
+    if(!m->mux_rows){ g_k3_live_dirty=1; if(pos0<g_k3_live_saved) g_k3_live_saved=pos0; }   /* its file's rows from here on are not these */
     /* a large step's activations: lent by the expert cache until the step ends (K3_LEND) */
     const double act_lent=!m->mux_rows&&C>512&&k3_lend_on()?(double)(C-512)*K3_ACT_ROW_GB*1e9*(double)D/7168.0:0.0;   /* K3's 1.4 MB a row, by the width */
     if(act_lent>0.0){
@@ -6409,6 +6436,8 @@ static int k3_tool_tag(const char *t){
  * photographs the state there once and keeps it (k3_serve_start), from K3_ROOT_MIN tokens
  * (1,024) on: a new conversation with the same instructions starts after them. */
 static int g_k3_chat_root;
+static int g_k3_chat_key;    /* the tokens up to the end of its first record that is not the system's: two
+                              * conversations part before it, a conversation's own turns after it */
 static int k3_root_photo_on(void){
     static int on=-1;
     if(on<0){ const char *e=getenv("K3_ROOT_PHOTO"); on=!e||!*e||atoi(e)!=0; }
@@ -6435,8 +6464,9 @@ static int chat_build_wire(Tok *T, const char *wire, int nwire, int *thinking,
     if(nwire<8||memcmp(p,"K3CHAT1\n",8)) return -1;
     p+=8; *thinking=0;
     int lead=1;   /* still in the leading system records */
-    g_k3_chat_root=0;
+    g_k3_chat_root=0; g_k3_chat_key=0;
     while(p<end){
+        if(!lead&&!g_k3_chat_key) g_k3_chat_key=b.n;   /* the record before this one was the first not the system's */
         const char *nl=memchr(p,'\n',(size_t)(end-p));
         if(!nl) return -1;
         if(b.cont && *p!='G') return -1;  /* the open final turn must be last; only G may follow */
@@ -6574,6 +6604,7 @@ static int chat_build_wire(Tok *T, const char *wire, int nwire, int *thinking,
         if(lead&&!strcmp(r,"system")) g_k3_chat_root=b.n; else lead=0;
         free(text); p=nl+1+nb;
     }
+    if(!g_k3_chat_key) g_k3_chat_key=b.n;
     if(!b.cont){                 /* a continuation already emitted the open final turn */
         cb_open(&b,"message","assistant");
         cb_open(&b,*thinking?"think":"response",NULL);
@@ -6631,12 +6662,19 @@ static void model_state_reset(Model *m){
     } else
 #endif
     {
+        /* The bytes freed leave the count the expert cache lends for (k3_cache_lent_sync): kept
+         * there, every new conversation's rows came on top of the last one's, and the cache
+         * shrank by a conversation's rows at each until the process restarted. */
+        double freed=0.0;
         for(int i=0;i<c->n_layers;i++){
-            if(m->Lc && m->Lc[i]) free(m->Lc[i]);
-            if(m->Rc && m->Rc[i]) free(m->Rc[i]);
+            if(m->Lc && m->Lc[i]){ freed+=(double)m->kv_cap*c->kv_lora*sizeof(float); free(m->Lc[i]); }
+            if(m->Rc && m->Rc[i]){ freed+=(double)m->kv_cap*c->qk_rope*sizeof(float); free(m->Rc[i]); }
             Mla *a=&m->L[i].m;
-            if(c->index_hd > 0 && c->idx_type[i] && a->Ic){ free(a->Ic); a->Ic=NULL; }
+            if(c->index_hd > 0 && c->idx_type[i] && a->Ic){
+                freed+=(double)m->kv_cap*c->index_hd*sizeof(float); free(a->Ic); a->Ic=NULL; }
         }
+        g_k3_kv_bytes-=freed;
+        if(g_k3_kv_bytes<0.0) g_k3_kv_bytes=0.0;
         if(m->Lc) free(m->Lc);
         if(m->Rc) free(m->Rc);
         m->Lc=NULL; m->Rc=NULL; m->max_t=0; m->kv_cap=0;
@@ -6995,6 +7033,8 @@ static void k3_unpark(Model *m){
     free(p);
 }
 
+#include "k3_sessions.h"   /* several conversations kept, in RAM and in files (K3_SESSIONS) */
+
 /* Decide reuse before changing the state it describes. A miss discards the
  * old recurrent/KV state first and allocates a fresh target; a hit grows the
  * existing target while preserving its prefix. The old order allocated first,
@@ -7076,6 +7116,7 @@ static int k3_serve_poll_cancel(void *context){
  * token. Drop that partial state so a later request cannot reuse it. */
 static void k3_cancel_unpublished_state(Model *m){
     model_state_reset(m);
+    k3_sess_live_lost(m);
 }
 
 static void serve_data(const char *id, const char *p, int n){
@@ -7186,6 +7227,7 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
     if(!ids){ coli_serve_write_error(stdout,q->id,"out of memory"); return 0; }
     int sp[4]={-1,-1,-1,-1}, chat=0, thinking=0;
     int chat_root=0;   /* the position after the conversation's leading system records, 0: none */
+    int chat_key=0;    /* the position after its first record not the system's (k3_sess_pick) */
     if(m->c.bos>=0) ids[np++]=m->c.bos;
     if(q->plen>=8&&!memcmp(q->payload,"K3CHAT1\n",8)){
         int n=chat_build_wire(T,q->payload,q->plen,&thinking,ids+np,cap-np,sp);
@@ -7216,7 +7258,7 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
                     cap,max_ctx);
         } else if(n<0){
             coli_serve_write_error(stdout,q->id,"invalid K3 chat payload"); free(ids); return 0;
-        } else { chat_root=g_k3_chat_root>0?np+g_k3_chat_root:0; np+=n; chat=1; }
+        } else { chat_root=g_k3_chat_root>0?np+g_k3_chat_root:0; chat_key=np+g_k3_chat_key; np+=n; chat=1; }
     } else {
         np+=tok_encode(T,q->payload,q->plen,ids+np,cap-np);
     }
@@ -7272,6 +7314,7 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
         fprintf(stderr,"[PIN] %d scatti dello stato ricorrente accesi su richiesta (%.2f GB)\n",
                 n,k3_ckpt_reserve_gb(m,n));
     }
+    k3_sess_pick(m,ids,np,np+q->max_tok+8,chat?chat_key:np);   /* another conversation's request: the live one aside */
     int reuse=prepare_request_state(m,ids,np,np+q->max_tok+8);
     /* The system prompt's end, photographed once and kept: every conversation of a client
      * begins with the same instructions and tool declarations (10-20 thousand tokens for an
@@ -7648,8 +7691,9 @@ static void serve_loop(Model *m, Tok *T){
     if(g_k3_mux_slots>1){ serve_mux(m,T); return; }
     for(;;){
         ServeReq q={0}; int r;
+        k3_sess_idle(m);   /* no request for a while: the live conversation to its file */
         do r=serve_read_req(stdin,stdout,&q,NULL); while(r==0);
-        if(r<0) return;
+        if(r<0){ k3_sess_exit(m); return; }
         if(r==2){ int fatal=serve_one(m,T,&q); free(q.payload); if(fatal<0) return; serve_emap(m); }
     }
 }
@@ -7775,6 +7819,7 @@ int main(int argc, char **argv){
             for(int i=1;i<g_k3_mux_slots;i++) k3_seq_alloc(&m,&g_k3_mux_seq[i]);
             g_k3_mux_cur=0;
         }
+         k3_sess_init(&m);
          serve_loop(&m,&T);
         /* Questo ramo non salvava affatto la storia: gli altri motori lo
          * fanno subito dopo il loop, qui mancava del tutto, quindi la

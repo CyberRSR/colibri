@@ -1,0 +1,4 @@
+A1: first token 231.54 s, total 263.31 s, prompt 16539 tokens: 'The engine was first written for GLM-5.2.'
+B1: first token 101.37 s, total 140.66 s, prompt 2956 tokens: 'The project is called **colibri** (colibrì), a tiny engine for running very large open models on the'
+A2: first token 26.63 s, total 41.36 s, prompt 16592 tokens: 'Vulkan and CUDA.'
+done

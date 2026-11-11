@@ -62,6 +62,15 @@ param(
     # against the checkpoint and written again when either changed. -NoDenseCache: off
     [string]$DenseCache = '',
     [switch]$NoDenseCache,
+    # Conversations kept beside the live one (K3_SESSIONS): a request of another conversation --
+    # a second chat, an agent's sub-agent, a client's summary request -- puts the live one aside
+    # in a file instead of writing over it, and its next turn reads it back in seconds, also
+    # after a restart. Nothing of them stays in RAM (the expert cache is whole, so no reply is
+    # slower for them); the files go to -SessionDir (beside the model) up to -SessionDiskGB,
+    # the longest unused conversation's first. 0 = off
+    [ValidateRange(0,64)][int]$Sessions = 16,
+    [string]$SessionDir = '',
+    [ValidateRange(1,4096)][int]$SessionDiskGB = 128,
     # Half of every layer's expert cache seeded at the start from the experts the history used
     # most (AUTOPIN) and never evicted. Off here: K3's router spreads its use evenly, so the
     # history's favourites are found little more often than any others (5.7% of a prompt's
@@ -147,6 +156,10 @@ $env:K3_PIPE = '1'
 $env:K3_IO_PER_DRIVE = [string]$IoPerDrive
 $env:K3_PREFETCH = [string]$Prefetch
 $env:COLI_K3_CKPT = [string]$Photos
+$sessionPath = $(if ($SessionDir) { $SessionDir } else { Join-Path $ModelDir 'k3_sessions' })
+$env:K3_SESSIONS = [string]$Sessions
+$env:K3_SESSION_DIR = $(if ($Sessions -gt 0) { $sessionPath } else { '' })
+$env:K3_SESSION_DISK_GB = [string]$SessionDiskGB
 $env:OMP_NUM_THREADS = [string]$Threads
 $env:COLI_NO_OMP_TUNE = '1'
 $env:COLI_VULKAN = '0'
@@ -154,7 +167,7 @@ $env:COLI_CUDA = '0'                   # the launcher's own GPU tier is for othe
 $env:COLI_GPU = '0'
 foreach ($key in @('K3_LAYERS', 'K3_TRACE', 'K3_LOGITS', 'K3_X0', 'K3_MMAP', 'K3_IO_THREADS', 'K3_LOAD_THREADS',
                    'K3_IO_DELAY_US', 'K3_VK', 'COLI_GPU_FAIL_AFTER', 'K3_VAL_LOGITS', 'K3_VALIDATE_LAYER',
-                   'COLI_K3_CKPT_DIR')) {
+                   'COLI_K3_CKPT_DIR', 'K3_SNAP_TEST')) {
     Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue
 }
 Write-Host "Kimi K3.1 Pro: $ModelDir$(if ($shardDirs.Count) { '; experts also from ' + ($shardDirs -join '; ') })"
@@ -162,6 +175,7 @@ Write-Host "RAM $RamGB GB, CPU $Threads, readers $IoPerDrive per drive, prefetch
 Write-Host "K3.1's index scores and picks: $(if ($indexerOnGpu) { 'on the GPU (k3cu_dsa_mask)' } elseif ($Cpu -or $CpuExperts) { 'on the CPU, as asked' } else { 'ON THE CPU: a long prompt waits here, see coli_cuda_k3.dll' })"
 Write-Host "Context $Context tokens, replies up to $MaxOutput tokens, prompt steps of $Chunk (read-ahead $($env:K3_READAHEAD_GB) GB), $Photos photos (the system prompt's end and the turns')"
 Write-Host "Dense matrices' quantization: $(if ($NoDenseCache) { 'from the checkpoint at every start (-NoDenseCache)' } else { 'kept in ' + $(if ($DenseCache) { $DenseCache } else { Join-Path $ModelDir 'k3_dense_cache.bin' }) + ' (33 GB, written by the first start)' })"
+Write-Host "Conversations kept aside: $(if ($Sessions -gt 0) { "up to $Sessions, in $sessionPath (up to $SessionDiskGB GB), none in RAM" } else { 'off (-Sessions 0)' })"
 Write-Host "API: http://127.0.0.1:$Port/v1, model $ModelId"
 & python (Join-Path $EngineDir 'coli') serve --model $ModelDir --ram $RamGB --ctx $Context `
     --ngen $MaxOutput --host 127.0.0.1 --port $Port --model-id $ModelId --kv-slots 1 `

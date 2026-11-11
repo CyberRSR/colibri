@@ -126,6 +126,8 @@ try {
                 & $python tests/test_kimi_k3_ckpt.py --binary ./kimi_k3.exe --fixture ./kimi_k31_tiny }
             Run 'the photo of the system prompt''s end: a new conversation starts after it' {
                 & $python tests/kimi_k3_root_harness.py --binary ./kimi_k3.exe --fixture ./kimi_k31_tiny }
+            Run 'conversations kept aside, in RAM and in files, across a restart; the caches'' count; the pins'' floor' {
+                & $python tests/kimi_k3_sessions_harness.py --binary ./kimi_k3.exe --fixture ./kimi_k31_tiny }
         }
         Run 'tests\test_k3_cuda_experts.exe (build)' { & $make tests/test_k3_cuda_experts.exe @flags }
         Run 'coli_cuda_k3.dll against the CPU, K3.1''s masked attention' { & .\tests\test_k3_cuda_experts.exe --dsa }

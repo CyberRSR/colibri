@@ -245,6 +245,12 @@ Judge quantization choices on real-text logits, not synthetic-vector norms.
 | `K3_LEND` | 1 | the expert cache lends slots to what the RAM plan did not count -- the conversation's rows past `K3_KV_MIN` (they stay) and a prompt step's activations past 512 rows (until the step ends): a lent slot is retired, its bytes freed and nothing read into it, and comes back with the bytes (0 = the plan reserves a whole `K3_CHUNK` step's activations instead; off under `KV_SLOTS>1`) |
 | `K3_ROOT_PHOTO` | 1 | with `COLI_K3_CKPT` of 2 or more: the state at the end of a chat's leading system records photographed inside the step that crosses it and kept, so a new conversation with the same system prompt starts after it (0 = off) |
 | `K3_ROOT_MIN` | 1024 | the fewest tokens of leading system records worth that photo |
+| `K3_SESSIONS` | 0 | serve: up to N conversations kept beside the live one; a request of another conversation puts the live one aside instead of writing over it (`k3_sessions.h`) |
+| `K3_SESSION_DIR` | unset | ... and in files there (the launcher: `<model folder>\k3_sessions`), read back after a restart |
+| `K3_SESSION_GB` | 8, 0 with files | RAM for the kept conversations together with the live one's rows past the plan; the longest unused leave first |
+| `K3_SESSION_DISK_GB` | 64 | the files' bytes at most (the launcher: 128) |
+| `K3_SESSION_MIN` | 1024 | the fewest tokens of a conversation worth keeping |
+| `K3_SESSION_IDLE` | 30 | seconds with no request before the live conversation is written |
 | `K3_LAYERS` | all | truncate the stack (validation) |
 | `K3_TRACE` | — | dump f32 hidden state after every layer (validation) |
 | `K3_X0` | — | inject input rows, bypass embedding (validation) |
@@ -776,6 +782,49 @@ after it **19.9 s** (33 tokens to compute) where it took 219.2 s, the same repli
 system prompt at a time: another client's conversation takes the caches' rows, and the
 first client's next conversation reads its instructions once more
 (`tests/kimi_k3_root_harness.py`).
+
+**Several conversations** (`K3_SESSIONS`, `c/k3_sessions.h`). The engine holds one
+conversation: the KDA layers' state and the MLA layers' rows. A request of another one -- a
+second chat, an agent's sub-agent with instructions of its own, a client's summary request --
+wrote its rows over the first one's, whose next turn then read every token again. Now the
+conversation held goes aside whole (the Model's pointers to its arrays traded for empty ones:
+nothing is copied) and comes back when a request continues it. Which conversation a request
+is: a prompt that continues a conversation, or parts from it only past the end of its first
+record that is not the system's (a regenerated reply, an edited turn), is that conversation's;
+one that parts earlier is another, which a kept conversation can only lend the rows of what
+they share up to a photo of the pool (the system prompt's end: their rows are copied). With
+`K3_SESSION_DIR` a conversation that goes aside is written to two files -- its rows a position
+after the other (a later save appends from where the file's rows stop being its own), and its
+tokens, the KDA state at its end and the photo of its last prompt's end -- and leaves RAM at
+once: a kept conversation's RAM would come out of the expert cache, and every token of every
+reply would be a little slower for it, where reading it back takes a second or a few. Without
+files the kept ones and the live one's rows past the plan share `K3_SESSION_GB` (8), the
+longest unused leaving first as the live conversation grows: past 8 GB of its rows (120
+thousand positions) none is left. Nothing of this runs per token, so a long reasoning is the
+same with it; the live conversation is written when it goes aside, after `K3_SESSION_IDLE`
+(30) seconds with no request, and when the input ends, never while a reply is computed. The
+files are read at the start: a server restarted takes its conversations back, and a file is
+trusted only whole and only for the model, the quantization and the format it was written by.
+On Kimi K3.1 Pro (the launcher's 16 conversations in files beside the model), a 16,501-token
+system message and a question, another conversation of 2,956 tokens, then the first one's next
+turn: it went to its file in 1.5 s (2.07 GB) and came back in 4.3 s, **26.6 s** to its first
+token where it read its 16,592 tokens again before (about 220 s); after a restart of the
+server, its next turn **31.9 s** (read back in 0.5 s, 35 tokens computed; 25 s of the rest the
+fresh start's first expert reads). The expert cache is the size it is without them (82-83
+slots a layer), and a 5,862-token prompt's logits are the CPU's at every position
+(`tests/kimi_k3_sessions_harness.py`: three conversations interleaved, in RAM and in files
+across a restart, answer as each one alone; a file cut short is deleted; no files and too
+little RAM drops them).
+
+Two faults of releases r2 and r3 found on the way. A new conversation's rows were
+counted on top of the last one's (`model_state_reset` freed them and left them in the count
+the expert cache lends for): the cache shrank by a conversation's rows at every new one until
+the process restarted -- 1.12 GB counted 2.24 after the second 16.5k-token conversation. With
+the history's pins on (`AUTOPIN`, off in the launcher) a layer lent down to its floor of
+2 x topk slots counted the pins among them, and the first token after the prompt waited for a
+slot forever; at that floor only a pin goes now. (The idle write also needs the end of the
+input seen by its poll: `PeekNamedPipe` fails on a pipe whose writer has closed it, and the
+gateway, which closes the engine's input to stop it, kills it 30 s later.)
 
 Download and run on the 4090 machine: `tools/download_kimi_k31_pro_4090.ps1` (folders
 `C:\AI\Kimi-K3.1-Pro`, `D:\AI\Models\Kimi-K3.1-Pro`) and

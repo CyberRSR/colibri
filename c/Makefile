@@ -865,6 +865,9 @@ kimi-k31-tiny-check: kimi-k31-tiny-generate kimi-k3-tiny-generate kimi_k3$(EXE) 
 	$(PYTHON) tests/kimi_k3_root_harness.py \
 		--binary ./kimi_k3$(EXE) \
 		--fixture ./kimi_k31_tiny
+	$(PYTHON) tests/kimi_k3_sessions_harness.py \
+		--binary ./kimi_k3$(EXE) \
+		--fixture ./kimi_k31_tiny
 
 .PHONY: deepseek-v4 deepseek-v4-oracle deepseek-v4-tiny-generate \
 	deepseek-v4-tiny-check deepseek-v4-clean

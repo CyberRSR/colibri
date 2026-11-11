@@ -149,6 +149,28 @@ with its logits written (`raw/root_6k_cut`). Release r3's `kimi_k3.exe` (0fb3905
 on the same prompt with no cut: `g6k_cpu.f32`'s logits again, 5,862 positions of 5,862
 (`raw/r3_6k`, 120.6 s with its logits written).
 
+## Several conversations, in files (2026-11-11)
+
+`api_sess.py` against `coli serve` with the launcher's settings and 16 conversations kept in
+files (`serve_sess.sh`; `K3_SESSIONS=16`, `K3_SESSION_DIR`, nothing kept in RAM): A is
+`p15k.txt` as its system message and a question, B `sys2k.txt` (the first 9,000 characters of
+it) and a question -- another conversation -- then A's next turn; then the server stopped
+(killed after its idle write) and started again, and A's turn after that (`raw/sess1*`,
+`raw/sess2*`).
+
+| request | to the first token | what happened |
+|---|---:|---|
+| A1, 16,539 tokens | 231.5 s | the prompt (222 s in the runs above: the machine's drift) |
+| B1, 2,956 tokens | 101.4 s | A written to its file first: 2.07 GB in 1.5 s |
+| A2, 16,592 tokens | **26.6 s** | B written (1.15 GB, 3.7 s), A read back in 4.3 s, 16,558 reused, 34 computed |
+| after a restart: A3, 16,637 tokens | **31.9 s** | A read back in 0.5 s, 16,602 reused; 24.9 s of the prompt's 30.9 the fresh start's expert reads |
+
+Without the kept conversations A2 and A3 read their 16.6 thousand tokens again, as a new
+conversation of that length does (219-221 s above). The expert cache is the size it is
+without them: 82-83 slots a layer, 49 lent for A's rows, and B did not add to that count.
+This build's `kimi_k3.exe` (f0d72290) on the 5,862-token prompt: `g6k_cpu.f32`'s logits at 5,862
+positions of 5,862 (`raw/r4_6k`, 120.6 s).
+
 ## Not done
 
 - **A large step waits for the card.** 16,511 rows take 221 s where the drives need 105:
