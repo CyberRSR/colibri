@@ -2169,6 +2169,10 @@ tests/test_k3_mla_scores$(EXE): tests/test_k3_mla_scores.c kimi_k3.c $(VK_OBJ)
 tests/test_k3_dsa$(EXE): tests/test_k3_dsa.c kimi_k3.c $(VK_OBJ)
 	$(CC) $(NOCUDA_CFLAGS) $< $(VK_OBJ) -o $@ $(NOCUDA_LDFLAGS)
 
+# a decode row's MLA core at Kimi K3.1 Pro's widths: its time, phase by phase, and its bytes
+tests/bench_k3_mla$(EXE): tests/bench_k3_mla.c kimi_k3.c $(VK_OBJ)
+	$(CC) $(NOCUDA_CFLAGS) $< $(VK_OBJ) -o $@ $(NOCUDA_LDFLAGS)
+
 # coli_cuda_k3.dll against kimi_k3.c, bit for bit (skipped without the DLL or a device)
 tests/test_k3_cuda_experts$(EXE): tests/test_k3_cuda_experts.c kimi_k3.c backend_cuda_k3_loader.c backend_cuda_k3.h $(CUDA_OBJ) $(VK_OBJ)
 	$(CC) $(CFLAGS) $(K3_CUDA_FLAGS) $< backend_cuda_k3_loader.c $(CUDA_OBJ) $(VK_OBJ) -o $@ $(LDFLAGS)

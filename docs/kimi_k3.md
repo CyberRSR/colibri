@@ -251,6 +251,10 @@ Judge quantization choices on real-text logits, not synthetic-vector norms.
 | `K3_SESSION_DISK_GB` | 64 | the files' bytes at most (the launcher: 128) |
 | `K3_SESSION_MIN` | 1024 | the fewest tokens of a conversation worth keeping |
 | `K3_SESSION_IDLE` | 30 | seconds with no request before the live conversation is written |
+| `K3_SHARED_PAR` | 1 | a prompt step's shared experts on the card from a thread of their own, beside the routed experts' waves (0: on the step's thread first) |
+| `K3_DC_AHEAD` | 1 | the dense cache read ahead by threads of their own (0: each matrix read as the load asks for it) |
+| `K3_LOGITS_DECODE` | 0 | the CLI's `K3_LOGITS` file keeps the decode's rows after the prompt's |
+| `K3_CANCEL_TEST` | 0 | tests: the N-th cancel poll of the serve's first prompt cancels it |
 | `K3_LAYERS` | all | truncate the stack (validation) |
 | `K3_TRACE` | — | dump f32 hidden state after every layer (validation) |
 | `K3_X0` | — | inject input rows, bypass embedding (validation) |
@@ -825,6 +829,42 @@ the history's pins on (`AUTOPIN`, off in the launcher) a layer lent down to its 
 slot forever; at that floor only a pin goes now. (The idle write also needs the end of the
 input seen by its poll: `PeekNamedPipe` fails on a pipe whose writer has closed it, and the
 gateway, which closes the engine's input to stop it, kills it 30 s later.)
+
+**A cancelled prompt resumes.** A prompt of several steps keeps a photo of the KDA state at
+the end of the last step it finished (the rows of the steps done stand where they are), and a
+cancelled prompt -- a client that gave up waiting, a user who pressed stop: the gateway cancels
+a request whose client left -- keeps the state of the steps it finished instead of nothing. The
+same prompt sent again resumes after them, where it started over before, so a client whose
+timeout is shorter than a long prompt never got an answer. The photo is one at a time, at every
+step's end (16,384 tokens in the launcher); photos inside a step would serve only a later prompt
+that parts from this one there, and the places where agents and chats part -- the end of the
+system prompt, of each prompt and of each reply -- have theirs. Through the API on the real model
+(a 2,962-token prompt in steps of 1,024, the client gone after 150 s, in the second step): the
+state after 988 tokens kept, the prompt sent again 187 s where the whole of it took 290, the same
+reply (`tests/kimi_k3_sessions_harness.py`, `K3_CANCEL_TEST`).
+
+**A decode row's attention** (the CPU's, past 2,048 positions): the indexer's scores in blocks
+every worker gets (blocks of 2,048 positions left fourteen of sixteen idle at 4,096), its pick of
+the 2,048 highest over the team past 32,768 positions (a radix select on the scores' keys, each
+worker's picks written at its place: the same list; one thread took 0.9 ms a layer at 131,072
+positions, the team 0.08), softmax's exps eight at a time (`exp_f8`, exp_f's bits: half a
+millisecond a layer for 96 heads x 2,048 rows) and the MLA core's latent sums with each cached
+row read once for a group's heads. The same bytes: a 16,511-token prompt and 16 tokens of its
+reply have every logit of release r4's build. A decode token's attention 271 -> 253 ms at
+16,500 positions; at 131,072 the indexer's row 2.6 -> 1.8 ms a layer and the MLA core 1.9 ->
+1.5 ms (`tests/test_k3_dsa bench`, `tests/bench_k3_mla`) -- the rest of a token is the drives'.
+
+**A large step on the card.** A prompt step's shared experts go to the card from a thread of
+their own (`K3_SHARED_PAR`): the step's thread waited 43 s of a 16,511-token prompt for them
+before it took a wave of routed experts for the CPU, and takes them from the start now. 220.7
+-> 217.7 s, the same logits: the card itself is the limit -- its exact kernels for the KDA
+layers, the shared and the routed experts, at about half of what the tile kernels reach alone,
+are what a faster large step needs.
+
+**The dense cache read ahead** (`K3_DC_AHEAD`): its pieces in order by 12 threads of their own,
+up to 4 GB ahead of the load, where each matrix was read over the team one after the other
+(the scales a read of their own): 33.9 GB in 4.6 s instead of 5.6, the engine ready in 7.3-7.5 s
+instead of 9.4.
 
 Download and run on the 4090 machine: `tools/download_kimi_k31_pro_4090.ps1` (folders
 `C:\AI\Kimi-K3.1-Pro`, `D:\AI\Models\Kimi-K3.1-Pro`) and

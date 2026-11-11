@@ -1,0 +1,13 @@
+{
+ "first": "sent by curl, which gave up after GIVEUP_S",
+ "second": {
+  "ttft_s": 187.18,
+  "total_s": 214.56,
+  "usage": {
+   "prompt_tokens": 2962,
+   "completion_tokens": 20,
+   "total_tokens": 2982
+  },
+  "text": "The text does not say which model the engine was first written for."
+ }
+}

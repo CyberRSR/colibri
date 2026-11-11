@@ -514,6 +514,10 @@ Read **only** by `c/kimi_k3.c`. The K3 engine has its own loader, cache and quan
 | `K3_SESSION_DISK_GB` | `64` | The files' bytes at most; the longest unused conversation's go first. |
 | `K3_SESSION_MIN` | `1024` | The fewest tokens of a conversation worth keeping. |
 | `K3_SESSION_IDLE` | `30` | Seconds with no request before the live conversation is written to its file. |
+| `K3_SHARED_PAR` | `1` | Kimi K3/K3.1: a prompt step's shared experts on the card from a thread of their own, so the step's thread takes routed experts for the CPU from the start; `0` computes them on the step's thread first. |
+| `K3_DC_AHEAD` | `1` | Kimi K3/K3.1: the dense cache (`K3_DENSE_CACHE`) read ahead in order by threads of their own, up to 4 GB ahead of the load; `0` reads each matrix when the load asks for it. |
+| `K3_LOGITS_DECODE` | `0` | Kimi K3/K3.1 CLI: `K3_LOGITS` keeps the decode's rows after the prompt's. |
+| `K3_CANCEL_TEST` | unset | Kimi K3/K3.1 tests: the N-th cancel poll of a prompt (one a layer) cancels it, once. |
 | `K3_CHUNK` | `32` | The most prompt tokens a prefill step takes. Clamped to [1,16384]. A prompt's steps are of one size and none is short (a few rows route to most of a layer's experts: a short last step reads nearly a whole pass for itself): a prompt up to an eighth longer than this is one step, a longer one equal steps. Past 512 rows a step holds 1.4 MB a row, borrowed from the expert cache while it runs (`K3_LEND`). A CUDA build's GPU calls take a step's rows 1,024 at a time. |
 | `K3_GPU_EXPERTS` | `1` (on) | Windows `CUDA_DLL=1` build with `coli_cuda_k3.dll` beside it: a prompt step's routed experts, the dense matrices `K3_CUDA_DENSE` did not place, the gated MLA's attention core, the shared experts and the routers on the card, in the CPU's arithmetic to the bit. `=0`: the CPU's alone. See [kimi_k3.md](kimi_k3.md#cuda-a-prompt-step-on-the-gpu-the-cpus-bytes-coli_cuda_k3dll). |
 | `K3_GPU_MIN_ROWS` | `32` | The prompt rows a step needs before the card takes its parts (`1` in tests). |

@@ -126,6 +126,32 @@ int main(int argc, char **argv){
         if(na != nb || memcmp(a, b, (size_t)na * sizeof(int))){
             if(bad++ < 10) printf("pick trial %d nt %d K %d: %d vs %d positions, differ\n", trial, nt, K, na, nb);
         }
+        /* the team's pick (a decode row's): the same list */
+        na = k3_dsa_pick_par(a, sc, nt, K);
+        checked++;
+        if(na != nb || memcmp(a, b, (size_t)na * sizeof(int))){
+            if(bad++ < 10) printf("team pick trial %d nt %d K %d: %d vs %d positions, differ\n", trial, nt, K, na, nb);
+        }
+        free(sc); free(tmp); free(a); free(b);
+    }
+    /* the team's pick on rows of a decode's lengths: 20,000-140,000 positions, K 2,048, the same
+     * kinds of rows */
+    for(int trial = 0; trial < 24; trial++){
+        const int nt = 20000 + (int)((rng = rng * 1664525u + 1013904223u) >> 15) % 120000, K = 2048;
+        float *sc = malloc((size_t)nt * sizeof(float)), *tmp = malloc((size_t)nt * sizeof(float));
+        int *a = malloc((size_t)K * sizeof(int)), *b = malloc((size_t)K * sizeof(int));
+        for(int t = 0; t < nt; t++){
+            float v = rnd();
+            if(trial % 3 == 1) v = (float)((int)(v * 4));
+            if(trial % 3 == 2 && v < 0.99f) v = 0;
+            if(trial % 5 == 0 && t % 13 == 0) v = NAN;
+            sc[t] = v != v ? -INFINITY : v;
+        }
+        int nb = k3_dsa_pick(b, sc, tmp, nt, K), na = k3_dsa_pick_par(a, sc, nt, K);
+        checked++;
+        if(na != nb || memcmp(a, b, (size_t)na * sizeof(int))){
+            if(bad++ < 10) printf("long team pick trial %d nt %d: %d vs %d positions, differ\n", trial, nt, na, nb);
+        }
         free(sc); free(tmp); free(a); free(b);
     }
     /* LayerNorm */

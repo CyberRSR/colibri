@@ -246,6 +246,42 @@ def check_floor(binary, base, tokenizer, work):
           f"({lent[-1][1]}-{lent[-1][2]} a layer left): the request is answered")
 
 
+def check_resume(binary, model, work):
+    """A prompt of several steps cancelled in its third step keeps the state after its first two;
+    sent again, it resumes there and answers what a server that never saw the cancel answers.
+    K3_CANCEL_TEST=N cancels at a step's N-th poll (one a layer: six a step on this fixture)."""
+    text = " ".join(f"Tell me about rivers number {i} and their names." for i in range(12))
+    prompt = chat("You answer questions about rivers.", [("user", text)])
+    env = {"K3_CHUNK": "128", "AUTOPIN": "0", "USAGE_SAVE": "0"}
+    ref_run = Run(binary, model, env, work / "resume_ref.err")
+    try:
+        ref, np_ref, _ = ref_run.ask(prompt)
+    finally:
+        ref_run.close()
+    run = Run(binary, model, dict(env, K3_CANCEL_TEST="15"), work / "resume.err")
+    try:
+        try:
+            run.ask(prompt)
+            raise RuntimeError("the prompt was not cancelled")
+        except AssertionError as e:
+            if "CANCELLED" not in str(e):
+                raise
+        reply, np_, lines = run.ask(prompt)
+    finally:
+        run.close()
+    log = run.err.read_text(errors="replace")
+    m = re.search(r"the prompt of (\d+) tokens was cancelled: the state after its first (\d+) is kept", log)
+    if not m:
+        raise AssertionError(f"the cancelled prompt kept nothing:\n{log[-2500:]}")
+    kept, got = int(m.group(2)), reuse_of(lines)
+    if kept < 200 or got != kept:
+        raise AssertionError(f"kept {kept} tokens of {m.group(1)}, the prompt sent again reused {got}")
+    if reply != ref:
+        raise AssertionError(f"after the resume: {reply!r}, a server that never saw the cancel: {ref!r}")
+    print(f"ok resume: a {np_}-token prompt cancelled in its third step kept its first {kept} tokens; sent again it "
+          f"computed {np_ - kept} and answered as a server that never saw the cancel")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--binary", required=True)
@@ -262,6 +298,7 @@ def main():
         shutil.copy(a.tokenizer, model / "tokenizer.json")
         check_leak(a.binary, model, work)
         check_floor(a.binary, base, a.tokenizer, work)
+        check_resume(a.binary, model, work)
         common = {"K3_CHUNK": "4096", "K3_ROOT_MIN": "8", "COLI_K3_CKPT": "4", "K3_SESSION_MIN": "8"}
 
         ref = alone(a.binary, model, common, work)

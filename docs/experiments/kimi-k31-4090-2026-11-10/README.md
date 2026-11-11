@@ -171,15 +171,47 @@ without them: 82-83 slots a layer, 49 lent for A's rows, and B did not add to th
 This build's `kimi_k3.exe` (f0d72290) on the 5,862-token prompt: `g6k_cpu.f32`'s logits at 5,862
 positions of 5,862 (`raw/r4_6k`, 120.6 s).
 
+## The not-done list, 2026-11-11
+
+The same prompt (`p15k.txt`, 16,511 tokens, the launcher's step of 16,384) and 16 tokens of its
+reply on release r4's source (`raw/r5_old`) and on this one (`raw/r5_new`), each with
+`K3_LOGITS` and `K3_LOGITS_DECODE`: all 16,527 rows of logits the same bytes.
+
+| | r4 | now |
+|---|---:|---:|
+| the dense cache read (33.9 GB) | 5.6 s | 4.6 s (read ahead by 12 threads) |
+| the engine ready | 9.4 s | 7.5 s (6.9-7.5 over three starts) |
+| the prompt, its logits written | 253.3 s | 244.0 s |
+| a decode token's attention after it (the CPU's, 16,500 positions) | 271 ms | 253 ms |
+| a decode token, the first 16 after the prompt | 2,076 ms | 1,676 ms (of it 964 -> 617 ms waiting for the drives: their drift) |
+
+The shared experts on a thread of their own, on one build (`raw/r5_15k_par`, `raw/r5_15k_nopar`,
+no logits written): 217.7 s with them, 220.7 s with `K3_SHARED_PAR=0`. The step's thread then
+computes 93 s of routed experts for the CPU where it computed 55, beside the card; the card is
+what a large step waits for. The 5,862-token prompt on this build: `g6k_cpu.f32`'s logits at
+every position, 117.1 s (`raw/r5_6k`).
+
+A cancelled prompt through the API (`raw/resume.log`, `api_resume.py`): the launcher's settings
+but steps of 1,024, the 2,962 tokens of `sys2k.txt` and a question; `curl` sent it and gave up
+after 150 s, in the second step; the engine kept the state after the first 988 tokens; the same
+request again reused them and took 187 s to its first token where the whole prompt took 290.5 s
+(a run before it whose client waited), the same reply.
+
+Benches on the CPU (16 threads; `tests/test_k3_dsa bench`, `tests/bench_k3_mla`, the pick alone
+with the engine's spinning team):
+
+| a decode row, one layer | r4 | now |
+|---|---:|---:|
+| the indexer at 4,096 / 16,384 / 131,072 positions | 0.44 / 0.72 / 2.60 ms | 0.24 / 0.50 / 1.84 ms |
+| its pick of 2,048 at 131,072 / 262,144 (one thread / the team) | 0.88 / 1.97 ms | 0.08 / 0.12 ms |
+| the MLA core over 2,048 picked rows (96 heads) | 1.90 ms | 1.37-1.46 ms |
+| of it softmax | 0.52 ms | 0.11 ms |
+
 ## Not done
 
-- **A large step waits for the card.** 16,511 rows take 221 s where the drives need 105:
-  the exact kernels run the KDA layers, the shared and the routed experts one after the
-  other at about half of what the tile kernels reach alone.
-- **Decode past 2,048 positions** pays about 100 ms a token for the MLA layers' loop over
-  the picked rows on the CPU, and 2 ms more per 1,000 positions for the index scores (99
-  GMAC/s for one row, `tests/test_k3_dsa bench`).
-- **The dense cache reads at 6 GB/s**, the drive at 10: the matrices are read one after the
-  other, each over the team.
+- **A large step waits for the card.** 16,511 rows take 218 s where the drives need 105: the
+  exact kernels run the KDA layers, the shared and the routed experts at about half of what
+  the tile kernels reach alone, and running the shared ones beside the routed ones took 3 s
+  off. Faster exact kernels are what is left.
 - The numbers of `docs/kimi_k3-4090.md` are Kimi K3's; its shards are no longer on this
   machine, so nothing here compares the two models on the same day.

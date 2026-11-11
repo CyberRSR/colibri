@@ -584,8 +584,18 @@ static float *afcalloc(int64_t n){
 }
 static inline float sigmoidf_(float x){ return 1.f/(1.f+exp_f(-x)); }
 static inline float siluf_(float x){ return x/(1.f+exp_f(-x)); }
+/* x = softmax(x): the max, each exp_f(x - max) (exp_f8 eight at a time: the same bits, a nanosecond
+ * a value against 17 -- a decode row's 96 heads x 2,048 picked rows were half a millisecond a
+ * layer), their sum in order from 0, each divided by it */
 static void softmax_(float *x, int n){ float m=x[0]; for(int i=1;i<n;i++) if(x[i]>m)m=x[i];
-    float s=0; for(int i=0;i<n;i++){ x[i]=exp_f(x[i]-m); s+=x[i]; } for(int i=0;i<n;i++) x[i]/=s; }
+    int i=0;
+#ifdef EXP_F8
+    const __m256 vm=_mm256_set1_ps(m);
+    for(;i+8<=n;i+=8) _mm256_storeu_ps(x+i,exp_f8(_mm256_sub_ps(_mm256_loadu_ps(x+i),vm)));
+#endif
+    for(;i<n;i++) x[i]=exp_f(x[i]-m);
+    float s=0; for(i=0;i<n;i++) s+=x[i];
+    for(i=0;i<n;i++) x[i]/=s; }
 static void rmsnorm_(float *out, const float *x, const float *w, int D, float eps){
     double ms=0; for(int i=0;i<D;i++) ms+=(double)x[i]*x[i];
     float r=1.f/sqrtf((float)(ms/D)+eps);
@@ -763,20 +773,87 @@ static int k3_dsa_pick(int *sel, const float *sc, float *tmp, int nt, int K){
     for(int t=0;t<nt;t++) if(sc[t]>v||(sc[t]==v&&eq>0)){ if(!(sc[t]>v)) eq--; sel[n++]=t; }
     return n;
 }
+/* k3_dsa_pick's picks over the team (a decode row's, nt large): the K-th largest score by a radix
+ * select -- its key's 11, 11 and 10 bits, each pass's counts made by every worker over its own
+ * positions -- then each worker's positions above it, and of those equal to it as many as the
+ * workers before it left (ties to the lower position), written at its place: the same list in
+ * the same order. A score is a number or -inf (k3_dsa_scores: no NaN, no -0), so the order of
+ * the keys below is the order of the scores. */
+static inline uint32_t k3_dsa_key(float f){ uint32_t u; memcpy(&u,&f,4); return u^((u>>31)?0xFFFFFFFFu:0x80000000u); }
+#define K3_DSA_PAR_PICK 32768   /* below it one thread is as fast (0.04 ms at 16,384 positions; the team 0.08 at any length) */
+static int k3_dsa_pick_par(int *sel, const float *sc, int nt, int K){
+    if(nt<=K){ for(int t=0;t<nt;t++) sel[t]=t; return nt; }
+    int nch=omp_get_max_threads(); if(nch<1) nch=1; if(nch>64) nch=64;
+    const int per=(nt+nch-1)/nch;
+    uint32_t *hist=calloc((size_t)nch*2048,sizeof(uint32_t));
+    int *ngt=calloc((size_t)nch,sizeof(int)), *neq=calloc((size_t)nch,sizeof(int)), *take=calloc((size_t)nch,sizeof(int));
+    if(!hist||!ngt||!neq||!take){ fprintf(stderr,"OOM DSA pick\n"); exit(1); }
+    static const int sh[3]={21,10,0}, wd[3]={11,11,10};
+    uint32_t prefix=0, mask=0; int need=K;
+    for(int p=0;p<3;p++){
+        const int nb=1<<wd[p]; const uint32_t m=(uint32_t)nb-1u;
+        memset(hist,0,(size_t)nch*2048*sizeof(uint32_t));
+        #pragma omp parallel for schedule(static)
+        for(int ch=0;ch<nch;ch++){
+            uint32_t *h=hist+(size_t)ch*2048;
+            const int t0=ch*per, t1=t0+per<nt?t0+per:nt;
+            for(int t=t0;t<t1;t++){ const uint32_t k=k3_dsa_key(sc[t]); if((k&mask)==prefix) h[(k>>sh[p])&m]++; }
+        }
+        uint32_t cum=0; int b=nb-1;
+        for(;b>0;b--){
+            uint32_t n=0; for(int ch=0;ch<nch;ch++) n+=hist[(size_t)ch*2048+b];
+            if(cum+n>=(uint32_t)need) break;
+            cum+=n;
+        }
+        need-=(int)cum; prefix|=(uint32_t)b<<sh[p]; mask|=m<<sh[p];
+    }
+    const uint32_t vk=prefix;   /* the K-th largest score's key */
+    #pragma omp parallel for schedule(static)
+    for(int ch=0;ch<nch;ch++){
+        const int t0=ch*per, t1=t0+per<nt?t0+per:nt; int g=0, e=0;
+        for(int t=t0;t<t1;t++){ const uint32_t k=k3_dsa_key(sc[t]); g+=k>vk; e+=k==vk; }
+        ngt[ch]=g; neq[ch]=e;
+    }
+    int gt=0; for(int ch=0;ch<nch;ch++) gt+=ngt[ch];
+    int eq=K-gt, n=0;
+    int *off=take;   /* each worker's place in sel, then how many equal ones it takes (below) */
+    int *teq=calloc((size_t)nch,sizeof(int));
+    if(!teq){ fprintf(stderr,"OOM DSA pick\n"); exit(1); }
+    for(int ch=0;ch<nch;ch++){ teq[ch]=neq[ch]<eq?neq[ch]:eq; eq-=teq[ch]; off[ch]=n; n+=ngt[ch]+teq[ch]; }
+    #pragma omp parallel for schedule(static)
+    for(int ch=0;ch<nch;ch++){
+        const int t0=ch*per, t1=t0+per<nt?t0+per:nt; int o=off[ch], left=teq[ch];
+        for(int t=t0;t<t1;t++){
+            const uint32_t k=k3_dsa_key(sc[t]);
+            if(k>vk||(k==vk&&left>0)){ if(k==vk) left--; sel[o++]=t; }
+        }
+    }
+    free(hist); free(ngt); free(neq); free(take); free(teq);
+    return n;
+}
 /* One query row's selection over the nt positions of its layer's keys Ic: q [nh][hd], w [nh];
  * sc and tmp nt floats each. par: the positions over the OpenMP team (a decode step's single
  * row), else on the caller's thread (a prompt step's rows go over the team instead). */
 #define K3_DSA_BLK 2048
 static int k3_dsa_row(int *sel, const float *q, const float *w, const float *Ic, int nt, int nh, int hd,
                       int K, float *sc, float *tmp, int par){
-    if(par&&nt>K3_DSA_BLK){
-        const int nb=(nt+K3_DSA_BLK-1)/K3_DSA_BLK;
+    if(par&&nt>256){
+        /* Blocks of K3_DSA_BLK left most of the team idle below 32,768 positions (two workers of
+         * sixteen at 4,096): blocks of a multiple of 16 positions, two a worker, at least 256.
+         * Every score is its own position's (k3_dsa_scores), whatever the block. */
+        const int nth=omp_get_max_threads()>0?omp_get_max_threads():1;
+        int blk=(nt+2*nth-1)/(2*nth);
+        blk=(blk+15)&~15;
+        if(blk<256) blk=256;
+        if(blk>K3_DSA_BLK) blk=K3_DSA_BLK;
+        const int nb=(nt+blk-1)/blk;
         #pragma omp parallel for schedule(static)
         for(int b=0;b<nb;b++){
-            const int t0=b*K3_DSA_BLK, t1=t0+K3_DSA_BLK<nt?t0+K3_DSA_BLK:nt;
+            const int t0=b*blk, t1=t0+blk<nt?t0+blk:nt;
             k3_dsa_scores(sc+t0,q,w,Ic,t0,t1,nh,hd);
         }
     } else k3_dsa_scores(sc,q,w,Ic,0,nt,nh,hd);
+    if(par&&nt>=K3_DSA_PAR_PICK) return k3_dsa_pick_par(sel,sc,nt,K);   /* a decode row's: the pick over the team too */
     return k3_dsa_pick(sel,sc,tmp,nt,K);
 }
 
@@ -1252,6 +1329,7 @@ static void k3dc_write_start(void){
     setvbuf(g_dc.out,NULL,_IOFBF,(size_t)8<<20);
     g_dc.mode=2;
 }
+static void k3dca_start(void);   /* the read-ahead, below */
 static void k3dc_open(Model *m, const char *snap){
     const char *e=getenv("K3_DENSE_CACHE");
     memset(&g_dc,0,sizeof g_dc);
@@ -1294,6 +1372,7 @@ static void k3dc_open(Model *m, const char *snap){
         return;
     }
     g_dc.mode=1;
+    k3dca_start();
 }
 /* [pos, pos+n) of the file into dst (pos a multiple of 4,096), its pieces' sums added to *sum */
 static int k3dc_read(int64_t pos, void *dst, int64_t n, uint64_t *sum){
@@ -1323,6 +1402,132 @@ static int k3dc_read(int64_t pos, void *dst, int64_t n, uint64_t *sum){
     *sum=tot;
     return !bad;
 }
+/* Read-ahead (K3_DC_AHEAD=0: off): the file's pieces in order, read by K3DC_AHEAD_TH threads of
+ * their own up to K3DC_AHEAD_WIN bytes ahead of the load, each record's matrix and scales into the
+ * buffers k3dc_get then takes as they are. One matrix after the other over the team kept the
+ * drive's queue as shallow as the matrix was small, and every record's scales were a read of their
+ * own: 33.9 GB in 5.5 s where the drive gives 10 GB/s. The bytes and their sums are k3dc_read's. */
+#define K3DC_AHEAD_TH 12
+#define K3DC_AHEAD_WIN ((int64_t)4<<30)
+typedef struct { uint8_t *q; float *s; int left, state, skipped; uint64_t sq, ss; } K3DcA;
+enum { K3DCA_NEW, K3DCA_READING, K3DCA_DONE, K3DCA_BAD, K3DCA_OFF };   /* OFF: taken by the load, or not wanted */
+static struct {
+    int on, stop, nth, taken_upto;
+    pthread_t th[K3DC_AHEAD_TH];
+    pthread_mutex_t mx; pthread_cond_t cv;
+    K3DcA *a;
+    int64_t *pfirst, np, next, ahead;   /* each record's first piece; the pieces; the next to read; bytes not yet taken */
+    double t0, t_last;
+} g_dca;
+/* the piece's record, its offset and length within the matrix (is_s 0) or the scales (is_s 1), its index there */
+static void k3dca_piece(int64_t p, int *k, int64_t *off, int64_t *len, int *is_s, int64_t *pc){
+    int lo=0, hi=g_dc.nrec-1;
+    while(lo<hi){ const int mid=(lo+hi+1)/2; if(g_dca.pfirst[mid]<=p) lo=mid; else hi=mid-1; }
+    const K3DcRec *r=&g_dc.rec[lo];
+    const int64_t nq=(r->qbytes+K3DC_PIECE-1)/K3DC_PIECE, j=p-g_dca.pfirst[lo];
+    *k=lo;
+    if(j<nq){ *is_s=0; *pc=j; *off=j*K3DC_PIECE; *len=r->qbytes-*off<K3DC_PIECE?r->qbytes-*off:K3DC_PIECE; }
+    else { *is_s=1; *pc=j-nq; *off=(j-nq)*K3DC_PIECE; *len=r->sbytes-*off<K3DC_PIECE?r->sbytes-*off:K3DC_PIECE; }
+}
+static void *k3dca_main(void *arg){
+    (void)arg;
+    const int fd=k3dc_open_direct(g_dc.path);
+    uint8_t *bn=NULL;
+    if(fd<0||posix_memalign((void**)&bn,4096,(size_t)K3DC_PIECE)) bn=NULL;
+    for(;;){
+        pthread_mutex_lock(&g_dca.mx);
+        while(!g_dca.stop&&g_dca.next<g_dca.np&&g_dca.ahead>=K3DC_AHEAD_WIN) pthread_cond_wait(&g_dca.cv,&g_dca.mx);
+        if(g_dca.stop||g_dca.next>=g_dca.np){ pthread_mutex_unlock(&g_dca.mx); break; }
+        const int64_t p=g_dca.next++;
+        int k=0, is_s=0; int64_t off=0, len=0, pc=0;
+        k3dca_piece(p,&k,&off,&len,&is_s,&pc);
+        K3DcA *a=&g_dca.a[k]; const K3DcRec *r=&g_dc.rec[k];
+        if(a->state==K3DCA_NEW){   /* its first piece: the buffers the load will keep */
+            a->q=malloc((size_t)r->qbytes); a->s=malloc((size_t)r->sbytes);
+            a->state=a->q&&a->s?K3DCA_READING:K3DCA_BAD;
+            g_dca.ahead+=r->qbytes+r->sbytes;
+        }
+        const int want=a->state==K3DCA_READING;
+        pthread_mutex_unlock(&g_dca.mx);
+        int ok=0; uint64_t sum=0;
+        if(want&&bn){
+            const int64_t base=g_dc.pos[k]+K3DC_BLOCK+(is_s?((r->qbytes+4095)&~4095LL):0), rd=(len+4095)&~4095LL;
+            if(pread(fd,bn,(size_t)rd,base+off)==rd){
+                memcpy((is_s?(uint8_t*)a->s:a->q)+off,bn,(size_t)len);
+                sum=k3dc_piece_sum(bn,len,pc); ok=1;
+            }
+        }
+        pthread_mutex_lock(&g_dca.mx);
+        if(a->state==K3DCA_READING){
+            if(!ok) a->state=K3DCA_BAD;
+            else if(is_s) a->ss+=sum; else a->sq+=sum;
+        }
+        if(--a->left==0){
+            if(a->state==K3DCA_READING) a->state=K3DCA_DONE;
+            pthread_cond_broadcast(&g_dca.cv);
+        }
+        pthread_mutex_unlock(&g_dca.mx);
+    }
+    if(bn) compat_aligned_free(bn);
+    if(fd>=0) close(fd);
+    return NULL;
+}
+static void k3dca_start(void){
+    const char *e=getenv("K3_DC_AHEAD");
+    if((e&&*e&&atoi(e)==0)||g_dc.nrec<1) return;
+    memset(&g_dca,0,sizeof g_dca);
+    g_dca.a=calloc((size_t)g_dc.nrec,sizeof *g_dca.a);
+    g_dca.pfirst=calloc((size_t)g_dc.nrec+1,sizeof *g_dca.pfirst);
+    if(!g_dca.a||!g_dca.pfirst){ free(g_dca.a); free(g_dca.pfirst); memset(&g_dca,0,sizeof g_dca); return; }
+    for(int k=0;k<g_dc.nrec;k++){
+        const K3DcRec *r=&g_dc.rec[k];
+        const int64_t n=(r->qbytes+K3DC_PIECE-1)/K3DC_PIECE+(r->sbytes+K3DC_PIECE-1)/K3DC_PIECE;
+        g_dca.pfirst[k]=g_dca.np; g_dca.a[k].left=(int)n; g_dca.np+=n;
+    }
+    g_dca.pfirst[g_dc.nrec]=g_dca.np;
+    pthread_mutex_init(&g_dca.mx,NULL); pthread_cond_init(&g_dca.cv,NULL);
+    g_dca.t0=now_s();
+    for(int i=0;i<K3DC_AHEAD_TH;i++) if(!pthread_create(&g_dca.th[g_dca.nth],NULL,k3dca_main,NULL)) g_dca.nth++;
+    g_dca.on=g_dca.nth>0;
+}
+/* record k for the load: 1 with its buffers and their sums when the read-ahead has it (the records the
+ * load passed over freed for the window), 0 for the load's own read (k3dc_read) */
+static int k3dca_take(int k, uint8_t **q, float **sp, uint64_t *sq, uint64_t *ss){
+    if(!g_dca.on) return 0;
+    pthread_mutex_lock(&g_dca.mx);
+    for(int j=g_dca.taken_upto;j<k;j++){   /* passed over: not wanted any more */
+        K3DcA *a=&g_dca.a[j];
+        if(a->state==K3DCA_NEW) a->state=K3DCA_OFF;   /* its pieces are not read */
+        else if(a->state!=K3DCA_OFF&&!a->skipped){ a->skipped=1; g_dca.ahead-=g_dc.rec[j].qbytes+g_dc.rec[j].sbytes; }
+    }
+    if(k>=g_dca.taken_upto) g_dca.taken_upto=k+1;
+    pthread_cond_broadcast(&g_dca.cv);
+    K3DcA *a=&g_dca.a[k];
+    while(a->state==K3DCA_NEW||a->state==K3DCA_READING) pthread_cond_wait(&g_dca.cv,&g_dca.mx);
+    int got=0;
+    if(a->state==K3DCA_DONE){
+        *q=a->q; *sp=a->s; *sq=a->sq; *ss=a->ss; got=1;
+        a->q=NULL; a->s=NULL;
+    }
+    if(a->state==K3DCA_DONE||a->state==K3DCA_BAD){
+        if(!a->skipped) g_dca.ahead-=g_dc.rec[k].qbytes+g_dc.rec[k].sbytes;
+        if(a->state==K3DCA_BAD){ free(a->q); free(a->s); a->q=NULL; a->s=NULL; }
+        a->state=K3DCA_OFF;
+    }
+    g_dca.t_last=now_s();
+    pthread_cond_broadcast(&g_dca.cv);
+    pthread_mutex_unlock(&g_dca.mx);
+    return got;
+}
+static void k3dca_stop(void){
+    if(!g_dca.on) return;
+    pthread_mutex_lock(&g_dca.mx); g_dca.stop=1; pthread_cond_broadcast(&g_dca.cv); pthread_mutex_unlock(&g_dca.mx);
+    for(int i=0;i<g_dca.nth;i++) pthread_join(g_dca.th[i],NULL);
+    for(int k=0;k<g_dc.nrec;k++){ free(g_dca.a[k].q); free(g_dca.a[k].s); }   /* read and never taken */
+    pthread_mutex_destroy(&g_dca.mx); pthread_cond_destroy(&g_dca.cv);
+    free(g_dca.a); free(g_dca.pfirst);
+    memset(&g_dca,0,sizeof g_dca);
+}
 static int64_t k3dc_qbytes(int fmt, int O, int I){ return fmt==1?(int64_t)O*I:(int64_t)O*(I/2); }
 static int64_t k3dc_sbytes(int fmt, int O, int I){ return (fmt==1?(int64_t)O:(int64_t)O*(I/64))*(int64_t)sizeof(float); }
 /* w from the file, as w_load's quantization would leave it (1), or 0: quantize it */
@@ -1336,13 +1541,17 @@ static int k3dc_get(Model *m, W *w, const char *nm, const st_tensor *t, int O, i
     const K3DcRec *r=k>=0?&g_dc.rec[k]:NULL;
     if(!r||r->O!=O||r->I!=I||r->fmt!=fmt||r->qbytes!=qb||r->sbytes!=sb||!k3dc_src(m,t,&ss,&mt)||
        r->src_off!=t->off||r->src_nbytes!=t->nbytes||r->src_dtype!=t->dtype||r->src_size!=ss||r->src_mtime!=mt){
-        g_dc.miss++; return 0; }
+        g_dc.miss++; k3dca_stop(); return 0; }   /* the file is not this start's: nothing more read ahead */
     const double t0=now_s();
-    uint8_t *q=malloc((size_t)qb); float *s=falloc(sb/(int64_t)sizeof(float));
-    if(!q){ fprintf(stderr,"OOM %s\n",nm); exit(1); }
+    uint8_t *q=NULL; float *s=NULL;
     uint64_t sq=0, ssum=0;
-    const int ok=k3dc_read(g_dc.pos[k]+K3DC_BLOCK,q,qb,&sq)&&
-                 k3dc_read(g_dc.pos[k]+K3DC_BLOCK+((qb+4095)&~4095LL),s,sb,&ssum);
+    int ok=k3dca_take(k,&q,&s,&sq,&ssum);
+    if(!ok){
+        q=malloc((size_t)qb); s=falloc(sb/(int64_t)sizeof(float));
+        if(!q){ fprintf(stderr,"OOM %s\n",nm); exit(1); }
+        ok=k3dc_read(g_dc.pos[k]+K3DC_BLOCK,q,qb,&sq)&&
+           k3dc_read(g_dc.pos[k]+K3DC_BLOCK+((qb+4095)&~4095LL),s,sb,&ssum);
+    }
     if(!ok||sq+((ssum<<1)|(ssum>>63))!=r->sum){
         fprintf(stderr,"[K3] dense cache: %s does not read back as it was written -- quantized from the checkpoint\n",nm);
         free(q); free(s); g_dc.miss++; return 0;
@@ -1381,6 +1590,7 @@ static void k3dc_put(Model *m, const W *w, const char *nm, const st_tensor *t){
 }
 static void k3dc_close(void){
     if(!g_dc.path[0]) return;             /* never opened: its descriptors are not descriptors */
+    if(g_dca.on){ g_dc.t_io=g_dca.t_last-g_dca.t0; k3dca_stop(); }   /* the read-ahead's start to the last matrix taken */
     if(g_dc.mode==1){
         fprintf(stderr,"[K3] dense cache: %d matrices, %.1f GB read from %s in %.1fs (K3_DENSE_CACHE=0: quantized "
                 "from the checkpoint at every start)\n",g_dc.hits,g_dc.gb,g_dc.path,g_dc.t_io);
@@ -3272,6 +3482,59 @@ static uint32_t *k3_dsa_mask_gpu(Model *m, Mla *a, const float *x, const float *
     return mask;
 }
 #endif
+/* One row's MLA core on the CPU: its nt cached rows (sel: K3.1's picks, ascending; NULL: rows
+ * 0..nt-1) scored, softmaxed and summed for every head, then each head's v rows and its gate:
+ * ctxt [H][vh]. The heads K3_MLA_G a task: a group's scores read the cache once for all of them
+ * (k3_mla_scores_g); each head's arithmetic is its own. */
+static void k3_mla_row_core(const Cfg *c, const W *kvb, const float *qvt, const float *gvt, const float *Lc_,
+                            const float *Rc_, const int *sl, int nt, float *ctxt){
+    const int H=c->n_heads, qh=c->qk_head, vh=c->v_head, kvl=c->kv_lora, qr=c->qk_rope;
+    const int ngr=(H+K3_MLA_G-1)/K3_MLA_G;
+    #pragma omp parallel for schedule(static)
+    for(int hg=0;hg<ngr;hg++){
+      const int h0=hg*K3_MLA_G, nh=H-h0<K3_MLA_G?H-h0:K3_MLA_G;
+      float *qab=falloc((int64_t)K3_MLA_G*kvl), *scs=falloc((int64_t)K3_MLA_G*nt);
+      const float *qrps[K3_MLA_G];
+      for(int g=0;g<nh;g++){
+        const float *qp=qvt+(int64_t)(h0+g)*qh;
+        int rbase=(h0+g)*(c->qk_nope+vh);
+        float *qabs=qab+(int64_t)g*kvl; memset(qabs,0,kvl*sizeof(float));
+        for(int d=0;d<c->qk_nope;d++) w_addrow(kvb,rbase+d,qp[d],qabs);
+        qrps[g]=qp+c->qk_nope;
+      }
+      k3_mla_scores_g(scs,qab,qrps,nh,Lc_,Rc_,nt,kvl,qr,c->attn_scale,sl);
+      for(int g=0;g<nh;g++) softmax_(scs+(int64_t)g*nt,nt);
+      /* each head's latent sum over the rows in their order, clat[i] += s[t] L[t][i] as before; a
+       * row read once for the group's heads (from the cache's 2,048 scattered rows, six times was
+       * a third of the layer's time) */
+      float *cl=qab;   /* the group's q.kvb rows are done with: its K3_MLA_G latent sums */
+      memset(cl,0,(size_t)nh*kvl*sizeof(float));
+      for(int t=0;t<nt;t++){
+          const float *Lt=Lc_+(int64_t)(sl?sl[t]:t)*kvl;
+          for(int g=0;g<nh;g++){
+              float *clat=cl+(int64_t)g*kvl; const float s2=scs[(int64_t)g*nt+t];
+              for(int i=0;i<kvl;i++) clat[i]+=s2*Lt[i];
+          }
+      }
+      for(int g=0;g<nh;g++){
+        const int h=h0+g, rbase=h*(c->qk_nope+vh);
+        const float *clat=cl+(int64_t)g*kvl;
+        float *cx=ctxt+(int64_t)h*vh;
+        int d=0;
+#if defined(__AVX2__)
+        if(kvb->fmt==1&&kvb->q8&&!(kvb->I&7))   /* int8 rows 8 at a time, the same bytes */
+            for(;d+8<=vh;d+=8){
+                float rd[8];
+                k3_rowdot8_i8(kvb,rbase+c->qk_nope+d,clat,rd);
+                for(int j=0;j<8;j++) cx[d+j]=rd[j]*sigmoidf_(gvt[(int64_t)h*vh+d+j]);
+            }
+#endif
+        for(;d<vh;d++)
+            cx[d]=w_rowdot(kvb,rbase+c->qk_nope+d,clat)*sigmoidf_(gvt[(int64_t)h*vh+d]);
+      }
+      free(qab); free(scs);
+    }
+}
 static void mla_forward(Model *m, Layer *l, int li, const float *x, int pos0, int C, float *out){
     Cfg *c=&m->c; Mla *a=&l->m;
     const K3Row *mr = m->mux_rows;   /* a multiplexed step: each row's own caches and position */
@@ -3385,48 +3648,7 @@ static void mla_forward(Model *m, Layer *l, int li, const float *x, int pos0, in
         const int *sl=dns&&dns[tt]>=0?dsel+(int64_t)tt*c->index_topk:NULL;
         const int nt=sl?dns[tt]:(mr?mr[tt].pos:pos0+tt)+1;
         const float *Lc_=mr?mr[tt].seq->Lc[li]:m->Lc[li], *Rc_=mr?mr[tt].seq->Rc[li]:m->Rc[li];
-        const float *qvt=qv+(int64_t)tt*H*qh, *gvt=gv+(int64_t)tt*H*vh;
-        float *ctxt=ctx+(int64_t)tt*H*vh;
-        /* the heads K3_MLA_G a task: a group's scores read the cache once for all of
-         * them (k3_mla_scores_g); each head's arithmetic is its own as before */
-        const int ngr=(H+K3_MLA_G-1)/K3_MLA_G;
-        #pragma omp parallel for schedule(static)
-        for(int hg=0;hg<ngr;hg++){
-          const int h0=hg*K3_MLA_G, nh=H-h0<K3_MLA_G?H-h0:K3_MLA_G;
-          float *qab=falloc((int64_t)K3_MLA_G*kvl), *scs=falloc((int64_t)K3_MLA_G*nt);
-          const float *qrps[K3_MLA_G];
-          for(int g=0;g<nh;g++){
-            const float *qp=qvt+(int64_t)(h0+g)*qh;
-            int rbase=(h0+g)*(c->qk_nope+vh);
-            float *qabs=qab+(int64_t)g*kvl; memset(qabs,0,kvl*sizeof(float));
-            for(int d=0;d<c->qk_nope;d++) w_addrow(&a->kvb,rbase+d,qp[d],qabs);
-            qrps[g]=qp+c->qk_nope;
-          }
-          k3_mla_scores_g(scs,qab,qrps,nh,Lc_,Rc_,nt,kvl,qr,c->attn_scale,sl);
-          for(int g=0;g<nh;g++){
-            const int h=h0+g, rbase=h*(c->qk_nope+vh);
-            float *sc=scs+(int64_t)g*nt;
-            softmax_(sc,nt);
-            float clat[4096]; memset(clat,0,kvl*sizeof(float));
-            for(int t=0;t<nt;t++){
-                const float *Lt=Lc_+(int64_t)(sl?sl[t]:t)*kvl; float s2=sc[t];
-                for(int i=0;i<kvl;i++) clat[i]+=s2*Lt[i];
-            }
-            float *cx=ctxt+(int64_t)h*vh;
-            int d=0;
-#if defined(__AVX2__)
-            if(a->kvb.fmt==1&&a->kvb.q8&&!(a->kvb.I&7))   /* int8 rows 8 at a time, the same bytes */
-                for(;d+8<=vh;d+=8){
-                    float rd[8];
-                    k3_rowdot8_i8(&a->kvb,rbase+c->qk_nope+d,clat,rd);
-                    for(int j=0;j<8;j++) cx[d+j]=rd[j]*sigmoidf_(gvt[(int64_t)h*vh+d+j]);
-                }
-#endif
-            for(;d<vh;d++)
-                cx[d]=w_rowdot(&a->kvb,rbase+c->qk_nope+d,clat)*sigmoidf_(gvt[(int64_t)h*vh+d]);
-          }
-          free(qab); free(scs);
-        }
+        k3_mla_row_core(c,&a->kvb,qv+(int64_t)tt*H*qh,gv+(int64_t)tt*H*vh,Lc_,Rc_,sl,nt,ctx+(int64_t)tt*H*vh);
     }
     free(dsel); free(dns); free(dmask);
     w_matmul(out,ctx,&a->o,C);
@@ -5338,20 +5560,41 @@ static void k3_vk_report(const Model *m, const char *scope){
 }
 #endif
 
+#ifdef COLI_K3_CUDA
+/* a prompt step's shared experts go to the card whole (k3cu_shared: gate, up, SiTU and down there in
+ * the CPU's bytes, no OpenMP on the host) */
+static int k3_shared_card_ok(const Model *m, const Moe *o, int C){
+    const W *g=&o->sh_gate, *u=&o->sh_up, *d=&o->sh_down;
+    (void)m;
+    return g_k3g_on&&C>=g_k3g_min_rows&&g->fmt==4&&u->fmt==4&&d->fmt==4&&!g->cuda&&!u->cuda&&!d->cuda&&
+           g->q4&&u->q4&&d->q4&&g->gs==u->gs;
+}
+static float *k3_shared_card(Model *m, Moe *o, const float *x, int C){
+    const Cfg *c=&m->c; const int shi=c->moe_inter*c->n_shared;
+    const W *g=&o->sh_gate, *u=&o->sh_up, *d=&o->sh_down;
+    float *sd=malloc((size_t)C*c->hidden*sizeof(float));
+    if(sd&&k3cu_shared(sd,x,C,c->hidden,shi,g->q4,g->s,u->q4,u->s,g->gs,d->q4,d->s,d->gs,c->situ_b1,c->situ_b2)) return sd;
+    free(sd);
+    return NULL;
+}
+/* K3_SHARED_PAR=0: a prompt step's shared experts on the step's own thread, before its waves */
+static int g_k3_shared_par=-1;
+typedef struct { Model *m; Moe *o; const float *x; int C; float *sd; double t; } K3SharedTh;
+static void *k3_shared_th(void *p){
+    K3SharedTh *j=p; const double t0=now_s();
+    j->sd=k3_shared_card(j->m,j->o,j->x,j->C);
+    j->t=now_s()-t0;
+    return NULL;
+}
+#endif
 /* The two fused shared experts at full width, [C, hidden] (falloc'd). */
 static float *k3_shared(Model *m, Moe *o, const float *x, int C){
     Cfg *c=&m->c;
     int shi=c->moe_inter*c->n_shared;
 #ifdef COLI_K3_CUDA
-    {   /* a prompt step's: gate, up, SiTU and down on the GPU in one call, the CPU's bytes */
-        const W *g=&o->sh_gate, *u=&o->sh_up, *d=&o->sh_down;
-        if(g_k3g_on&&C>=g_k3g_min_rows&&g->fmt==4&&u->fmt==4&&d->fmt==4&&!g->cuda&&!u->cuda&&!d->cuda&&
-           g->q4&&u->q4&&d->q4&&g->gs==u->gs){
-            float *sd=falloc((int64_t)C*c->hidden);
-            if(k3cu_shared(sd,x,C,c->hidden,shi,g->q4,g->s,u->q4,u->s,g->gs,d->q4,d->s,d->gs,c->situ_b1,c->situ_b2))
-                return sd;
-            free(sd);
-        }
+    if(k3_shared_card_ok(m,o,C)){   /* a prompt step's: on the GPU in one call, the CPU's bytes */
+        float *sd=k3_shared_card(m,o,x,C);
+        if(sd) return sd;
     }
 #endif
     float *sg=k3_balloc((int64_t)C*shi), *su=k3_balloc((int64_t)C*shi), *sd=falloc((int64_t)C*c->hidden);
@@ -5707,9 +5950,20 @@ static void moe_forward(Model *m, Layer *l, int li, const float *x, int C, float
         double t1=now_s(); m->t_route+=t1-t0;
         w_matmul(z,x,&o->lat_down,C);
         m->t_lat+=now_s()-t1;
-        /* the shared experts while the step would wait for a read (k3_waves_run's idle) */
+        /* the shared experts while the step would wait for a read (k3_waves_run's idle) -- or, when
+         * the card computes them, from a thread of their own from now on: the step's thread then
+         * waited on the card for them (43 s of a 16,511-token prompt) before it took a wave of
+         * routed experts for the CPU, where it takes them while the card works */
         K3SharedJob sj={m,o,x,C,NULL};
+#ifdef COLI_K3_CUDA
+        if(g_k3_shared_par<0){ const char *e=getenv("K3_SHARED_PAR"); g_k3_shared_par=!e||!*e||atoi(e)!=0; }
+        K3SharedTh st={m,o,x,C,NULL,0.0}; pthread_t sth; int side=0;
+        if(g_k3_shared_par&&k3_shared_card_ok(m,o,C)) side=!pthread_create(&sth,NULL,k3_shared_th,&st);
+        k3_waves_run(m,li,&wv,z,LT,u,side?NULL:k3_shared_job,&sj);
+        if(side){ pthread_join(sth,NULL); sj.sd=st.sd; m->t_shared+=st.t; }   /* NULL: the card failed, the CPU below */
+#else
         k3_waves_run(m,li,&wv,z,LT,u,k3_shared_job,&sj);
+#endif
         sd=sj.sd;
         k3_union_free(&un);
     } else {
@@ -7097,9 +7351,12 @@ static int serve_read_req(FILE *in, FILE *out, ServeReq *q, const char *active){
  * second SUBMIT is refused without stealing the active request's state. */
 typedef struct { const char *active; int fatal; } K3ServePoll;
 
+static int g_k3_cancel_test=-1;   /* K3_CANCEL_TEST=N (tests): the N-th poll of a prompt cancels it, once */
 static int k3_serve_poll_cancel(void *context){
     K3ServePoll *poll=context;
     int cancelled=0;
+    if(g_k3_cancel_test==-1){ const char *e=getenv("K3_CANCEL_TEST"); g_k3_cancel_test=e&&*e&&atoi(e)>0?atoi(e):0; }
+    if(g_k3_cancel_test>0&&--g_k3_cancel_test==0) return 1;   /* then 0: never again */
     while(serve_stdin_readable()){
         ServeReq queued={0}; int r=serve_read_req(stdin,stdout,&queued,poll->active);
         if(r<0){ if(r==-2) poll->fatal=1; return 1; }
@@ -7372,6 +7629,12 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
         fprintf(stderr,"[K3] prompt of %d tokens: the photo of its end restored, nothing to compute\n",np);
     }
     const int several=k3_prompt_step(np-reuse,chunk)<np-reuse;
+    /* A prompt of several steps keeps a photo of the state at the end of the last step done (the
+     * KDA layers' state: the rows of the steps done stand where they are). A cancelled prompt --
+     * a client that gave up waiting, a user who pressed stop -- then keeps the state of the steps
+     * it finished instead of nothing, and the same prompt sent again resumes after them: a client
+     * whose timeout is shorter than a long prompt used to start over at every retry. */
+    float *prog=NULL; int prog_pos=0;
     for(int i=reuse,C;i<np;i+=C){
         C=k3_prompt_step(np-i,chunk);
         float *snap=NULL;   /* the root's photo, when this step crosses it two rows or more from either end */
@@ -7383,6 +7646,10 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
         if(prefill_cancelled){ free(snap); break; }
         if(snap){ k3_ckpt_put(m,snap,ids,root); free(snap); }
         else if(root==i+C) k3_ckpt_save(m,NULL,1);   /* the step ended there: the live state is the root's */
+        if(several&&poll&&i+C<np&&!m->kvp.tainted){   /* more steps follow: this one's end, photographed */
+            if(!prog) prog=malloc(k3_ckpt_blob_floats(m)*sizeof(float));
+            if(prog){ k3_ckpt_copy(prog,m,1); prog_pos=i+C; }
+        }
         if(several){   /* a prompt of several steps: where it is (a step can take minutes) */
             K3StageClock done; k3_stage_clock(m,&done);
             char what[96];
@@ -7398,10 +7665,21 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
         k3_stage_span_log(what,&p0,&end);
     }
     if(prefill_cancelled){
-        free(lo); k3_cancel_unpublished_state(m); free(ids);
+        free(lo);
+        if(prog&&prog_pos>0&&m->kvp.len==prog_pos&&!poll->fatal){
+            /* the steps before the cancelled one stand: their rows and record, the state at their end */
+            k3_ckpt_copy(prog,m,0);
+#ifdef COLI_VULKAN
+            k3c_host_rewrote(m);
+#endif
+            fprintf(stderr,"[K3] the prompt of %d tokens was cancelled: the state after its first %d is kept, "
+                    "and the same prompt sent again resumes there\n",np,prog_pos);
+        } else k3_cancel_unpublished_state(m);
+        free(prog); free(ids);
         if(!poll->fatal) coli_serve_write_error(stdout,q->id,"CANCELLED");
         return poll->fatal?-1:0;
     }
+    free(prog);
     /* Turn boundary: the state now covers exactly the prompt. A photo here is
      * what an agentic edit of the NEXT request restores from. */
     k3_ckpt_save(m, lo, q->pin);
@@ -7888,7 +8166,7 @@ int main(int argc, char **argv){
         g_k3_snap_blob=NULL; g_k3_snap_rows=0; free(snap);
         fprintf(stderr,"\r[K3] prefill %d/%d (%.1fs)",i+Cc,np,now_s()-t0);
     }
-    if(g_lfp){ fclose(g_lfp); g_lfp=NULL; }
+    if(g_lfp&&!(getenv("K3_LOGITS_DECODE")&&atoi(getenv("K3_LOGITS_DECODE")))){ fclose(g_lfp); g_lfp=NULL; }
     fprintf(stderr,"\n[K3] prefill done in %.1fs (%.2f tok/s)\n",now_s()-t0,np/(now_s()-t0));
     fprintf(stderr,"[K3] the prompt: attention %.1fs (KDA %.1f, MLA %.1f), MoE %.1fs (router and reads issued %.1f, "
             "latent %.1f, shared %.1f, routed experts computed %.1f, waiting for reads %.1f, their inputs %.1f, "
@@ -7973,6 +8251,7 @@ int main(int argc, char **argv){
                     ntok,el/ntok,100.0*m.hits/(m.hits+m.miss+1e-9),m.ebytes/1e9);
     }
     if(lo) free(lo);
+    if(g_lfp){ fclose(g_lfp); g_lfp=NULL; }   /* K3_LOGITS_DECODE: the decode's rows too */
     double dt=now_s()-tg;
     fprintf(stderr,"\n[K3] decode %d tokens in %.1fs (%.2f tok/s) | expert hit %.1f%% (%llu/%llu) | %.1f GB streamed\n",
             ntok,dt,ntok/dt,100.0*m.hits/(m.hits+m.miss+1e-9),
