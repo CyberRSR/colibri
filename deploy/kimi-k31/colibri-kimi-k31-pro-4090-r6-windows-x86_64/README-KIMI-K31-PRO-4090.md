@@ -9,7 +9,7 @@ row attends only the 2,048 earlier rows its layer's indexer scores highest. Ever
 format) is K3's. Sources: the model card and TokenSpeed's implementation,
 [lightseekorg/tokenspeed#3015](https://github.com/lightseekorg/tokenspeed/pull/3015).
 
-**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r5: `kimi_k3.exe` and
+**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r6: `kimi_k3.exe` and
 `coli_cuda_k3.dll` here were built on the RTX 4090 machine and checked there on the model
 itself (BUILD-INFO-K31.txt: the commit, the toolchain, the checks). Release kimi-k3-4090-r1's
 `kimi_k3.exe` does not read `dsa_config`: it would run every MLA layer dense, which is K3.1's
@@ -51,7 +51,7 @@ the launcher's settings, each run a fresh start:
 | the API answering after `START-KIMI-K31-PRO.cmd` | 11 s |
 | a 35-token question, to the first token | 28-29 s (311 GB of experts read) |
 | a 5,862-token prompt | 110 s (one step, at the drives' pace) |
-| a 16,511-token prompt | **221 s** (one step; 375 s in release r1's steps of 8,192) |
+| a 16,511-token prompt | **205 s** (one step; 228 s in release r5, 375 s in release r1's steps of 8,192) |
 | a follow-up of 90 tokens on a 16,600-token conversation | 28 s to the first token |
 | the same request again (a regenerated reply, a retry) | **0.27 s** to the first token (27 s before) |
 | a new conversation with the same system prompt (16,501 tokens of instructions) | **19.9 s** to the first token (219 s in release r2: the instructions read again) |
@@ -144,6 +144,18 @@ What release r5 adds (2026-11-11; the bytes kept again):
 - **A large step**: the shared experts on the card from a thread of their own, beside the
   routed experts: a 16,511-token prompt 220.7 -> 217.7 s. The card's exact kernels are the
   limit there.
+
+What release r6 adds (2026-11-12; the bytes kept again):
+
+- **A large step's rows beside the card's kernels.** A prompt step on the card registers its
+  big host buffers with it while it runs (18 buffers, 11 GB for 16,384 rows, 0.7 s), and the
+  card's calls -- the dense matrices, the router, the shared experts, the KDA layers -- move
+  their rows on a copy stream of their own while their kernels run, where the driver used to
+  stage every copy from pageable memory and the host waited for each. On this machine the
+  copies of every stream run in one queue in the order they were queued, so a copy is queued
+  only once what it needs is done; r5's shared experts held up the routed experts' copies that
+  way, and no longer do. A 16,511-token prompt 228 -> 205 s; a 5,862-token prompt waits for the
+  drives and is unchanged. `K3_PIN_STEP=0` turns it off (environment variable).
 
 ---
 
