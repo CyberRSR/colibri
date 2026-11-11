@@ -22,7 +22,7 @@ param(
     # The colibri checkout (this script's ..\..)
     [string]$Repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     # The install the binaries go into
-    [string]$Bundle = (Join-Path $PSScriptRoot 'colibri-kimi-k31-pro-4090-r4-windows-x86_64'),
+    [string]$Bundle = (Join-Path $PSScriptRoot 'colibri-kimi-k31-pro-4090-r5-windows-x86_64'),
     # The GPU's architecture: sm_89 = RTX 40xx, sm_120 = RTX 50xx, sm_86 = RTX 30xx
     [string]$CudaArch = 'sm_89',
     # Rebuild coli_cuda.dll too

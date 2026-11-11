@@ -9,7 +9,7 @@ row attends only the 2,048 earlier rows its layer's indexer scores highest. Ever
 format) is K3's. Sources: the model card and TokenSpeed's implementation,
 [lightseekorg/tokenspeed#3015](https://github.com/lightseekorg/tokenspeed/pull/3015).
 
-**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r4: `kimi_k3.exe` and
+**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r5: `kimi_k3.exe` and
 `coli_cuda_k3.dll` here were built on the RTX 4090 machine and checked there on the model
 itself (BUILD-INFO-K31.txt: the commit, the toolchain, the checks). Release kimi-k3-4090-r1's
 `kimi_k3.exe` does not read `dsa_config`: it would run every MLA layer dense, which is K3.1's
@@ -47,7 +47,7 @@ the launcher's settings, each run a fresh start:
 
 | | |
 |---|---:|
-| the start: the engine ready (the dense matrices from `k3_dense_cache.bin`) | **9.7 s** (the first start writes the file: 48 s; with `-NoDenseCache` 28 s every time) |
+| the start: the engine ready (the dense matrices from `k3_dense_cache.bin`) | **7.5 s** (9.7 s in r4; the first start writes the file: 48 s; with `-NoDenseCache` 28 s every time) |
 | the API answering after `START-KIMI-K31-PRO.cmd` | 11 s |
 | a 35-token question, to the first token | 28-29 s (311 GB of experts read) |
 | a 5,862-token prompt | 110 s (one step, at the drives' pace) |
@@ -57,6 +57,7 @@ the launcher's settings, each run a fresh start:
 | a new conversation with the same system prompt (16,501 tokens of instructions) | **19.9 s** to the first token (219 s in release r2: the instructions read again) |
 | a 16,592-token conversation's next turn after another conversation | **26.6 s** to the first token (about 220 s in release r3: the conversation read again) |
 | its next turn after a restart of the server | **31.9 s** to the first token (read back from its file in 0.5 s) |
+| a long prompt whose client gave up, sent again | resumes after the steps it finished (a 2,962-token prompt in steps of 1,024: 187 s, not 290) |
 | decode | 0.85-0.91 tok/s at a short context (the machine's own drift over a day), 0.73-0.80 right after a long prompt |
 
 The logits of the 5,862-token prompt are the same bytes at every position with this profile
@@ -127,6 +128,22 @@ What release r4 adds (2026-11-11; the bytes kept again):
   the process restarted: after a few long conversations the cache was gigabytes smaller and
   decode slower.
 - **The history's pins (`-Pins`) cannot hang a decode** at the floor the lending stops at.
+
+What release r5 adds (2026-11-11; the bytes kept again):
+
+- **A cancelled prompt resumes.** A prompt of several steps (16,384 tokens a step here) keeps a
+  photo of the state at the end of the last step it finished. A client that gave up waiting
+  -- its timeout shorter than a long prompt -- or a user who pressed stop used to leave
+  nothing, and the same prompt sent again started over, so such a client never got an
+  answer; now it resumes after the steps that were done.
+- **A decode token's attention** past 2,048 positions: 271 -> 253 ms at 16,500 positions,
+  and the indexer's pick of 2,048 positions at 131,072 positions 0.9 -> 0.08 ms a layer.
+  The rest of a token is the drives'.
+- **The start**: the dense cache read ahead by threads of their own, 5.6 -> 4.6 s; the engine
+  ready in 7.5 s instead of 9.4.
+- **A large step**: the shared experts on the card from a thread of their own, beside the
+  routed experts: a 16,511-token prompt 220.7 -> 217.7 s. The card's exact kernels are the
+  limit there.
 
 ---
 

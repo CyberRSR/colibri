@@ -5,10 +5,11 @@ Unzip anywhere (e.g. C:\colibri) and start one model at a time:
   START-KIMI-K31-PRO.cmd   Kimi K3.1 Pro (tools\start_kimi_k31_pro_4090.ps1)  README-KIMI-K31-PRO-4090.md
                            weights: tools\download_kimi_k31_pro_4090.ps1 (moonshotai/Kimi-K3.1-Pro)
                            engine: K3.1's kimi_k3.exe and coli_cuda_k3.dll are here (BUILD-INFO-K31.txt);
-                           the first start writes <model folder>\k3_dense_cache.bin (33.9 GB), the next start in 10 s;
+                           the first start writes <model folder>\k3_dense_cache.bin (33.9 GB), the next start in 8 s;
                            a new conversation starts after its system prompt, kept from the first one (20 s, not 220, for 16.5k tokens);
                            a conversation another one interrupted, or a restart left behind, comes back from its file
-                           in <model folder>\k3_sessions (27-32 s to its next reply, not 220; -Sessions 0: off)
+                           in <model folder>\k3_sessions (27-32 s to its next reply, not 220; -Sessions 0: off);
+                           a long prompt whose client gave up resumes where it was when it is sent again
   START-MIMO.cmd           MiMo-V2.6-Pro-MOPD (tools\start_mimo_cuda_4090.ps1)  README-MIMO-4090.md
   START-MIMO-HERETIC.cmd   MiMo-V2.6-Pro-MOPD-heretic (the same launcher, -Model heretic)
 
