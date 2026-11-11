@@ -32,6 +32,8 @@ static int (*p_mla_mask)(const float *, const float *, int, int, int, const floa
 static int (*p_dsa_mask)(const float *, int, int, int, const float *, const float *, int, int, int, uint32_t *, int);   /* and this */
 static int (*p_mla_sel)(const float *, const float *, int, int, int, const float *, const float *, const int8_t *,
                         const float *, int, int, int, int, int, float, const uint32_t *, int, int, float *);   /* and this */
+static int (*p_host_register)(void *, size_t);   /* optional: registered rows beside the kernels */
+static void (*p_host_unregister)(void *);
 static void (*p_report)(void), (*p_shutdown)(void);
 
 int k3cu_init(int device) {
@@ -62,12 +64,16 @@ int k3cu_init(int device) {
     { FARPROC fn = GetProcAddress(h, "k3cu_mla_mask"); if (fn) memcpy(&p_mla_mask, &fn, sizeof fn); else fprintf(stderr, "[K3-CUDA] coli_cuda_k3.dll has no k3cu_mla_mask: K3.1's sparse rows on the CPU\n"); }
     { FARPROC fn = GetProcAddress(h, "k3cu_mla_sel"); if (fn) memcpy(&p_mla_sel, &fn, sizeof fn); else fprintf(stderr, "[K3-CUDA] coli_cuda_k3.dll has no k3cu_mla_sel: K3.1's selecting rows against every position (k3cu_mla_mask), slower as the context grows\n"); }
     { FARPROC fn = GetProcAddress(h, "k3cu_dsa_mask"); if (fn) memcpy(&p_dsa_mask, &fn, sizeof fn); else fprintf(stderr, "[K3-CUDA] coli_cuda_k3.dll has no k3cu_dsa_mask: K3.1's picks on the CPU, a long prompt waits there\n"); }
+    { FARPROC fn = GetProcAddress(h, "k3cu_host_register"), fu = GetProcAddress(h, "k3cu_host_unregister");
+      if (fn && fu) { memcpy(&p_host_register, &fn, sizeof fn); memcpy(&p_host_unregister, &fu, sizeof fu); } }
     module = h;
     return p_init(device);
 }
 size_t k3cu_free_bytes(void) { return module ? p_free_bytes() : 0; }
 void *k3cu_host_alloc(size_t bytes) { return module ? p_host_alloc(bytes) : NULL; }
 void k3cu_host_free(void *p) { if (module && p) p_host_free(p); }
+int k3cu_host_register(void *p, size_t bytes) { return module && p_host_register ? p_host_register(p, bytes) : 0; }
+void k3cu_host_unregister(void *p) { if (module && p_host_unregister && p) p_host_unregister(p); }
 int k3cu_exact_eval(int kind, uint32_t first, uint32_t count, uint32_t *out) { return module ? p_exact_eval(kind, first, count, out) : 0; }
 int k3cu_moe_begin(const int8_t *zq, const float *zs, int n, int LT, int MI, float b1, float b2,
                    size_t ebytes, const size_t *off, float *Y, int npairs) {

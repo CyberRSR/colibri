@@ -527,6 +527,59 @@ static float *fcalloc(int64_t n){
  * (k3_balloc: the smallest kept block that holds the request, at most twice it), and a
  * step's end gives them back (k3_bcache_drop). As with malloc, every user writes a
  * buffer before it reads it. */
+/* K3_PIN_STEP (default 1): a prompt step on the card registers its big host buffers with it while it runs
+ * (k3cu_host_register; the pool's blocks below, a layer range's buffers) and lets them go at its end. From
+ * pageable memory the driver stages every copy and the host waits for each, so a step's rows went up and down
+ * at 9-11 GB/s with nothing on the card beside them; from registered memory the DLL moves them at the bus's
+ * speed on a copy stream while its kernels run (backend_cuda_k3.cu, pipe_rows). The bytes are the same; a
+ * 16,511-token prompt in a step of 16,384 took 228 s before, 205 now (the 4090 machine). */
+static int g_k3_pin_step;                  /* the running step registers the big buffers it allocates */
+#define K3_PIN_MIN ((size_t)4<<20)
+static double g_k3_pin_t, g_k3_pin_gb; static int g_k3_pin_n, g_k3_unpin_n; static double g_k3_unpin_t;   /* a step's registrations */
+#ifdef COLI_K3_CUDA
+static pthread_mutex_t g_k3_pin_mx=PTHREAD_MUTEX_INITIALIZER;   /* the counters and the cap: any thread allocates */
+#endif
+static int k3_pin(void *p, size_t b){
+#ifdef COLI_K3_CUDA
+    if(!g_k3_pin_step||!p||b<K3_PIN_MIN) return 0;
+    /* K3_PIN_GB (16): past it nothing more is registered in the step. A step of 16,384 rows registers
+     * 18 buffers, 11.0 GB, in 0.6 s and lets them go in 0.1 (the 4090 machine); K3_PIN_LOG=1 prints each. */
+    static double cap=-1.0;
+    pthread_mutex_lock(&g_k3_pin_mx);
+    if(cap<0.0){ const char *e=getenv("K3_PIN_GB"); cap=e&&*e?atof(e):16.0; }
+    const int room=g_k3_pin_gb+b/1e9<=cap;
+    if(room) g_k3_pin_gb+=b/1e9;   /* held while it registers */
+    pthread_mutex_unlock(&g_k3_pin_mx);
+    if(!room) return 0;
+    struct timespec a,z; clock_gettime(CLOCK_MONOTONIC,&a);
+    const int ok=k3cu_host_register(p,b);
+    clock_gettime(CLOCK_MONOTONIC,&z);
+    pthread_mutex_lock(&g_k3_pin_mx);
+    g_k3_pin_t+=(z.tv_sec-a.tv_sec)+(z.tv_nsec-a.tv_nsec)*1e-9;
+    if(ok) g_k3_pin_n++; else g_k3_pin_gb-=b/1e9;
+    const double gb=g_k3_pin_gb;
+    pthread_mutex_unlock(&g_k3_pin_mx);
+    {   static int lg=-1;
+        if(lg<0){ const char *e=getenv("K3_PIN_LOG"); lg=e&&atoi(e); }
+        if(lg) fprintf(stderr,"[K3] pin %.1f MB %s (%.2f GB in the step)\n",b/1e6,ok?"registered":"REFUSED",gb);
+    }
+    return ok;
+#else
+    (void)p; (void)b; return 0;
+#endif
+}
+static void k3_unpin(void *p){
+#ifdef COLI_K3_CUDA
+    struct timespec a,z; clock_gettime(CLOCK_MONOTONIC,&a);
+    k3cu_host_unregister(p);
+    clock_gettime(CLOCK_MONOTONIC,&z);
+    pthread_mutex_lock(&g_k3_pin_mx);
+    g_k3_unpin_t+=(z.tv_sec-a.tv_sec)+(z.tv_nsec-a.tv_nsec)*1e-9; g_k3_unpin_n++;
+    pthread_mutex_unlock(&g_k3_pin_mx);
+#else
+    (void)p;
+#endif
+}
 #define K3_BC_MAX 64
 #define K3_BC_MIN ((size_t)1<<20)
 static struct { char *blk; size_t cap; } g_k3_bc[K3_BC_MAX];   /* blk: malloc's, not posix_memalign's */
@@ -546,6 +599,7 @@ static void *k3_balloc_bytes(size_t b){
     char *base=malloc(b+64);
     if(!base){ fprintf(stderr,"OOM %zu bytes\n",b); exit(1); }
     *(size_t*)base=b;
+    *(int*)(base+8)=k3_pin(base,b+64);   /* registered with the card: let go before it is freed */
     return base+64;
 }
 static float *k3_balloc(int64_t n){
@@ -560,11 +614,15 @@ static void k3_bfree(void *p){
         if(g_k3_bc_n<K3_BC_MAX){ g_k3_bc[g_k3_bc_n].blk=base; g_k3_bc[g_k3_bc_n].cap=*(size_t*)base; g_k3_bc_n++; base=NULL; }
         pthread_mutex_unlock(&g_k3_bc_mx);
     }
+    if(base&&*(int*)(base+8)) k3_unpin(base);
     free(base);
 }
 static void k3_bcache_drop(void){
     pthread_mutex_lock(&g_k3_bc_mx);
-    for(int i=0;i<g_k3_bc_n;i++) free(g_k3_bc[i].blk);
+    for(int i=0;i<g_k3_bc_n;i++){
+        if(*(int*)(g_k3_bc[i].blk+8)) k3_unpin(g_k3_bc[i].blk);
+        free(g_k3_bc[i].blk);
+    }
     g_k3_bc_n=0;
     pthread_mutex_unlock(&g_k3_bc_mx);
 }
@@ -5579,10 +5637,14 @@ static float *k3_shared_card(Model *m, Moe *o, const float *x, int C){
 }
 /* K3_SHARED_PAR=0: a prompt step's shared experts on the step's own thread, before its waves */
 static int g_k3_shared_par=-1;
-typedef struct { Model *m; Moe *o; const float *x; int C; float *sd; double t; } K3SharedTh;
+typedef struct { Model *m; Moe *o; const float *x; int C; float *out, *sd; double t; } K3SharedTh;
 static void *k3_shared_th(void *p){
     K3SharedTh *j=p; const double t0=now_s();
-    j->sd=k3_shared_card(j->m,j->o,j->x,j->C);
+    const Cfg *c=&j->m->c; const int shi=c->moe_inter*c->n_shared;
+    const W *g=&j->o->sh_gate, *u=&j->o->sh_up, *d=&j->o->sh_down;
+    /* into out: a block of the step's pool, registered with the card on a prompt step */
+    j->sd=j->out&&k3cu_shared(j->out,j->x,j->C,c->hidden,shi,g->q4,g->s,u->q4,u->s,g->gs,d->q4,d->s,d->gs,c->situ_b1,c->situ_b2)
+          ?j->out:NULL;
     j->t=now_s()-t0;
     return NULL;
 }
@@ -5941,6 +6003,7 @@ static void moe_forward(Model *m, Layer *l, int li, const float *x, int C, float
     k3_moe_route(m,o,li,sco,C,idxs,wsels,keff);
     k3_prefetch_score(m,li,idxs,keff,C);
     float *z=k3_balloc((int64_t)C*LT), *u=k3_balloc((int64_t)C*LT), *sd=NULL;
+    int sd_pool=0;   /* sd a block of the step's pool (the shared experts' side thread) */
     memset(u,0,(size_t)C*LT*sizeof(float));
     if(k3_waves_on()){
         /* the routed experts' reads first; the latent projection and the shared experts,
@@ -5957,10 +6020,17 @@ static void moe_forward(Model *m, Layer *l, int li, const float *x, int C, float
         K3SharedJob sj={m,o,x,C,NULL};
 #ifdef COLI_K3_CUDA
         if(g_k3_shared_par<0){ const char *e=getenv("K3_SHARED_PAR"); g_k3_shared_par=!e||!*e||atoi(e)!=0; }
-        K3SharedTh st={m,o,x,C,NULL,0.0}; pthread_t sth; int side=0;
-        if(g_k3_shared_par&&k3_shared_card_ok(m,o,C)) side=!pthread_create(&sth,NULL,k3_shared_th,&st);
+        K3SharedTh st={m,o,x,C,NULL,NULL,0.0}; pthread_t sth; int side=0;
+        if(g_k3_shared_par&&k3_shared_card_ok(m,o,C)){
+            st.out=k3_balloc((int64_t)C*c->hidden);
+            side=!pthread_create(&sth,NULL,k3_shared_th,&st);
+            if(!side){ k3_bfree(st.out); st.out=NULL; }
+        }
         k3_waves_run(m,li,&wv,z,LT,u,side?NULL:k3_shared_job,&sj);
-        if(side){ pthread_join(sth,NULL); sj.sd=st.sd; m->t_shared+=st.t; }   /* NULL: the card failed, the CPU below */
+        if(side){   /* NULL: the card failed, the CPU below */
+            pthread_join(sth,NULL); m->t_shared+=st.t;
+            if(st.sd){ sj.sd=st.sd; sd_pool=1; } else k3_bfree(st.out);
+        }
 #else
         k3_waves_run(m,li,&wv,z,LT,u,k3_shared_job,&sj);
 #endif
@@ -5986,7 +6056,8 @@ static void moe_forward(Model *m, Layer *l, int li, const float *x, int C, float
     for(int64_t d=0;d<(int64_t)C*c->hidden;d++) out[d]+=sd[d];
     if(g_k3_ckf) k3_ck_rows(K3CK_OUT,li,out,C,c->hidden);
     k3_bfree(sco);free(idxs);free(wsels);free(keff);
-    k3_bfree(z);k3_bfree(u);free(sd);
+    k3_bfree(z);k3_bfree(u);
+    if(sd_pool) k3_bfree(sd); else free(sd);
 }
 
 static void dense_forward(Model *m, Layer *l, const float *x, int C, float *out){
@@ -6023,6 +6094,9 @@ static int k3_layers_forward_range(Model *m, float *hidden, float *bres,
     int nb=*nb_io;
     float *prefix=falloc((int64_t)C*D), *nrm=falloc((int64_t)C*D);
     float *att=falloc((int64_t)C*D), *mix=falloc((int64_t)C*D), *mlp=falloc((int64_t)C*D);
+    float *const rbuf[5]={prefix,nrm,att,mix,mlp};
+    int rpin[5];
+    for(int k=0;k<5;k++) rpin[k]=k3_pin(rbuf[k],(size_t)C*D*sizeof(float));   /* a prompt step's: the card's calls read and write them */
     if(cancelled) *cancelled=0;
     for(int i=layer_begin;i<layer_end;i++){
         Layer *l=&m->L[i];
@@ -6107,6 +6181,7 @@ static int k3_layers_forward_range(Model *m, float *hidden, float *bres,
         }
     }
     *nb_io=nb;
+    for(int k=0;k<5;k++) if(rpin[k]) k3_unpin(rbuf[k]);
     free(prefix);free(nrm);free(att);free(mix);free(mlp);
     return cancelled&&*cancelled?-1:0;
 }
@@ -6393,6 +6468,13 @@ static float *step_chunk_ex(Model *m, const int *ids, int pos0, int C,
     Cfg *c=&m->c; int D=c->hidden;
     if(cancelled) *cancelled=0;
     if(!m->mux_rows&&k3_kv_grow_on()) k3_kv_need(m,pos0+C);   /* the rows this step is about to write */
+#ifdef COLI_K3_CUDA
+    {   /* a prompt step on the card: its big buffers registered with it while it runs (K3_PIN_STEP) */
+        static int pin_on=-1;
+        if(pin_on<0){ const char *e=getenv("K3_PIN_STEP"); pin_on=!e||!*e||atoi(e)!=0; }
+        g_k3_pin_step=pin_on&&!m->mux_rows&&g_k3g_on&&C>=g_k3g_min_rows;
+    }
+#endif
     if(!m->mux_rows){ g_k3_live_dirty=1; if(pos0<g_k3_live_saved) g_k3_live_saved=pos0; }   /* its file's rows from here on are not these */
     /* a large step's activations: lent by the expert cache until the step ends (K3_LEND) */
     const double act_lent=!m->mux_rows&&C>512&&k3_lend_on()?(double)(C-512)*K3_ACT_ROW_GB*1e9*(double)D/7168.0:0.0;   /* K3's 1.4 MB a row, by the width */
@@ -6471,6 +6553,10 @@ static float *step_chunk_ex(Model *m, const int *ids, int pos0, int C,
     if(!cancelled||!*cancelled) kv_prefix_record(&m->kvp,ids,pos0,C);
     free(hidden);free(bres);free(mix);
     k3_bcache_drop();   /* the step's kept buffers back to the OS */
+    if(g_k3_pin_n) fprintf(stderr,"[K3] the step registered %d buffers (%.1f GB) with the card in %.1fs and let %d go in %.1fs\n",
+                           g_k3_pin_n,g_k3_pin_gb,g_k3_pin_t,g_k3_unpin_n,g_k3_unpin_t);
+    g_k3_pin_n=g_k3_unpin_n=0; g_k3_pin_gb=g_k3_pin_t=g_k3_unpin_t=0.0;
+    g_k3_pin_step=0;
     if(act_lent>0.0){ g_k3_lend_step=0.0; k3_cache_lent_sync(m); }   /* and the cache's slots back to it */
 #ifdef COLI_VULKAN
     free(fin);free(dev_last);

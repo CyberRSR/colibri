@@ -122,6 +122,22 @@ static int check_experts(int LT, int MI, float b1, float b2, const int *rs, int 
     return bad;
 }
 
+static int check_dense_dev(int fmt, int S, int I, int O, int gs);
+static int check_router(int C, int D, int E);
+static int check_shared(int C, int D, int MI, int ns, int gs);
+static int check_kda(int C, int D, int H, int hd, int K, int card);
+/* g_pin: the card's calls given registered host rows (k3cu_host_register), which they move on a copy
+ * stream beside their kernels (backend_cuda_k3.cu, pipe_rows); 0: pageable rows, the driver's staging */
+static int g_pin;
+static int pin_rows(void *a, size_t na, void *b, size_t nb){
+    if(!g_pin) return 1;
+    if(!k3cu_host_register(a, na)) return 0;
+    if(!k3cu_host_register(b, nb)){ k3cu_host_unregister(a); return 0; }
+    return 1;
+}
+static void unpin_rows(void *a, void *b){ if(g_pin){ k3cu_host_unregister(a); k3cu_host_unregister(b); } }
+static const char *pin_tag(void){ return g_pin ? " (registered rows)" : ""; }
+
 /* 3. The dense matrices the device does not hold: k3cu_matmul against matmul_i4_grouped
  *    (fmt 4) and matmul_q (fmt 1), every output the same bytes. */
 static int check_dense(int fmt, int S, int I, int O, int gs){
@@ -134,11 +150,12 @@ static int check_dense(int fmt, int S, int I, int O, int gs){
     if(fmt == 4) matmul_i4_grouped(yc, x, w, sc, S, I, O, gs);
     else matmul_q(yc, x, (const int8_t *)w, sc, S, I, O);
     memset(yg, 0xff, (size_t)S * O * sizeof(float));
-    int ok = k3cu_matmul(fmt, yg, x, w, sc, S, I, O, gs);
+    int ok = pin_rows(x, (size_t)S * I * 4, yg, (size_t)S * O * 4) && k3cu_matmul(fmt, yg, x, w, sc, S, I, O, gs);
+    unpin_rows(x, yg);
     size_t diff = 0;
     for(size_t i = 0; i < (size_t)S * O; i++) if(memcmp(yc + i, yg + i, 4)) diff++;
-    printf("dense %s %dx%d%s%s, %d rows: %s%zu of %zu differ\n", fmt == 4 ? "int4" : "int8", O, I,
-           fmt == 4 ? ", groups of " : "", fmt == 4 ? (gs == 64 ? "64" : gs == 32 ? "32" : "128") : "", S,
+    printf("dense %s %dx%d%s%s, %d rows%s: %s%zu of %zu differ\n", fmt == 4 ? "int4" : "int8", O, I,
+           fmt == 4 ? ", groups of " : "", fmt == 4 ? (gs == 64 ? "64" : gs == 32 ? "32" : "128") : "", S, pin_tag(),
            ok ? "" : "FAILED to run; ", diff, (size_t)S * O);
     free(w); free(sc); free(x); free(yc); free(yg);
     return !ok || diff;
@@ -257,10 +274,11 @@ static int check_router(int C, int D, int E){
     for(size_t i = 0; i < (size_t)C * D; i++) x[i] = rndf();
     k3_router_scores(&o, sc, x, C, D, E);
     memset(sg, 0xff, (size_t)C * E * sizeof(float));
-    int ok = k3cu_router(sg, x, o.router16, C, D, E);
+    int ok = pin_rows(x, (size_t)C * D * 4, sg, (size_t)C * E * 4) && k3cu_router(sg, x, o.router16, C, D, E);
+    unpin_rows(x, sg);
     size_t diff = 0;
     for(size_t i = 0; i < (size_t)C * E; i++) if(memcmp(sc + i, sg + i, 4)) diff++;
-    printf("router %d experts x %d, %d rows: %s%zu of %zu differ\n", E, D, C, ok ? "" : "FAILED to run; ", diff, (size_t)C * E);
+    printf("router %d experts x %d, %d rows%s: %s%zu of %zu differ\n", E, D, C, pin_tag(), ok ? "" : "FAILED to run; ", diff, (size_t)C * E);
     free(o.router16); free(x); free(sc); free(sg);
     return !ok || diff;
 }
@@ -283,10 +301,12 @@ static int check_shared(int C, int D, int MI, int ns, int gs){
     for(size_t i = 0; i < (size_t)C * D; i++) x[i] = rndf();
     float *sc = k3_shared(m, &o, x, C);
     memset(sg, 0xff, (size_t)C * D * sizeof(float));
-    int ok = k3cu_shared(sg, x, C, D, I, o.sh_gate.q4, o.sh_gate.s, o.sh_up.q4, o.sh_up.s, gs, o.sh_down.q4, o.sh_down.s, gs, 4.0f, 25.0f);
+    int ok = pin_rows(x, (size_t)C * D * 4, sg, (size_t)C * D * 4) &&
+             k3cu_shared(sg, x, C, D, I, o.sh_gate.q4, o.sh_gate.s, o.sh_up.q4, o.sh_up.s, gs, o.sh_down.q4, o.sh_down.s, gs, 4.0f, 25.0f);
+    unpin_rows(x, sg);
     size_t diff = 0;
     for(size_t i = 0; i < (size_t)C * D; i++) if(memcmp(sc + i, sg + i, 4)) diff++;
-    printf("shared experts %dx%d (%d of %d), %d rows: %s%zu of %zu differ\n", D, I, ns, MI, C, ok ? "" : "FAILED to run; ", diff, (size_t)C * D);
+    printf("shared experts %dx%d (%d of %d), %d rows%s: %s%zu of %zu differ\n", D, I, ns, MI, C, pin_tag(), ok ? "" : "FAILED to run; ", diff, (size_t)C * D);
     free(sc); free(sg); free(x);
     W *ws[3] = {&o.sh_gate, &o.sh_up, &o.sh_down};
     for(int k = 0; k < 3; k++){ free(ws[k]->q4); free(ws[k]->s); }
@@ -318,12 +338,14 @@ static int check_dense_dev(int fmt, int S, int I, int O, int gs){
     ColiCudaTensor *t = NULL;
     const void *dw = NULL; const float *ds = NULL; int tgs = 0;
     int ok = coli_cuda_tensor_upload_g(&t, w, sc, fmt, I, O, 0, fmt == 4 ? gs : 0) &&
-             coli_cuda_tensor_dev_ptrs(t, &dw, &ds, &tgs) == fmt && k3cu_matmul_dev(fmt, yg, x, dw, ds, S, I, O, tgs);
+             coli_cuda_tensor_dev_ptrs(t, &dw, &ds, &tgs) == fmt && pin_rows(x, (size_t)S * I * 4, yg, (size_t)S * O * 4) &&
+             k3cu_matmul_dev(fmt, yg, x, dw, ds, S, I, O, tgs);
+    unpin_rows(x, yg);
     size_t diff = 0, first = (size_t)-1;
     for(size_t i = 0; i < (size_t)S * O; i++) if(memcmp(yc + i, yg + i, 4)){ if(first == (size_t)-1) first = i; diff++; }
     if(diff) printf("  output %zu: CPU %a, device %a\n", first, yc[first], yg[first]);
-    printf("dense on the card %s %dx%d%s%s, %d rows: %s%zu of %zu differ\n", fmt == 4 ? "int4" : "int8", O, I,
-           fmt == 4 ? ", groups of " : "", fmt == 4 ? (gs == 64 ? "64" : gs == 32 ? "32" : "128") : "", S,
+    printf("dense on the card %s %dx%d%s%s, %d rows%s: %s%zu of %zu differ\n", fmt == 4 ? "int4" : "int8", O, I,
+           fmt == 4 ? ", groups of " : "", fmt == 4 ? (gs == 64 ? "64" : gs == 32 ? "32" : "128") : "", S, pin_tag(),
            ok ? "" : "FAILED to run; ", diff, (size_t)S * O);
     if(t) coli_cuda_tensor_free(t);
     free(w); free(sc); free(x); free(yc); free(yg);
@@ -378,16 +400,18 @@ static int check_kda(int C, int D, int H, int hd, int K, int card){
     for(int w = 0; w < 3; w++) memcpy(win[w], w0[w], (size_t)P * K * 4);
     g_k3_kda_gpu = 1; g_k3g_on = 1; m->t_kda_gpu = 0; g_k3_cuda_dense = card != 0;
     memset(og, 0xff, (size_t)C * D * 4);
+    const int pinned = pin_rows(x, (size_t)C * D * 4, og, (size_t)C * D * 4);
     kda_forward(m, l, 0, x, C, og);
-    const int ran = m->t_kda_gpu > 0;
+    if(pinned) unpin_rows(x, og);
+    const int ran = m->t_kda_gpu > 0 && pinned;
     g_k3g_on = 0;
     size_t dout = 0, dst = 0, dwin = 0, first = (size_t)-1;
     for(size_t i = 0; i < (size_t)C * D; i++) if(memcmp(oc + i, og + i, 4)){ if(first == (size_t)-1) first = i; dout++; }
     for(size_t i = 0; i < (size_t)H * hd * hd; i++) if(memcmp(stc + i, kst + i, 4)) dst++;
     for(int w = 0; w < 3; w++) for(size_t i = 0; i < (size_t)P * K; i++) if(memcmp(wc[w] + i, win[w] + i, 4)) dwin++;
     if(dout) printf("  output %zu: CPU %a, device %a\n", first, oc[first], og[first]);
-    printf("KDA %d heads of %d, %d columns, conv %d, card's projections 0x%02x, %d rows: %s%zu of %zu outputs, %zu of %zu state, "
-           "%zu of %zu window values differ\n", H, hd, D, K, card, C, ran && up ? "" : "FAILED to run on the GPU; ",
+    printf("KDA %d heads of %d, %d columns, conv %d, card's projections 0x%02x, %d rows%s: %s%zu of %zu outputs, %zu of %zu state, "
+           "%zu of %zu window values differ\n", H, hd, D, K, card, C, pin_tag(), ran && up ? "" : "FAILED to run on the GPU; ",
            dout, (size_t)C * D, dst, (size_t)H * hd * hd, dwin, (size_t)3 * P * K);
     if(card){   /* the by-step path with the card's projections: w_matmul's k3cu_matmul_dev */
         memcpy(kst, st0, (size_t)H * hd * hd * 4);
@@ -496,6 +520,25 @@ static int check_mla_layer(int C, int pos0, int D, int H, int qn, int qr, int vh
     free(Lc); free(Rc); free(L0); free(R0); free(Lg); free(Rg); free(x); free(oc); free(og); free(l); free(m);
     return !up || ran != want || dout || dl || dr;
 }
+/* The calls again with registered rows, in several chunks: chunk 3 into the buffers chunk 1 used. */
+static int pinned_rows(void){
+    int bad = 0;
+    g_pin = 1;
+    bad += check_dense(4, 3000, 7168, 3584, 64);    /* 3 chunks of 1,024 rows (the latent's down) */
+    bad += check_dense(4, 2500, 3584, 7168, 64);    /* the latent's up: 3 chunks */
+    bad += check_dense(1, 2100, 512, 40, 0);        /* int8, 3 chunks */
+    bad += check_dense(4, 300, 7168, 200, 64);      /* one chunk */
+    bad += check_dense_dev(4, 5000, 7168, 200, 64); /* 3 chunks of 2,048 */
+    bad += check_dense_dev(1, 300, 12288, 100, 0);
+    bad += check_router(5000, 7168, 896);           /* 3 chunks of 2,048 */
+    bad += check_router(70, 128, 13);
+    bad += check_shared(2500, 7168, 3072, 2, 64);   /* 3 chunks of 1,024 */
+    bad += check_shared(300, 7168, 3072, 2, 64);
+    bad += check_kda(1100, 7168, 96, 128, 4, 0x1f); /* 3 pieces of 512 rows, every projection on the card */
+    bad += check_kda(600, 7168, 96, 128, 4, 0x12);  /* some projections the host's: their rows on the compute stream */
+    g_pin = 0;
+    return bad;
+}
 int dense_dev(void){
     int bad = 0;
     const int rows[] = { 1, 2, 3, 4, 5, 37, 64, 300, 1030 };
@@ -577,6 +620,12 @@ int main(int argc, char **argv){
         printf(bad ? "FAILED\n" : "ok\n");
         return bad ? 1 : 0;
     }
+    if(argc > 1 && !strcmp(argv[1], "--pin")){   /* the calls with registered rows (the pipe) alone */
+        int bad = pinned_rows();
+        k3cu_report();
+        printf(bad ? "FAILED\n" : "ok\n");
+        return bad ? 1 : 0;
+    }
     if(argc > 1 && !strcmp(argv[1], "--mla")){   /* the MLA layer's cases alone */
         int bad = mla_layers();
         k3cu_report();
@@ -622,6 +671,7 @@ int main(int argc, char **argv){
     bad += check_kda(600, 7168, 96, 128, 4, 0x12);  /* k and o on the card, q, v and g the host's */
     bad += mla_layers();
     bad += mla_dsa();
+    bad += pinned_rows();
     k3cu_report();
     printf(bad ? "FAILED\n" : "ok\n");
     return bad ? 1 : 0;

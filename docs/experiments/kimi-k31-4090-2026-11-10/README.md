@@ -207,11 +207,56 @@ with the engine's spinning team):
 | the MLA core over 2,048 picked rows (96 heads) | 1.90 ms | 1.37-1.46 ms |
 | of it softmax | 0.52 ms | 0.11 ms |
 
+## A large step's rows beside the kernels (2026-11-12)
+
+A prompt step on the card registers its big host buffers with it (`K3_PIN_STEP`; 18 buffers,
+11.0 GB for a step of 16,384 rows, 0.6 s to register and 0.1 s to let go), and the DLL's calls
+whose rows are registered move them on a copy stream beside their kernels (`pipe_rows` in
+`backend_cuda_k3.cu`). The 16,511-token prompt, step 16,384, no logits written, r5's pair
+(`kimi_k3.exe` 947d1767, `coli_cuda_k3.dll` 7ed12963) and this one's (`coli_cuda_k3.dll`
+1a4faee4) in turn (`raw/ab_r5_1`, `raw/ab_hw_1`, `raw/ab_r5_2`, `raw/ab_hw_2`):
+
+| | r5 | now |
+|---|---:|---:|
+| the prompt | 227.5 / 228.9 s | 205.5 / 205.2 s |
+| attention: KDA / MLA | 43.6 / 26.4 s | 38.2 / 21.1 s |
+| the KDA layers' calls on the card | 38.9 s | 35.6 s |
+| the dense matrices the card does not hold (353 calls) | 24.2 s | 13.0 s |
+| the dense matrices it holds (56 calls) | 8.5 s | 5.1 s |
+| the latent's two matrices | 13.8 s | 6.7 s |
+| the shared experts (beside the routed ones) | 44.0 s | 27.1 s |
+| the routed experts, computed | 97.9 s | 95.6 s |
+| their bytes copied / waiting for a slot | 67.6 / 5.0 s | 53.7 / 16.3 s |
+
+The copies' queue (`qblock.cu`, built with `nvcc -O2 -arch=sm_89`): on this machine (WDDM, driver
+621.14) a 50 MB copy of a stream that waits for nothing finishes 90-104 ms after it is queued when
+another stream's copy queued before it waits for a 100 ms kernel, in either direction and from
+pinned or pageable memory, and 2 ms when nothing waits; a kernel of another stream is not held up.
+The pipe's first version queued each chunk's copies behind waits for its kernels: the shared
+experts' pipe then held the routed experts' copies and the experts' rows a layer sends first
+(`k3g_begin`: 14.0 s of `raw/pipe_15k_all`'s 211.6, 0.7 s now). Its two runs in the half hour
+before midnight took 358.3 and 342.6 s (`raw/pipe_15k`, `raw/pipe_15k_b`), everything on the card
+slower (the KDA layers 85.5 s), and the runs beside them were slow too (r5 230.7 s, the pipe's
+build with `K3_PIN_STEP=0` 247.3 s), the adapter's memory 40-130 MB fuller at its peak than in
+every run since; the same DLL with the same 11.0 GB registered took 211.6 s after midnight. Not
+explained; not seen again. `monitor2.ps1` (`K3_MON=monitor2.ps1`)
+adds the GPU memory WDDM gives the engine to the CSV: 22.3 GB dedicated and 35.6 GB shared (the
+cache's 20 GiB of pinned slots, the experts' outputs and the step's registered buffers) at most.
+
+The same bytes, on this build (`kimi_k3.exe` fc6b9154): the 5,862-token prompt has `g6k_cpu.f32`'s
+logits at every position (`raw/r6_6k_logits`, 116.8 s: that prompt waits for the drives, 13.9 s of
+its MoE); the 16,511-token prompt, its logits written, has `p15k_16k.f32`'s, the bytes every
+release since r2 has had (`raw/r6_15k_logits`, 229.1 s where r5 took 244.0 with them written).
+The `kimi_k3.exe` built from the committed source differs from fc6b9154 in its 4 bytes of PE
+time stamp and checksum. `tests/test_k3_cuda_experts --pin` runs every call with
+registered rows in several chunks, so a chunk reuses the buffers of the chunk two before it: the
+CPU's bytes.
+
 ## Not done
 
-- **A large step waits for the card.** 16,511 rows take 218 s where the drives need 105: the
+- **A large step waits for the card.** 16,511 rows take 205 s where the drives need 105: the
   exact kernels run the KDA layers, the shared and the routed experts at about half of what
-  the tile kernels reach alone, and running the shared ones beside the routed ones took 3 s
-  off. Faster exact kernels are what is left.
+  the tile kernels reach alone (the routed experts' 95-96 s of the step's MoE, of which their
+  copies are 54). Faster exact kernels are what is left.
 - The numbers of `docs/kimi_k3-4090.md` are Kimi K3's; its shards are no longer on this
   machine, so nothing here compares the two models on the same day.

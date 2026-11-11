@@ -1250,6 +1250,23 @@ extern "C" void *k3cu_host_alloc(size_t bytes) {
     return p;
 }
 extern "C" void k3cu_host_free(void *p) { if (p) cudaFreeHost(p); }
+// Host memory the card reaches directly: the engine's step buffers while a prompt step runs on the card
+// (kimi_k3.c, K3_PIN_STEP). Registering 473 MB took 2.4 ms on the 4090 machine, unregistering 5.7.
+extern "C" int k3cu_host_register(void *p, size_t bytes) {
+    if (!ready || failed || !p || !bytes || !on_device()) return 0;
+    if (cudaHostRegister(p, bytes, cudaHostRegisterDefault) != cudaSuccess) { cudaGetLastError(); return 0; }
+    return 1;
+}
+extern "C" void k3cu_host_unregister(void *p) {
+    if (!ready || !p || !on_device()) return;
+    if (cudaHostUnregister(p) != cudaSuccess) cudaGetLastError();
+}
+// p in registered or cudaHostAlloc'd memory: copies from and to it need no staging and need not hold the host
+static int host_pinned(const void *p) {
+    cudaPointerAttributes at;
+    if (!p || cudaPointerGetAttributes(&at, p) != cudaSuccess) { cudaGetLastError(); return 0; }
+    return at.type == cudaMemoryTypeHost;
+}
 
 extern "C" int k3cu_exact_eval(int kind, uint32_t first, uint32_t count, uint32_t *out) {
     if (!ready || failed || !out || !count) return 0;
@@ -1396,6 +1413,61 @@ static int mm_room(void **p, size_t *cap, size_t need) {
     *cap = need;
     return 1;
 }
+
+// ---- a call's rows through the card, the copies beside the kernels ------------------------------------
+// From pageable host memory the driver stages every copy and the host waits for each: a prompt step's rows
+// went up at 9-11 GB/s and nothing ran beside them (a 5,847-token prompt: 31 s of one stream's 113, of which
+// 11 computing). When a call's host rows are registered (k3cu_host_register), they go up and down on a copy
+// stream of the call's own while its kernels run on the compute stream: chunk c+1's rows up while chunk c
+// computes, chunk c's outputs down after it, each into one of two device buffers. One copy stream for both
+// directions: the two at once were slower on the 4090 machine than one after the other (17.5 GB/s together
+// against 26.8 one way). The kernels, their inputs and their order are the pageable path's: the same bytes.
+// Under WDDM (the 4090 machine, driver 621.14) the copies of every stream run in one queue in the order they
+// were queued: a copy waiting for an event, or for kernels before it on its stream, holds up the copies of
+// every other stream queued after it until that work is done (docs/experiments/kimi-k31-4090-2026-11-10/
+// qblock.cu: 90-104 ms behind a 100 ms kernel instead of 2). So a copy is queued here only once what it needs
+// is done, and the host does the waiting; otherwise the shared experts' copies, queued beside the routed
+// experts', held theirs.
+struct K3Pipe { cudaStream_t cp; cudaEvent_t up[2], comp[2], dn[2]; };
+static int pipe_init(K3Pipe *p) {
+    if (p->cp) return 1;
+    if (!checked(cudaStreamCreateWithFlags(&p->cp, cudaStreamNonBlocking), "copy stream")) return 0;
+    for (int i = 0; i < 2; i++)
+        if (!checked(cudaEventCreateWithFlags(&p->up[i], cudaEventDisableTiming), "copy events") ||
+            !checked(cudaEventCreateWithFlags(&p->comp[i], cudaEventDisableTiming), "copy events") ||
+            !checked(cudaEventCreateWithFlags(&p->dn[i], cudaEventDisableTiming), "copy events")) return 0;
+    return 1;
+}
+static unsigned long long n_pipe;   // calls that took the pipe
+// n chunks on compute stream st: up(c, cp) copies chunk c's rows into input buffer c & 1; comp(c, b, st) queues
+// its kernels from input buffer b into output buffer b; down(c, b, cp) copies its outputs back. Chunks 0 and 1
+// go up at once (both buffers free); chunk c+1's kernels are queued (waiting for its rows and, from chunk 2 on,
+// for the outputs of chunk c-1, which shared its output buffer, to be down) before the host waits for chunk c's;
+// then chunk c's outputs go down and chunk c+2's rows up into the buffer chunk c read. Every copy up() and
+// down() make is queued when nothing it waits for is left, so none holds up another stream's (a comp() that
+// copies on its compute stream -- the KDA layer's projections the host computed -- queues those behind the
+// kernels before them; nothing else copies while the KDA layers run).
+template <class Up, class Comp, class Down>
+static int pipe_rows(K3Pipe *p, cudaStream_t st, int n, Up up, Comp comp, Down down) {
+    auto upq = [&](int c) { return up(c, p->cp) && checked(cudaEventRecord(p->up[c & 1], p->cp), "copies"); };
+    auto compq = [&](int c) {
+        const int b = c & 1;
+        return checked(cudaStreamWaitEvent(st, p->up[b], 0), "copies") &&
+               (c < 2 || checked(cudaStreamWaitEvent(st, p->dn[b], 0), "copies")) &&
+               comp(c, b, st) && checked(cudaGetLastError(), "kernels") && checked(cudaEventRecord(p->comp[b], st), "copies");
+    };
+    if (!upq(0) || (n > 1 && !upq(1)) || !compq(0)) return 0;
+    for (int c = 0; c < n; c++) {
+        const int b = c & 1;
+        if (c + 1 < n && !compq(c + 1)) return 0;
+        if (!checked(cudaEventSynchronize(p->comp[b]), "copies") ||   // chunk c computed: its buffers are free
+            !down(c, b, p->cp) || !checked(cudaEventRecord(p->dn[b], p->cp), "copies") ||
+            (c + 2 < n && !upq(c + 2))) return 0;
+    }
+    n_pipe++;
+    return checked(cudaStreamSynchronize(p->cp), "copies");
+}
+#define K3_PIPE_BYTES (96ll << 20)   // a chunk's rows and outputs, one of the two buffer pairs
 extern "C" int k3cu_matmul(int fmt, float *y, const float *x, const void *w, const float *scale,
                            int S, int I, int O, int gs) {
     if (!ready || failed || !y || !x || !w || !scale || S < 1 || I < 8 || O < 1 || !on_device()) return 0;
@@ -1403,6 +1475,31 @@ extern "C" int k3cu_matmul(int fmt, float *y, const float *x, const void *w, con
     double t0 = now_s();
     if (!s_mm && !checked(cudaStreamCreateWithFlags(&s_mm, cudaStreamNonBlocking), "dense stream")) return 0;
     const size_t wb = fmt == 4 ? (size_t)O * (I / 2) : (size_t)O * I, sb = (size_t)O * (fmt == 4 ? I / gs : 1) * sizeof(float);
+    if (host_pinned(x) && host_pinned(y)) {   // registered rows: the pipe (mm_x and mm_y the first buffer pair)
+        static K3Pipe pm; static float *x1, *y1; static size_t x1c, y1c;
+        long long Rl = K3_PIPE_BYTES / (((long long)I + O) * 4);
+        if (Rl > K3_MMROWS) Rl = K3_MMROWS;
+        if (Rl > S) Rl = S;
+        if (Rl < 1) Rl = 1;
+        const int R = (int)Rl, n = (S + R - 1) / R;
+        float *xb[2], *yb[2];
+        if (!pipe_init(&pm) || !mm_room((void **)&mm_w, &mm_wcap, wb) || !mm_room((void **)&mm_s, &mm_scap, sb) ||
+            !mm_room((void **)&mm_x, &mm_xcap, (size_t)R * I * 4) || !mm_room((void **)&mm_y, &mm_ycap, (size_t)R * O * 4) ||
+            !mm_room((void **)&x1, &x1c, (size_t)R * I * 4) || !mm_room((void **)&y1, &y1c, (size_t)R * O * 4)) return 0;
+        xb[0] = mm_x; xb[1] = x1; yb[0] = mm_y; yb[1] = y1;
+        if (!checked(cudaMemcpyAsync(mm_w, w, wb, cudaMemcpyHostToDevice, pm.cp), "dense weights") ||
+            !checked(cudaMemcpyAsync(mm_s, scale, sb, cudaMemcpyHostToDevice, pm.cp), "dense scales")) return 0;
+        auto rows = [&](int c) { return S - c * R < R ? S - c * R : R; };
+        if (!pipe_rows(&pm, s_mm, n,
+                [&](int c, cudaStream_t cs) {
+                    return checked(cudaMemcpyAsync(xb[c & 1], x + (size_t)c * R * I, (size_t)rows(c) * I * 4, cudaMemcpyHostToDevice, cs), "dense rows"); },
+                [&](int c, int b, cudaStream_t ks) { k3_dense_launch(fmt, mm_w, mm_s, xb[b], rows(c), I, O, gs, yb[b], ks); return 1; },
+                [&](int c, int b, cudaStream_t cs) {
+                    return checked(cudaMemcpyAsync(y + (size_t)c * R * O, yb[b], (size_t)rows(c) * O * 4, cudaMemcpyDeviceToHost, cs), "dense outputs"); }))
+            return 0;
+        n_mm++; n_mm_rows += (unsigned long long)S; t_mm += now_s() - t0;
+        return 1;
+    }
     const int R = S < K3_MMROWS ? S : K3_MMROWS;
     if (!mm_room((void **)&mm_w, &mm_wcap, wb) || !mm_room((void **)&mm_s, &mm_scap, sb) ||
         !mm_room((void **)&mm_x, &mm_xcap, (size_t)R * I * sizeof(float)) ||
@@ -1450,6 +1547,29 @@ extern "C" int k3cu_matmul_dev(int fmt, float *y, const float *x, const void *w,
     if (fmt == 4 ? (gs < 16 || gs % 16 || I % gs || K3_KC % gs) : fmt != 1 || I % 8) return 0;
     double t0 = now_s();
     if (!s_mm && !checked(cudaStreamCreateWithFlags(&s_mm, cudaStreamNonBlocking), "dense stream")) return 0;
+    if (host_pinned(x) && host_pinned(y)) {   // registered rows: the pipe, two buffer pairs in K3_MMBYTES
+        static K3Pipe pmd;
+        long long Rl = K3_MMBYTES / 2 / (((long long)I + O) * 4);
+        if (Rl > K3_MMROWS) Rl = K3_MMROWS;
+        if (Rl > S) Rl = S;
+        if (Rl < 1) Rl = 1;
+        const int R = (int)Rl, n = (S + R - 1) / R;
+        float *xb[2], *yb[2];
+        void **const kp[4] = {(void **)&xb[0], (void **)&xb[1], (void **)&yb[0], (void **)&yb[1]};
+        const size_t kb[4] = {(size_t)R * I * 4, (size_t)R * I * 4, (size_t)R * O * 4, (size_t)R * O * 4};
+        if (!pipe_init(&pmd) || !ar_carve(kp, kb, 4)) return 0;
+        auto rows = [&](int c) { return S - c * R < R ? S - c * R : R; };
+        if (!pipe_rows(&pmd, s_mm, n,
+                [&](int c, cudaStream_t cs) {
+                    return checked(cudaMemcpyAsync(xb[c & 1], x + (size_t)c * R * I, (size_t)rows(c) * I * 4, cudaMemcpyHostToDevice, cs), "dense rows"); },
+                [&](int c, int b, cudaStream_t ks) {
+                    k3_dense_launch(fmt, static_cast<const uint8_t *>(w), scale, xb[b], rows(c), I, O, gs, yb[b], ks, 1); return 1; },
+                [&](int c, int b, cudaStream_t cs) {
+                    return checked(cudaMemcpyAsync(y + (size_t)c * R * O, yb[b], (size_t)rows(c) * O * 4, cudaMemcpyDeviceToHost, cs), "dense outputs"); }))
+            return 0;
+        n_mmd++; n_mmd_rows += (unsigned long long)S; t_mmd += now_s() - t0;
+        return 1;
+    }
     long long R = K3_MMBYTES / (((long long)I + O) * 4);
     if (R > K3_MMROWS) R = K3_MMROWS;
     if (R > S) R = S;
@@ -1675,6 +1795,28 @@ extern "C" int k3cu_router(float *sco, const float *x, const uint16_t *w, int C,
     if (!ready || failed || !sco || !x || !w || C < 1 || E < 1 || D < 32 || D % 32 || !on_device()) return 0;
     double t0 = now_s();
     if (!s_mm && !checked(cudaStreamCreateWithFlags(&s_mm, cudaStreamNonBlocking), "dense stream")) return 0;
+    if (host_pinned(x) && host_pinned(sco)) {   // registered rows: the pipe, 2,048 rows a chunk
+        static K3Pipe prt; static float *x1, *s1; static size_t x1c, s1c;
+        const int R = C < 2048 ? C : 2048, n = (C + R - 1) / R;
+        float *xb[2], *sb2[2];
+        if (!pipe_init(&prt) || !mm_room((void **)&rt_x, &rt_xc, (size_t)R * D * 4) || !mm_room((void **)&rt_s, &rt_sc, (size_t)R * E * 4) ||
+            !mm_room((void **)&x1, &x1c, (size_t)R * D * 4) || !mm_room((void **)&s1, &s1c, (size_t)R * E * 4) ||
+            !mm_room((void **)&rt_w, &rt_wc, (size_t)E * D * 2) ||
+            !checked(cudaMemcpyAsync(rt_w, w, (size_t)E * D * 2, cudaMemcpyHostToDevice, prt.cp), "router")) return 0;
+        xb[0] = rt_x; xb[1] = x1; sb2[0] = rt_s; sb2[1] = s1;
+        auto rows = [&](int c) { return C - c * R < R ? C - c * R : R; };
+        if (!pipe_rows(&prt, s_mm, n,
+                [&](int c, cudaStream_t cs) {
+                    return checked(cudaMemcpyAsync(xb[c & 1], x + (size_t)c * R * D, (size_t)rows(c) * D * 4, cudaMemcpyHostToDevice, cs), "router rows"); },
+                [&](int c, int b, cudaStream_t ks) {
+                    k3_lanes32<uint16_t><<<dim3((unsigned)((E + 7) / 8), (unsigned)((rows(c) + K3R_RT - 1) / K3R_RT)), 256, 0, ks>>>(rt_w, xb[b], rows(c), D, E, sb2[b]);
+                    return 1; },
+                [&](int c, int b, cudaStream_t cs) {
+                    return checked(cudaMemcpyAsync(sco + (size_t)c * R * E, sb2[b], (size_t)rows(c) * E * 4, cudaMemcpyDeviceToHost, cs), "router scores"); }))
+            return 0;
+        n_rt++; t_rt += now_s() - t0;
+        return 1;
+    }
     if (!mm_room((void **)&rt_x, &rt_xc, (size_t)C * D * 4) || !mm_room((void **)&rt_s, &rt_sc, (size_t)C * E * 4) ||
         !mm_room((void **)&rt_w, &rt_wc, (size_t)E * D * 2)) return 0;
     dim3 g((unsigned)((E + 7) / 8), (unsigned)((C + K3R_RT - 1) / K3R_RT));
@@ -1708,12 +1850,41 @@ extern "C" int k3cu_shared(float *sd, const float *x, int S, int D, int I, const
     const size_t wb[3] = {(size_t)I * (D / 2), (size_t)I * (D / 2), (size_t)D * (I / 2)};
     const size_t sb[3] = {(size_t)I * (D / ggs) * 4, (size_t)I * (D / ggs) * 4, (size_t)D * (I / dgs) * 4};
     const uint8_t *wq[3] = {gq, uq, dq}; const float *ws[3] = {gs, us, ds};
+    const int piped = host_pinned(x) && host_pinned(sd);
+    static K3Pipe psh; static cudaStream_t s_sh;
+    if (piped && ((!s_sh && !checked(cudaStreamCreateWithFlags(&s_sh, cudaStreamNonBlocking), "shared stream")) || !pipe_init(&psh))) return 0;
+    // the weights up on the stream the rows take: the pipe's copy stream (its chunks' kernels wait for their
+    // rows, queued behind the weights), s_mm otherwise
+    cudaStream_t ws_st = piped ? psh.cp : s_mm;
     for (int k = 0; k < 3; k++)
         if (!mm_room((void **)&sh_w[k], &sh_wc[k], wb[k]) || !mm_room((void **)&sh_s[k], &sh_sc[k], sb[k]) ||
-            !checked(cudaMemcpyAsync(sh_w[k], wq[k], wb[k], cudaMemcpyHostToDevice, s_mm), "shared weights") ||
-            !checked(cudaMemcpyAsync(sh_s[k], ws[k], sb[k], cudaMemcpyHostToDevice, s_mm), "shared scales")) return 0;
+            !checked(cudaMemcpyAsync(sh_w[k], wq[k], wb[k], cudaMemcpyHostToDevice, ws_st), "shared weights") ||
+            !checked(cudaMemcpyAsync(sh_s[k], ws[k], sb[k], cudaMemcpyHostToDevice, ws_st), "shared scales")) return 0;
     if (!mm_room((void **)&sh_x, &sh_xc, (size_t)R * D * 4) || !mm_room((void **)&sh_g, &sh_gc, (size_t)R * I * 4) ||
         !mm_room((void **)&sh_u, &sh_uc, (size_t)R * I * 4) || !mm_room((void **)&sh_y, &sh_yc, (size_t)R * D * 4)) return 0;
+    if (piped) {
+        // registered rows: the pipe, on a compute stream of its own (the engine runs this beside its own calls)
+        static float *x1, *y1; static size_t x1c, y1c;
+        if (!mm_room((void **)&x1, &x1c, (size_t)R * D * 4) || !mm_room((void **)&y1, &y1c, (size_t)R * D * 4)) return 0;
+        float *xb[2] = {sh_x, x1}, *yb[2] = {sh_y, y1};
+        const int n = (S + R - 1) / R;
+        auto rows = [&](int c) { return S - c * R < R ? S - c * R : R; };
+        if (!pipe_rows(&psh, s_sh, n,
+                [&](int c, cudaStream_t cs) {
+                    return checked(cudaMemcpyAsync(xb[c & 1], x + (size_t)c * R * D, (size_t)rows(c) * D * 4, cudaMemcpyHostToDevice, cs), "shared rows"); },
+                [&](int c, int b, cudaStream_t ks) {
+                    const int r = rows(c); const size_t nn = (size_t)r * I;
+                    k3_dense_launch(4, sh_w[0], sh_s[0], xb[b], r, D, I, ggs, sh_g, ks);
+                    k3_dense_launch(4, sh_w[1], sh_s[1], xb[b], r, D, I, ggs, sh_u, ks);
+                    k3_situ_rows<<<(unsigned)((nn + 255) / 256), 256, 0, ks>>>(sh_g, sh_u, nn, b1, b2);
+                    k3_dense_launch(4, sh_w[2], sh_s[2], sh_g, r, I, D, dgs, yb[b], ks);
+                    return 1; },
+                [&](int c, int b, cudaStream_t cs) {
+                    return checked(cudaMemcpyAsync(sd + (size_t)c * R * D, yb[b], (size_t)rows(c) * D * 4, cudaMemcpyDeviceToHost, cs), "shared outputs"); }))
+            return 0;
+        n_sh++; t_sh += now_s() - t0;
+        return 1;
+    }
     for (int s0 = 0; s0 < S; s0 += R) {
         const int r = S - s0 < R ? S - s0 : R;
         const size_t n = (size_t)r * I;
@@ -1722,7 +1893,9 @@ extern "C" int k3cu_shared(float *sd, const float *x, int S, int D, int I, const
         k3_dense_launch(4, sh_w[1], sh_s[1], sh_x, r, D, I, ggs, sh_u, s_mm);
         k3_situ_rows<<<(unsigned)((n + 255) / 256), 256, 0, s_mm>>>(sh_g, sh_u, n, b1, b2);
         k3_dense_launch(4, sh_w[2], sh_s[2], sh_g, r, I, D, dgs, sh_y, s_mm);
-        if (!checked(cudaGetLastError(), "shared kernels") ||
+        // the kernels done before the outputs' copy is queued: queued behind them, it would hold up the
+        // copies the engine's other threads queue meanwhile (the routed experts', beside these)
+        if (!checked(cudaGetLastError(), "shared kernels") || !checked(cudaStreamSynchronize(s_mm), "shared") ||
             !checked(cudaMemcpyAsync(sd + (size_t)s0 * D, sh_y, (size_t)r * D * 4, cudaMemcpyDeviceToHost, s_mm), "shared outputs")) return 0;
     }
     if (!checked(cudaStreamSynchronize(s_mm), "shared")) return 0;
@@ -1898,12 +2071,14 @@ extern "C" int k3cu_kda(const K3cuKda *a, const float *x, float *out) {
     // the layer's constants: fa, fb, bp, A, dt, onw, the q, k, v taps; its state: S, the q, k, v windows
     const size_t nfa = (size_t)hd * D, nfb = (size_t)P * hd, nbp = (size_t)H * D;
     const size_t ncon = nfa + nfb + nbp + H + P + hd + 3 * PK, nst = (size_t)H * hd * hd + 3 * PK;
-    float *dx, *dq, *dk, *dv, *da, *dc, *ds, *dsm;
-    void **const kp[8] = {(void **)&dx, (void **)&dq, (void **)&dk, (void **)&dv, (void **)&da, (void **)&dc, (void **)&ds,
-                          (void **)&dsm};
-    const size_t kb[8] = {(size_t)R * D * 4, (size_t)R * P * 4, (size_t)R * P * 4, (size_t)R * P * 4, (size_t)R * P * 4,
-                          ncon * 4, nst * 4, ((size_t)R * hd + 4 * (size_t)R * H) * 4};
-    if (!ar_carve(kp, kb, 8)) return 0;
+    float *dx, *dq, *dk, *dv, *da, *dc, *ds, *dsm, *dx1 = nullptr;
+    // registered rows with the output on the card: the rows up and the output down on the pipe (dx and dx1)
+    const int piped = a->o.w && out && host_pinned(x) && host_pinned(out);
+    void **const kp[9] = {(void **)&dx, (void **)&dq, (void **)&dk, (void **)&dv, (void **)&da, (void **)&dc, (void **)&ds,
+                          (void **)&dsm, (void **)&dx1};
+    const size_t kb[9] = {(size_t)R * D * 4, (size_t)R * P * 4, (size_t)R * P * 4, (size_t)R * P * 4, (size_t)R * P * 4,
+                          ncon * 4, nst * 4, ((size_t)R * hd + 4 * (size_t)R * H) * 4, (size_t)R * D * 4};
+    if (!ar_carve(kp, kb, piped ? 9 : 8)) return 0;
     float *cfa = dc, *cfb = cfa + nfa, *cbp = cfb + nfb, *cA = cbp + nbp, *cdt = cA + H, *conw = cdt + P, *ctap = conw + hd;
     float *sS = ds, *swin = ds + (size_t)H * hd * hd;
     float *t1 = dsm, *br = t1 + (size_t)R * hd, *rq = br + (size_t)R * H, *rk = rq + (size_t)R * H, *be = rk + (size_t)R * H;
@@ -1916,7 +2091,45 @@ extern "C" int k3cu_kda(const K3cuKda *a, const float *x, float *out) {
     for (int w = 0; w < 3; w++)
         if (!checked(cudaMemcpyAsync(swin + w * PK, a->win[w], PK * 4, cudaMemcpyHostToDevice, st), "KDA windows")) return 0;
     float *dqkv[3] = {dq, dk, dv};
-    for (int s0 = 0; s0 < C; s0 += R) {
+    if (piped) {
+        static K3Pipe pkd;
+        if (!pipe_init(&pkd)) return 0;
+        float *xb[2] = {dx, dx1};
+        const int n = (C + R - 1) / R;
+        auto rows = [&](int c) { return C - c * R < R ? C - c * R : R; };
+        if (!pipe_rows(&pkd, st, n,
+                [&](int c, cudaStream_t cs) {
+                    return checked(cudaMemcpyAsync(xb[c & 1], x + (size_t)c * R * D, (size_t)rows(c) * D * 4, cudaMemcpyHostToDevice, cs), "KDA rows"); },
+                [&](int c, int b, cudaStream_t ks) {
+                    const int s0 = c * R, r = rows(c);
+                    float *dxb = xb[b];
+                    const size_t rp = (size_t)r * P;
+                    const unsigned grh = (unsigned)((r * H + 255) / 256), grp = (unsigned)((rp + 255) / 256);
+                    for (int i = 0; i < 3; i++) {
+                        if (pr[i]->w) kd_mm(pr[i], dqkv[i], dxb, r, D, P, ks);
+                        else if (!checked(cudaMemcpyAsync(dqkv[i], pr[i]->y + (size_t)s0 * P, rp * 4, cudaMemcpyHostToDevice, ks), "KDA projections")) return 0;
+                    }
+                    kd_conv(K, dq, dk, dv, swin, ctap, r, P, ks);
+                    k3_lanes32<float><<<dim3((unsigned)((hd + 7) / 8), (unsigned)((r + K3R_RT - 1) / K3R_RT)), 256, 0, ks>>>(cfa, dxb, r, D, hd, t1);
+                    k3_lanes32<float><<<dim3((unsigned)((P + 7) / 8), (unsigned)((r + K3R_RT - 1) / K3R_RT)), 256, 0, ks>>>(cfb, t1, r, hd, P, da);
+                    k3_lanes32<float><<<dim3((unsigned)((H + 7) / 8), (unsigned)((r + K3R_RT - 1) / K3R_RT)), 256, 0, ks>>>(cbp, dxb, r, D, H, br);
+                    k3_kda_norms<<<grh, 256, 0, ks>>>(dq, dk, br, r * H, hd, rq, rk, be);
+                    k3_kda_prep<<<grp, 256, 0, ks>>>(dq, dk, da, rq, rk, cA, cdt, rp, H, hd, a->qscale, a->gate_lb);
+                    if (hd == 128) kd_rec<128>(sS, dq, dk, da, dv, be, r, H, ks);
+                    else if (hd == 64) kd_rec<64>(sS, dq, dk, da, dv, be, r, H, ks);
+                    else if (hd == 32) kd_rec<32>(sS, dq, dk, da, dv, be, r, H, ks);
+                    else kd_rec<16>(sS, dq, dk, da, dv, be, r, H, ks);
+                    k3_kda_rms<<<grh, 256, 0, ks>>>(dv, r * H, hd, a->eps, rq);
+                    if (a->g.w) kd_mm(&a->g, dk, dxb, r, D, P, ks);
+                    else if (!checked(cudaMemcpyAsync(dk, a->g.y + (size_t)s0 * P, rp * 4, cudaMemcpyHostToDevice, ks), "KDA gate")) return 0;
+                    k3_kda_gate<<<grp, 256, 0, ks>>>(dv, dk, rq, conw, rp, hd);
+                    kd_mm(&a->o, dxb, dk, r, P, D, ks);   // the output over the rows it came from
+                    return 1; },
+                [&](int c, int b, cudaStream_t cs) {
+                    return checked(cudaMemcpyAsync(out + (size_t)c * R * D, xb[b], (size_t)rows(c) * D * 4, cudaMemcpyDeviceToHost, cs), "KDA output"); }))
+            return 0;
+    }
+    for (int s0 = 0; s0 < C && !piped; s0 += R) {
         const int r = C - s0 < R ? C - s0 : R;
         const size_t rp = (size_t)r * P;
         const unsigned grh = (unsigned)((r * H + 255) / 256), grp = (unsigned)((rp + 255) / 256);
@@ -2069,6 +2282,7 @@ extern "C" void k3cu_report(void) {
     if (n_steps)
         fprintf(stderr, "[K3-CUDA] experts: %llu steps, %llu experts, %llu rows on the GPU; copying their bytes %.1fs, waiting for slots %.1fs%s\n",
                 n_steps, n_experts, n_rows, t_copy, t_wait, failed ? "; the device failed" : "");
+    if (n_pipe) fprintf(stderr, "[K3-CUDA] %llu calls moved their rows from registered memory beside their kernels\n", n_pipe);
     if (n_mm) fprintf(stderr, "[K3-CUDA] the dense matrices the GPU does not hold: %llu matmuls, %llu rows, %.1fs\n", n_mm, n_mm_rows, t_mm);
     if (n_mmd) fprintf(stderr, "[K3-CUDA] the dense matrices the GPU holds, one by one: %llu matmuls, %llu rows, %.1fs\n", n_mmd, n_mmd_rows, t_mmd);
     if (n_mla) fprintf(stderr, "[K3-CUDA] the gated MLA's attention: %llu layer steps (%llu of them K3.1's selections, %llu rows of "

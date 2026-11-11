@@ -253,6 +253,9 @@ Judge quantization choices on real-text logits, not synthetic-vector norms.
 | `K3_SESSION_IDLE` | 30 | seconds with no request before the live conversation is written |
 | `K3_SHARED_PAR` | 1 | a prompt step's shared experts on the card from a thread of their own, beside the routed experts' waves (0: on the step's thread first) |
 | `K3_DC_AHEAD` | 1 | the dense cache read ahead by threads of their own (0: each matrix read as the load asks for it) |
+| `K3_PIN_STEP` | 1 | a prompt step on the card registers its big host buffers with it while it runs, and the card's calls move their rows beside their kernels (0: pageable, the driver stages every copy) |
+| `K3_PIN_GB` | 16 | the most a step registers (a step of 16,384 rows: 18 buffers, 11.0 GB) |
+| `K3_PIN_LOG` | 0 | 1: a line for each registration |
 | `K3_LOGITS_DECODE` | 0 | the CLI's `K3_LOGITS` file keeps the decode's rows after the prompt's |
 | `K3_CANCEL_TEST` | 0 | tests: the N-th cancel poll of the serve's first prompt cancels it |
 | `K3_LAYERS` | all | truncate the stack (validation) |
@@ -865,6 +868,41 @@ are what a faster large step needs.
 up to 4 GB ahead of the load, where each matrix was read over the team one after the other
 (the scales a read of their own): 33.9 GB in 4.6 s instead of 5.6, the engine ready in 7.3-7.5 s
 instead of 9.4.
+
+**A large step's rows beside the kernels** (`K3_PIN_STEP`). From pageable memory the driver
+stages every copy and the host waits for each, so a step's rows went up and down at 9-11 GB/s
+with nothing on the card beside them. A prompt step on the card now registers its big host
+buffers with it while it runs (`cudaHostRegister`: the layer range's five and the blocks of the
+step's pool, 18 buffers and 11.0 GB for 16,384 rows, in 0.6 s, let go in 0.1 s at its end; at most
+`K3_PIN_GB`), and the DLL's calls whose rows are registered -- the dense matrices the card does
+not hold and those it does, the router, the shared experts, the KDA layers -- move them on a copy
+stream of their own while their kernels run: a chunk's rows up while the one before computes,
+its outputs down after it, two buffers each way (`pipe_rows`). The kernels, their inputs and
+their order are the pageable path's.
+
+One property of this machine's copies shaped it (WDDM, driver 621.14): the copies of every
+stream go through one queue in the order they were queued. A copy that waits for an event, or for
+kernels before it on its own stream, holds up every copy queued after it on any stream until that
+work is done -- a 50 MB copy that waited for nothing took 90-104 ms behind another stream's copy
+waiting for a 100 ms kernel, 2 ms alone; other streams' kernels were not held up
+(`docs/experiments/kimi-k31-4090-2026-11-10/qblock.cu`). A pipe that queues its chunks' copies
+behind waits for their kernels then holds up everyone's: the shared experts' pipe, beside the
+routed experts, held the routed experts' copies and the 66 MB of rows a layer's experts start
+from (14 s of a 16,511-token prompt in that send alone). So a copy is queued only once what it
+needs is done: the host waits for chunk c's kernels, then queues its outputs down and chunk c+2's
+rows up into the buffer chunk c read, and chunk c+1's kernels are queued before that wait, so the
+card always has the next chunk behind the one it runs. r5's pageable path for the shared experts
+had the same fault, its outputs' copies queued behind their chunk's kernels; they wait on the host
+now too.
+
+A 16,511-token prompt in the launcher's step of 16,384, two runs each in turn: 227.5 / 228.9 s on
+r5, 205.5 / 205.2 s now -- the dense matrices the card does not hold 24.2 -> 13.0 s, those it holds
+8.5 -> 5.1, the KDA layers 38.9 -> 35.6, the MLA layers 26.4 -> 21.1, the shared experts 44.0 ->
+27.1 beside the routed experts, the experts' copies 67.6 -> 53.7. The same bytes: the 5,862-token
+prompt's logits are the CPU-only run's at every position (116.6 s, as r5's 117.1: that prompt waits
+for the drives) and the 16,511-token prompt's are the ones every release since r2 has had. What a
+large step waits for now is the card's exact kernels: the routed experts' 95-96 s of a step's MoE,
+of which the copies are 54.
 
 Download and run on the 4090 machine: `tools/download_kimi_k31_pro_4090.ps1` (folders
 `C:\AI\Kimi-K3.1-Pro`, `D:\AI\Models\Kimi-K3.1-Pro`) and

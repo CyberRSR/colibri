@@ -117,7 +117,7 @@ a DSA indexer on every MLA layer; release `kimi-k31-pro-4090-r3`, `START-KIMI-K3
 model id `kimi-k3.1-pro`). The card computes a prompt in the CPU's arithmetic: the logits of
 a 5,862-token prompt are the same bytes at every position as a run with no GPU path at all
 (1,861 s there, 110 s here). The engine is ready 7.5 s after its start, a 16,511-token prompt
-takes 221 s in one pass over the drives, a reply comes at 0.85-0.9 tokens a second (12 GB of
+takes 205 s in one pass over the drives, a reply comes at 0.85-0.9 tokens a second (12 GB of
 experts read per token: the drives' pace), the same request sent again starts answering in
 0.3 s, a new conversation with the same system prompt (16,500 tokens of instructions) in
 20 s instead of 220, and a conversation that another one interrupted, or that a restart of the

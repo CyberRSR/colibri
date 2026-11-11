@@ -23,6 +23,10 @@ K3CU_API int k3cu_init(int device);
 K3CU_API size_t k3cu_free_bytes(void);
 /* Pinned host memory the device writes to directly; NULL when there is none. */
 K3CU_API void *k3cu_host_alloc(size_t bytes);
+/* Host memory the card reaches directly (cudaHostRegister): 1 when registered. A call whose host rows are
+ * there moves them beside its kernels; unregister before the memory is freed. */
+K3CU_API int k3cu_host_register(void *p, size_t bytes);
+K3CU_API void k3cu_host_unregister(void *p);
 K3CU_API void k3cu_host_free(void *p);
 /* Tests: the device's exp_f (kind 0) or tanhf (kind 1) of the floats whose bits are
  * first .. first+count-1, their bits into out. */
