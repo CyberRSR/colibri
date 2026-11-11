@@ -1,12 +1,12 @@
 Kimi K3.1 Pro on the RTX 4090 beside MiMo-V2.6-Pro (release mimo-pro-4090-r7), 2026-11-11
-Release kimi-k31-pro-4090-r3: kimi-k31-pro-4090-r2's install with a new kimi_k3.exe -- the end of a conversation's
-system prompt photographed inside its step and kept, so a new conversation with the same instructions starts
-after them -- and tools\start_kimi_k31_pro_4090.ps1 keeping five photos. coli_cuda_k3.dll and openai_server.py
-are r2's. BUILD-INFO-K31.txt carries the pair's commit, toolchain and checks. A pair older than K3.1's indexer
-loads, answers and is correct to the bit, but scores every MLA layer's prompt on the CPU, so the launcher
-refuses to start with one.
+Release kimi-k31-pro-4090-r4: kimi-k31-pro-4090-r3's install with a new kimi_k3.exe -- conversations kept aside in
+files, read back after another conversation and after a restart; the expert cache no longer shrinking with every new
+conversation -- and tools\start_kimi_k31_pro_4090.ps1 keeping 16 conversations in <model folder>\k3_sessions.
+coli_cuda_k3.dll and openai_server.py are r2's. BUILD-INFO-K31.txt carries the pair's commit, toolchain and checks.
+A pair older than K3.1's indexer loads, answers and is correct to the bit, but scores every MLA layer's prompt on the
+CPU, so the launcher refuses to start with one.
 
-kimi_k3.exe: release kimi-k31-pro-4090-r3; coli_cuda_k3.dll: release kimi-k31-pro-4090-r2's, unchanged; see BUILD-INFO-K31.txt
+kimi_k3.exe: release kimi-k31-pro-4090-r4; coli_cuda_k3.dll: release kimi-k31-pro-4090-r2's, unchanged; see BUILD-INFO-K31.txt
 coli_cuda.dll, mimo.exe, coli and its Python modules: commit 9372715b0c0709cb848830d5abf7d82535507be5 (main; their sources unchanged since but for comments)
 kimi_k3.exe: mingw32-make -C c kimi_k3 CUDA_DLL=1 ARCH=native VK=0 (needs AVX-512: Zen 4 or newer)
 coli_cuda.dll: c\build_cuda.bat, coli_cuda_k3.dll: c\build_k3_cuda.bat (sm_89, the CUDA runtime linked statically)
@@ -14,7 +14,7 @@ mimo.exe: mingw32-make -C c mimo CUDA_DLL=1 ARCH=native VK=0 (the tiny MiMo mode
 coli_cuda_mimo.dll: release mimo-pro-4090-r7, commit 1dc7f0376a6d3f32d5d2e664dc32ca9dc856b552 (its source unchanged since)
 Checked: BUILD-INFO-K31.txt (the K3.1 pair, on the card and on the model itself); mimo.exe and the other engines as in kimi-k3-4090-r1.
 
-0fb3905d632fd9ae532462e9f90238229a84046598caa0038d1a79af5dd16e1a  kimi_k3.exe
+f0d7229053a7bf93b4bd34ac331d7ddde7cc0ddf37d7f1a22d49b795ef8bff00  kimi_k3.exe
 7ed129636578ca08af7aa9f391b02bd76b3c86d0ce9a0673676b558a99be56b2  coli_cuda_k3.dll
 0ae7268206e60c340c3b9faf3675a1d727580565ebd8fc69b187a4b48d3cccbc  coli_cuda.dll
 d430b118907deee2db401cde118b29f3907e205744531d64c8bbf52209e511c9  mimo.exe

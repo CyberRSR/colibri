@@ -9,7 +9,7 @@ row attends only the 2,048 earlier rows its layer's indexer scores highest. Ever
 format) is K3's. Sources: the model card and TokenSpeed's implementation,
 [lightseekorg/tokenspeed#3015](https://github.com/lightseekorg/tokenspeed/pull/3015).
 
-**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r3: `kimi_k3.exe` and
+**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r4: `kimi_k3.exe` and
 `coli_cuda_k3.dll` here were built on the RTX 4090 machine and checked there on the model
 itself (BUILD-INFO-K31.txt: the commit, the toolchain, the checks). Release kimi-k3-4090-r1's
 `kimi_k3.exe` does not read `dsa_config`: it would run every MLA layer dense, which is K3.1's
@@ -55,6 +55,8 @@ the launcher's settings, each run a fresh start:
 | a follow-up of 90 tokens on a 16,600-token conversation | 28 s to the first token |
 | the same request again (a regenerated reply, a retry) | **0.27 s** to the first token (27 s before) |
 | a new conversation with the same system prompt (16,501 tokens of instructions) | **19.9 s** to the first token (219 s in release r2: the instructions read again) |
+| a 16,592-token conversation's next turn after another conversation | **26.6 s** to the first token (about 220 s in release r3: the conversation read again) |
+| its next turn after a restart of the server | **31.9 s** to the first token (read back from its file in 0.5 s) |
 | decode | 0.85-0.91 tok/s at a short context (the machine's own drift over a day), 0.73-0.80 right after a long prompt |
 
 The logits of the 5,862-token prompt are the same bytes at every position with this profile
@@ -103,6 +105,28 @@ What release r3 adds (2026-11-11; the bytes kept again):
   the same replies. One system prompt at a time: a conversation with other instructions
   takes the caches' rows, and the first client's next conversation reads its instructions
   once more. `K3_ROOT_PHOTO=0` turns it off.
+
+What release r4 adds (2026-11-11; the bytes kept again):
+
+- **Several conversations.** A request of another conversation -- a second chat, an agent's
+  sub-agent with instructions of its own, a client's summary request -- wrote its rows over
+  the conversation the engine held, whose next turn then read every token again. Now that
+  conversation is written to a file and leaves RAM, and its next turn reads it back in a few
+  seconds; the files are read at the start too, so a restarted server takes its
+  conversations back (`K3_SESSIONS`; the launcher keeps up to 16 in
+  `<model folder>\k3_sessions`, up to 128 GB: `-Sessions`, `-SessionDir`, `-SessionDiskGB`;
+  `-Sessions 0` turns it off). A conversation's files are about 1 GB (the KDA state at its
+  end and the photo of its last prompt's end) plus 66 KB a token. None of it stays in RAM,
+  so the expert cache is the size it was and no reply is slower for it; nothing of it runs
+  while a reply is computed (the conversation is written when another one begins, after 30 s
+  with no request, and when the server stops). Measured: a 16,539-token conversation, then
+  another one of 2,956 tokens, then the first one's next turn: written in 1.5 s (2.07 GB),
+  read back in 4.3 s, 26.6 s to its first token; after a restart its next turn 31.9 s.
+- **The expert cache no longer shrinks with every new conversation.** Releases r2 and r3
+  counted a dropped conversation's rows among the ones the cache lends its slots for, until
+  the process restarted: after a few long conversations the cache was gigabytes smaller and
+  decode slower.
+- **The history's pins (`-Pins`) cannot hang a decode** at the floor the lending stops at.
 
 ---
 
