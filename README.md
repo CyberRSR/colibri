@@ -13,6 +13,46 @@
   English · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.it.md">Italiano</a> · <a href="README.ja.md">日本語</a> · <a href="README.id.md">Bahasa Indonesia</a> · <a href="README.pt-BR.md">Português (Brasil)</a>
 </p>
 
+## Kimi K3.1 Pro, full, on one RTX 4090
+
+[moonshotai/Kimi-K3.1-Pro](https://huggingface.co/moonshotai/Kimi-K3.1-Pro) unquantized beyond
+its own release: 2.8T parameters, 1.56 TB of MXFP4 experts and BF16, with its vision tower. One
+desktop: Ryzen 9 7950X3D (16 cores), 192 GB DDR5-5400, RTX 4090 24 GB, two NVMe drives (the
+experts split across them), Windows 11. The card computes a prompt in the CPU's arithmetic: the
+logits are the same bytes as a run with no GPU path at all.
+
+| Measured on that machine | |
+|---|---|
+| ready after start | 7.5 s |
+| a 16,511-token prompt | 190 s (5,862 tokens: 117 s, the drives' pace) |
+| a long answer (512 tokens) | 0.86 tokens/s, 1.16 s a token; 0.75-0.8 at 6-16k tokens of context |
+| the same request again | answers in 0.3 s |
+| a new conversation, same 16.5k-token system prompt | 20 s instead of 220 |
+| an interrupted conversation, back from its file | 27-32 s instead of 220 |
+| a 1568 x 830 screenshot (1,680 prompt tokens) | the vision tower in 0.76 s on the card |
+
+Where a token's 1.16 s go: the CPU runs 16 routed experts in each of 92 layers (0.5 s, 26 GB of
+weights through RAM), the drives bring the 11 GB of them the RAM cache lacks (0.26 s of
+waiting), the shared experts, attention and router take the rest. Deeper read queues, wider
+expert prediction and the GPU beside the CPU were measured and are all slower
+([the measurements](docs/experiments/kimi-k31-4090-2026-11-10/README.md)).
+
+To run it: take the install from the latest release
+([kimi-k31-pro-4090-r10](https://github.com/CyberRSR/colibri/releases/tag/kimi-k31-pro-4090-r10)),
+then from its folder:
+
+```powershell
+.\tools\download_kimi_k31_pro_4090.ps1           # 1.56 TB into C:\AI\Kimi-K3.1-Pro and D:\AI\Models\Kimi-K3.1-Pro
+.\tools\download_kimi_k31_pro_4090.ps1 -Verify   # every shard's SHA-256
+.\START-KIMI-K31-PRO.cmd                          # OpenAI/Anthropic API on http://127.0.0.1:18080/v1, model kimi-k3.1-pro
+```
+
+It serves agent clients such as Kimi Code (tool calls, MCP screenshots), keeps up to 16
+conversations in files, and reads pictures. How it runs: [docs/kimi_k3.md](docs/kimi_k3.md#kimi-k31) ·
+the install's own README: `README-KIMI-K31-PRO-4090.md`.
+
+---
+
 **Tiny engine, immense model.** colibri runs very large open models on the
 machine you already have. A mixture-of-experts model of hundreds of billions of
 parameters uses only a small part of itself for each token, so colibri keeps
