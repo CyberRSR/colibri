@@ -598,6 +598,11 @@ def _kimi_geometry(config, context, _model_dir):
                                gv = C*H*vh, ctx = C*H*vh
     The planner reserves the larger of the two (a single forward pass only
     touches one layer type at a time).
+
+    Kimi K3.1 (dsa_config): every DSA layer also keeps its indexer's keys,
+    index_head_dim floats a position (kimi_k3.c's Ic):
+
+        index keys = n_dsa * context * index_head_dim * 4
     """
     layers = _required_int(config, "num_hidden_layers", "kimi_k3")
     experts = _required_int(config, "num_experts", "kimi_k3")
@@ -624,7 +629,7 @@ def _kimi_geometry(config, context, _model_dir):
 
     state = n_mla * context * (kv_lora + qk_rope) * 4
     dsa = config.get("dsa_config")
-    if isinstance(dsa, dict):   # Kimi K3.1: each DSA layer's index keys, index_head_dim floats a position
+    if isinstance(dsa, dict):
         index_hd = _required_int(dsa, "index_head_dim", "kimi_k3")
         dsa_list = dsa.get("dsa_layers")
         if not isinstance(dsa_list, list):
@@ -1483,7 +1488,9 @@ FAMILIES = (
         # share COMMON_CAP, which says otherwise -- the flag is descriptive
         # (it only feeds the capability dict) so nothing broke, but a client
         # reading it programmatically was told the opposite of the truth.
-        capabilities=FamilyCapabilities(True, False, False, True),
+        # image=True: Kimi K3.1's pictures (expand_kimi_images, kimi_k3.c's tower, k3_vision.h);
+        # whether the checkpoint served has the tower is the engine's CAPS vision=1.
+        capabilities=FamilyCapabilities(True, False, False, True, image=True),
         has_gateway_adapter=True,
         tune_prompt_template="K3CHAT1\nM user {prompt_len}\n{prompt}G 0\n\n",
     ),
@@ -1609,6 +1616,7 @@ FAMILIES = (
         display_name="Qwen3.8-Flash-Next",
         display_scale="176B",
         engine_artifact="qwen38",
+        split_dirs_env="Q38_DIRS",
         engine_aliases=(),
         engine_group="qwen38",
         internal_arch="qwen38",

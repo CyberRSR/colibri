@@ -1612,7 +1612,11 @@ def render_chat_kimi(messages, enable_thinking=False, reasoning_effort=None, too
         if role not in ("system", "developer", "user", "assistant", "tool"):
             raise APIError(400, f"Unsupported role {role!r}.", f"messages.{index}.role")
         raw = message.get("content")
-        text = content_text(raw, f"messages.{index}.content") if raw is not None else ""
+        pictures = _has_pictures(raw)
+        text = (content_text(raw, f"messages.{index}.content") if raw is not None and not pictures
+                else "")
+        if pictures and role == "assistant":
+            raise APIError(400, "pictures in an assistant turn are not supported.", f"messages.{index}.content")
         if role == "tool":
             tool_index += 1
             name = message.get("name") or message.get("tool")
@@ -1627,6 +1631,10 @@ def render_chat_kimi(messages, enable_thinking=False, reasoning_effort=None, too
             nb = name.encode("utf-8")
             if len(nb) > 256:
                 raise APIError(400, "Tool name too long (max 256 bytes).", f"messages.{index}.name")
+            if pictures:   # a tool result with pictures: R <index> <name-len> <pieces>, its pieces
+                pieces = _k3_pieces(raw, f"messages.{index}.content")
+                parts.append(f"R {tool_index} {len(nb)} {len(pieces)}\n{name}" + "".join(pieces))
+                continue
             parts.append(f"O {tool_index} {len(nb)} {len(text.encode('utf-8'))}\n{name}{text}")
             continue
         reasoning = message.get("reasoning_content") if role == "assistant" else None
@@ -1657,6 +1665,9 @@ def render_chat_kimi(messages, enable_thinking=False, reasoning_effort=None, too
             reasoning = reasoning or ""
             parts.append(f"A {len(reasoning.encode('utf-8'))} {len(text.encode('utf-8'))}\n"
                          f"{reasoning or ''}{text}")
+        elif pictures:   # a user or system turn with pictures: S <role> <pieces>, its pieces
+            pieces = _k3_pieces(raw, f"messages.{index}.content")
+            parts.append(f"S {'system' if role == 'developer' else role} {len(pieces)}\n" + "".join(pieces))
         else:
             r = "system" if role == "developer" else role
             parts.append(f"M {r} {len(text.encode('utf-8'))}\n{text}")
@@ -3792,6 +3803,80 @@ def qwen36_has_vision(model_dir):
     except (OSError, ValueError):
         return False
     return isinstance(meta, dict) and isinstance(meta.get("vision"), dict)
+
+
+# Kimi K3.1: a picture is K3CHAT1's I piece (render_chat_kimi), its pixels an IMAGE frame each;
+# kimi_k3.c's tower (k3_vision.h) turns them into the rows its <|media_pad|> places take.
+KIMI_MAX_IMAGE_TOKENS = 4096   # a picture's rows at most (K3_MAX_IMAGE_TOKENS; the processor's own is 16,384)
+
+
+class KimiPicture(dict):
+    """A picture part expand_kimi_images placed: its size and its rows, for render_chat_kimi."""
+
+
+def expand_kimi_images(messages, model_dir, max_tokens=KIMI_MAX_IMAGE_TOKENS):
+    """Every picture of the conversation -- the user's, a tool result's (Kimi Code's Computer
+    Use screenshots), one an Anthropic tool_result carried -- becomes a KimiPicture part in
+    place, and its pixels go to the engine in the conversation's order. Returns (messages,
+    [(rgb, grid_h, grid_w), ...] or None)."""
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parent / "tools"))
+    try:
+        from kimi_image import preprocess
+    except ImportError as problem:
+        raise APIError(400, f"image support needs Pillow and numpy ({problem}); pip install pillow numpy",
+                       "messages")
+    images, out = [], []
+    for index, message in enumerate(messages if isinstance(messages, list) else ()):
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list) or not any(
+                isinstance(part, dict) and part.get("type") in ("image_url", "input_image") for part in content):
+            out.append(message)
+            continue
+        if message.get("role") == "assistant":
+            raise APIError(400, "pictures in an assistant turn are not supported.", f"messages.{index}.content")
+        parts = []
+        for position, part in enumerate(content):
+            kind = part.get("type") if isinstance(part, dict) else None
+            if kind in ("image_url", "input_image"):
+                data = _image_bytes_from_url(_image_part_url(part, kind))
+                try:
+                    rgb, gh, gw, width, height, tokens = preprocess(data, model_dir, max_tokens)
+                except APIError:
+                    raise
+                except ImportError as problem:   # Pillow and numpy are imported when it runs
+                    raise APIError(400, f"image support needs Pillow and numpy ({problem}); "
+                                        "pip install pillow numpy", "messages")
+                except Exception as problem:
+                    raise APIError(400, f"the picture could not be read ({problem}).",
+                                   f"messages.{index}.content.{position}")
+                images.append((rgb, gh, gw))
+                parts.append(KimiPicture(type="kimi_picture", width=width, height=height, tokens=tokens))
+            else:
+                parts.append(part)
+        out.append({**message, "content": parts})
+    return out, images or None
+
+
+def _k3_pieces(raw, where):
+    """K3CHAT1 pieces of a content list that holds pictures: T <bytes>\\n<text>, I <w> <h> <rows>\\n."""
+    pieces = []
+    for position, part in enumerate(raw):
+        if isinstance(part, KimiPicture):
+            pieces.append(f"I {int(part['width'])} {int(part['height'])} {int(part['tokens'])}\n")
+        elif isinstance(part, dict) and part.get("type") in ("text", "input_text"):
+            text = part.get("text", "")
+            if not isinstance(text, str):
+                raise APIError(400, "Text content parts require a string `text` field.", f"{where}.{position}.text")
+            pieces.append(f"T {len(text.encode('utf-8'))}\n{text}")
+        else:
+            content_text([part], where)   # names what it is not, as for any other turn
+            raise APIError(400, "unsupported content part.", f"{where}.{position}")
+    return pieces
+
+
+def _has_pictures(raw):
+    return isinstance(raw, list) and any(isinstance(part, KimiPicture) for part in raw)
 
 
 class ToolPicture(dict):
@@ -7525,8 +7610,9 @@ class Engine:
                 # partire dentro lo stesso lock, o un'altra richiesta potrebbe
                 # infilarsi in mezzo e prendersi l'immagine di questa.
                 try:
-                    if image is not None:
-                        patches, grid_h, grid_w = image
+                    # one picture, or a list of them (Kimi K3.1: the conversation's, in order)
+                    for patches, grid_h, grid_w in (image if isinstance(image, list) else
+                                                    [image] if image is not None else []):
                         blob = patches.tobytes() if hasattr(patches, "tobytes") else patches
                         try:
                             _write_all(
@@ -9908,6 +9994,15 @@ class APIHandler(BaseHTTPRequestHandler):
         embedding non possono divergere. Both chat endpoints come through here,
         so a picture is one thing whichever API delivered it."""
         model_dir = getattr(self.server.engine, "model_dir", None)
+        if ARCH == "kimi":
+            # kimi_k3.c says at its handshake whether it loaded Kimi K3.1's tower (CAPS vision=1). With
+            # it every picture goes to the model, several a request; without it a tool's picture is a
+            # line in its result and one the user sends is refused (content_text) -- r8's behaviour.
+            if getattr(self.server.engine, "vision", None) is True:
+                ceiling = os.environ.get("K3_MAX_IMAGE_TOKENS")
+                return expand_kimi_images(messages, model_dir,
+                                          int(ceiling) if ceiling else KIMI_MAX_IMAGE_TOKENS)
+            return text_only_tool_results(messages), None
         if getattr(self.server.engine, "vision", None) is False and has_image_parts(messages):
             # The engine said at its handshake that it loaded no tower. Refuse here,
             # by name, before the picture is preprocessed and before the engine

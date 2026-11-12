@@ -1,11 +1,21 @@
-Kimi K3.1 Pro's engine, release kimi-k31-pro-4090-r8, built 2026-11-12 on the RTX 4090 machine
-commit: bdc14c7703f85aabcd32c911758baff4a6a3b5bc (coli_cuda_k3.dll; kimi_k3.exe is r6's, of 3777923f, its sources unchanged since)
+Kimi K3.1 Pro's engine, release kimi-k31-pro-4090-r9, built 2026-11-12 on the RTX 4090 machine
+commit: 9b1a1dba506aa76c7257e9a870fb42411a37bb38 (kimi_k3.exe, coli_cuda_k3.dll, openai_server.py, tools/kimi_image.py)
 kimi_k3.exe: mingw32-make -C c kimi_k3 CUDA_DLL=1 ARCH=native VK=0 on the msvcrt C runtime (gcc.exe (MinGW-W64 x86_64-msvcrt-posix-seh, built by Brecht Sanders, r2) 14.2.0)
 ARCH=native is AMD Ryzen 9 7950X3D 16-Core Processor: rebuild with ARCH=znver4 / x86-64-v3 before moving the binaries to another box
 coli_cuda_k3.dll: this commit's (c\build_k3_cuda.bat, CUDA_ARCH=sm_89, CUDA 13.4, MSVC 2022, the CUDA runtime
   linked statically; the file measured below -- two builds of the same source differ in some 5,500 bytes)
 coli_cuda.dll: release kimi-k3-4090-r1's (unchanged by K3.1)
-what changed since r7 (README-KIMI-K31-PRO-4090.md, "What release r8 adds"):
+kimi_k3.exe sha256 728b2e8c2a3b73855972bde3fb2536a12107769ce7fbe6ac993524fb59f9d207
+coli_cuda_k3.dll sha256 d36351bde52f73a3e08697d0fb50763d767740978d25b90e5581cf4eafe0810d
+what changed since r8 (README-KIMI-K31-PRO-4090.md, "What release r9 adds"):
+  Pictures: Kimi K3.1's own vision tower (MoonViT, 0.89 GB) in the engine, on the card (k3cu_vision,
+  0.76 s a 1568x830 screenshot) or the CPU (18 s); a user's pictures and a tool result's, several a
+  request; a picture's places keyed by its bytes, so a conversation's state is reused over them.
+  Rows within 1.3e-5 of Moonshot's modeling code; the text path's bytes are r8's (the tiny K3 and
+  K3.1 checks, the C tests, the gateway's tests). Checked on the model: a screenshot from the user
+  and as a tool result read right, an agent's two-screenshot turns (the second reused the first's
+  1,930 tokens, the tower 0.65 s for the new picture).
+what r8 changed since r7:
   The gateway (openai_server.py, commit 3eb9f5df): a picture in a tool result (Kimi Code's Computer
   Use screenshots) becomes a line saying an image was there, instead of an HTTP 400 that stopped the
   agent; a 4xx's reason is logged. kimi_k3.exe and coli_cuda_k3.dll are r7's.

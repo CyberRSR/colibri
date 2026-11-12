@@ -9,7 +9,7 @@ row attends only the 2,048 earlier rows its layer's indexer scores highest. Ever
 format) is K3's. Sources: the model card and TokenSpeed's implementation,
 [lightseekorg/tokenspeed#3015](https://github.com/lightseekorg/tokenspeed/pull/3015).
 
-**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r8: `kimi_k3.exe` and
+**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r9: `kimi_k3.exe` and
 `coli_cuda_k3.dll` here were built on the RTX 4090 machine and checked there on the model
 itself (BUILD-INFO-K31.txt: the commit, the toolchain, the checks). Release kimi-k3-4090-r1's
 `kimi_k3.exe` does not read `dsa_config`: it would run every MLA layer dense, which is K3.1's
@@ -175,6 +175,18 @@ What release r8 adds (2026-11-12):
   result saying an image was there and is not shown, and the tool's text reaches the model. A
   picture the user sends is still refused, and the server's log now names the reason of every
   4xx it answers. Only `openai_server.py` changed.
+
+What release r9 adds (2026-11-12):
+
+- **Kimi K3.1 reads pictures.** The checkpoint's own vision tower (MoonViT, 0.89 GB of its last
+  two shards) runs in the engine: a picture the user sends and one a tool returns (Kimi Code's
+  Computer Use screenshots) reach the model, several in a conversation. A 1568 x 830 screenshot is
+  1,680 prompt tokens and 0.76 s of the card (18 s on the CPU when the card has no 0.5 GB free).
+  A conversation that comes back with its pictures reuses its state over them; the tower runs only
+  for the new ones. On the model: a window's title, its terminal's lines, its baud rate and its
+  buttons read right, from a user's message and from a tool result. `K3_VISION=0` serves text as
+  r8 did; `K3_MAX_IMAGE_TOKENS` (4,096) caps a picture. In Kimi Code add `image_in` to the model's
+  `capabilities` (`~/.kimi-code/config.toml`) so that your own pictures are sent too.
 
 ---
 
