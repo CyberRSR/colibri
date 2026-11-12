@@ -858,6 +858,7 @@ These are read by the Python programs (not the `glm` engine), so they don't appe
 | `COLI_MODEL` | unset | Default model directory (fallback for `--model`). |
 | `COLI_MODEL_ID` | `glm-5.2-colibri` | Model id reported by the API. |
 | `COLI_API_KEY` | unset | Required bearer token for the server. |
+| `COLI_CLIENT_BLOB_DIRS` | unset; the Kimi K3.1 launcher: `%USERPROFILE%\.kimi-code\sessions` | Folders (`;` between them on Windows) where a client's stored picture `blobref:<mime>;<sha256>` (Kimi Code's, after a restart or an undo) is looked up: only a file named by the hash under `blobs`, and only when the SHA-256 of its base64 text is that hash. Unset, such a picture in a tool result becomes a line saying the server could not read it. |
 | `COLI_IMAGE_ROOT` | unset (local paths denied) | Directory under which an `image_url.url` naming a local path or `file://` URI may be read. Unset, the server refuses local paths: a client sends images as base64 `data:` URIs (`coli chat` and `coli web` do), because a file read here happens with the server's own rights and an inference client is not the operator. Set it to allow paths under one directory only; symlinks are resolved before the check. |
 | `COLI_ALLOWED_HOSTS` | unset | Comma-separated hostnames or IP addresses accepted by the DNS-rebinding guard in addition to loopback and the bind address. Equivalent to repeating `--allowed-host`. |
 | `COLI_MAX_QUEUE` | `8` | Max queued requests. |

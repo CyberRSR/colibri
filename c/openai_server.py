@@ -3585,6 +3585,39 @@ def _image_part_url(part, kind):
     return value.get("url")
 
 
+_BLOBREF = re.compile(r"blobref:([\w.+-]+/[\w.+-]+);([0-9a-f]{64})")
+
+
+def _client_blob_bytes(url):
+    """A client's own reference to a picture it stored: Kimi Code keeps a tool result's
+    screenshot as `blobref:<mime>;<sha256>` in its session folder (agents/<agent>/blobs/<sha256>,
+    the hash of the picture's base64 text) and, restoring a conversation after a restart or an
+    undo, can send that reference where the data: URI was. The server reads it only from the
+    folders COLI_CLIENT_BLOB_DIRS names (the K3.1 launcher names ~/.kimi-code/sessions), only a
+    file named by the hash, and only when the bytes are the hash's. None when it cannot."""
+    import base64
+    m = _BLOBREF.fullmatch(url)
+    roots = [r for r in os.environ.get("COLI_CLIENT_BLOB_DIRS", "").split(os.pathsep) if r.strip()]
+    if not m or not roots:
+        return None
+    import glob
+    import hashlib
+    digest = m.group(2)
+    for root in roots:
+        for pattern in ("blobs", "*/blobs", "*/agents/*/blobs", "*/*/agents/*/blobs", "*/*/*/agents/*/blobs"):
+            for path in glob.glob(os.path.join(glob.escape(root), pattern, digest)):
+                try:
+                    if not os.path.isfile(path) or os.path.getsize(path) > (64 << 20):
+                        continue
+                    with open(path, "rb") as handle:
+                        data = handle.read()
+                except OSError:
+                    continue
+                if hashlib.sha256(base64.b64encode(data)).hexdigest() == digest:
+                    return data
+    return None
+
+
 def _image_bytes_from_url(url):
     """data: URI, file:// o percorso sul disco -> i byte dell'immagine.
 
@@ -3611,6 +3644,13 @@ def _image_bytes_from_url(url):
             return base64.b64decode(payload, validate=True)
         except Exception:
             raise APIError(400, "image_url.url is not valid base64.", "messages")
+    if url.startswith("blobref:"):
+        data = _client_blob_bytes(url)
+        if data is None:
+            raise APIError(400, "the image is a client's stored reference (blobref:) this server cannot "
+                                "read: send it as a base64 data: URI, or start the server with "
+                                "COLI_CLIENT_BLOB_DIRS=<the client's sessions folder>.", "messages")
+        return data
     if url.startswith("http://") or url.startswith("https://"):
         # Scaricare da un URL che arriva in una richiesta vorrebbe dire far fare
         # al server una chiamata di rete decisa da chi la manda. Non si fa.
@@ -3839,7 +3879,25 @@ def expand_kimi_images(messages, model_dir, max_tokens=KIMI_MAX_IMAGE_TOKENS):
         for position, part in enumerate(content):
             kind = part.get("type") if isinstance(part, dict) else None
             if kind in ("image_url", "input_image"):
-                data = _image_bytes_from_url(_image_part_url(part, kind))
+                url = _image_part_url(part, kind)
+                try:
+                    data = _image_bytes_from_url(url)
+                except APIError as refused:
+                    # A picture the server cannot read -- a client's own handle for it (Kimi Code's
+                    # blobref: or kimi-file:// after a restart), or a path or a URL in a tool's
+                    # result -- would refuse this request and every one after it: the agent's
+                    # history holds it. It becomes a line saying so; the user's own picture that
+                    # names a path or a URL is still refused, they can send it again.
+                    handle = isinstance(url, str) and re.match(r"[a-z][a-z0-9+.-]*:", url) and \
+                        not url.startswith(("data:", "http:", "https:", "file:"))
+                    if not (message.get("role") == "tool" or isinstance(part, ToolPicture) or handle):
+                        raise
+                    scheme = url.split(":", 1)[0] if isinstance(url, str) and ":" in url else "a path"
+                    print(f"[api] a picture the server cannot read ({scheme}) became a line: "
+                          f"{refused.message}", file=sys.stderr, flush=True)
+                    parts.append({"type": "text", "text": f"\n[an image was here ({scheme}); the server could "
+                                                          f"not read it, so it is not shown]\n"})
+                    continue
                 try:
                     rgb, gh, gw, width, height, tokens = preprocess(data, model_dir, max_tokens)
                 except APIError:

@@ -165,6 +165,14 @@ $env:COLI_NO_OMP_TUNE = '1'
 $env:COLI_VULKAN = '0'
 $env:COLI_CUDA = '0'                   # the launcher's own GPU tier is for other engines
 $env:COLI_GPU = '0'
+# Kimi Code can send a screenshot it stored as `blobref:<mime>;<sha256>` (after a restart or an
+# undo): the gateway reads such a picture from Kimi Code's sessions folder, by its hash and checked
+# against it. Set COLI_CLIENT_BLOB_DIRS yourself to name other folders (';' between them), or
+# 'none' to read no client's pictures.
+if ($null -eq $env:COLI_CLIENT_BLOB_DIRS) {
+    $kimiCodeSessions = Join-Path $env:USERPROFILE '.kimi-code\sessions'
+    if (Test-Path -LiteralPath $kimiCodeSessions -PathType Container) { $env:COLI_CLIENT_BLOB_DIRS = $kimiCodeSessions }
+}
 foreach ($key in @('K3_LAYERS', 'K3_TRACE', 'K3_LOGITS', 'K3_X0', 'K3_MMAP', 'K3_IO_THREADS', 'K3_LOAD_THREADS',
                    'K3_IO_DELAY_US', 'K3_VK', 'COLI_GPU_FAIL_AFTER', 'K3_VAL_LOGITS', 'K3_VALIDATE_LAYER',
                    'COLI_K3_CKPT_DIR', 'K3_SNAP_TEST')) {

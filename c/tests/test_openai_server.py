@@ -8687,6 +8687,53 @@ class ServedModalityTest(unittest.TestCase):
         self.assertIn("S user 2\nT 13\nwhat is this?I 60 40 6\n", prompt)
         self.assertEqual([(gh, gw) for _rgb, gh, gw in pictures[-1]], [(4, 6), (4, 6)])
 
+    def test_kimi_code_blobref_is_read_from_its_store_or_becomes_a_line(self):
+        """Kimi Code keeps a tool's screenshot as `blobref:<mime>;<sha256>` (agents/<agent>/blobs/,
+        the hash of the picture's base64 text) and, restoring a conversation after a restart or an
+        undo, can send that reference instead of the data: URI. Every request of that session was
+        refused with "local image paths are disabled" and the agent could not go on. The gateway
+        reads it from the folders COLI_CLIENT_BLOB_DIRS names when the bytes are the hash's; a
+        reference it cannot read (no folder, a wrong hash, kimi-file://) becomes a line; a path in
+        the user's own message is still refused."""
+        import base64, hashlib, tempfile
+        from openai_server import KimiPicture, _client_blob_bytes, expand_kimi_images
+        uri = self.kimi_png(60, 40)
+        data = base64.b64decode(uri.split(",", 1)[1])
+        digest = hashlib.sha256(uri.split(",", 1)[1].encode()).hexdigest()
+        ref = f"blobref:image/png;{digest}"
+
+        def conv(url):
+            call = {"id": "c1", "type": "function", "function": {"name": "get_window_state", "arguments": "{}"}}
+            return [{"role": "user", "content": "look"}, {"role": "assistant", "content": "", "tool_calls": [call]},
+                    {"role": "tool", "tool_call_id": "c1", "content": [
+                        {"type": "text", "text": "state"}, {"type": "image_url", "image_url": {"url": url}}]}]
+        with tempfile.TemporaryDirectory() as root:
+            blobs = Path(root) / "wm_x" / "session_y" / "agents" / "main" / "blobs"
+            blobs.mkdir(parents=True)
+            (blobs / digest).write_bytes(data)
+            (blobs / ("0" * 64)).write_bytes(data)          # named by a hash its bytes are not
+            with patch.dict(os.environ, {"COLI_CLIENT_BLOB_DIRS": root}):
+                self.assertEqual(_client_blob_bytes(ref), data)
+                self.assertIsNone(_client_blob_bytes("blobref:image/png;" + "0" * 64))
+                self.assertIsNone(_client_blob_bytes("blobref:image/png;../../x"))
+                messages, images = expand_kimi_images(conv(ref), None)
+                self.assertEqual(len(images), 1)
+                self.assertIsInstance(messages[2]["content"][1], KimiPicture)
+            with patch.dict(os.environ, {"COLI_CLIENT_BLOB_DIRS": ""}):
+                self.assertIsNone(_client_blob_bytes(ref))
+                for url in (ref, "kimi-file://f_mcp_1234", "C:/Users/someone/shot.png"):
+                    with self.subTest(url=url):
+                        messages, images = expand_kimi_images(conv(url), None)
+                        self.assertIsNone(images)
+                        self.assertIn("the server could not read it", messages[2]["content"][1]["text"])
+                messages, images = expand_kimi_images([{"role": "user", "content": [
+                    {"type": "text", "text": "this"}, {"type": "image_url", "image_url": {"url": ref}}]}], None)
+                self.assertIn("could not read it", messages[0]["content"][1]["text"])   # a client's handle
+                with self.assertRaises(APIError) as caught:                            # a path the user named
+                    expand_kimi_images([{"role": "user", "content": [
+                        {"type": "image_url", "image_url": {"url": "C:/Users/someone/shot.png"}}]}], None)
+                self.assertIn("local image paths are disabled", caught.exception.message)
+
     def test_kimi_without_its_tower_keeps_r8s_lines(self):
         """An engine that loaded no tower (CAPS vision=0: K3_VISION=0, or a checkpoint without
         vision_tower.*): a tool's picture is a line in its result, a user's is refused -- the

@@ -988,7 +988,14 @@ lines word for word, its baud rate and its three buttons, from a user's message 
 result. A picture's rows are prompt tokens like any other: a screenshot is about 1,700 of them.
 Kimi Code sends its MCP tools' screenshots whatever its model's capabilities say; with
 `image_in` among them (`~/.kimi-code/config.toml`) it sends the user's pictures and
-ReadMediaFile's too. `tests/kimi_k3_vision_harness.py` checks the path on the tiny fixture with
+ReadMediaFile's too. A screenshot it stored can come back, after a restart or an undo, as its own
+reference `blobref:<mime>;<sha256>` instead of a data: URI (the hash of the picture's base64 text,
+the file `agents/<agent>/blobs/<sha256>` of its session): the gateway reads it from the folders
+`COLI_CLIENT_BLOB_DIRS` names -- the K3.1 launcher names `~/.kimi-code/sessions` -- when the bytes
+are the hash's. A picture the gateway cannot read in a tool result, or a client's handle
+(`blobref:`, `kimi-file://`) anywhere, becomes a line saying so instead of an HTTP 400: the
+conversation holds it, and every next request would have been refused ("local image paths are
+disabled", a Kimi Code session stopped for good). `tests/kimi_k3_vision_harness.py` checks the path on the tiny fixture with
 a tiny tower of its own (numpy's reading of the modeling code for the rows, the builder, the
 reuse, the refusals).
 
