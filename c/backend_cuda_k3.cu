@@ -2562,6 +2562,360 @@ extern "C" int k3cu_mla_layer(const K3cuMlaLayer *a, const float *x, float *out)
     return 1;
 }
 
+// ---- Kimi K3.1's vision tower (k3_vision.h, k3cu_vision) ----------------------------------------
+// f32 throughout, as kimi_k3.c's CPU tower, in this file's own order of the sums: the tower is not
+// one of the engine's exact paths (its rows are held against Moonshot's code, tools/k3_vision_ref.py).
+// The matrices are a tiled GEMM, C = A . B^T with A [M][K] f32 and B [N][K] bf16 or f32 (both K
+// inner, the checkpoint's [out][in] and the attention's keys and values alike); 128 x 128 outputs
+// a block of 256 threads, 8 x 8 each (rows ty + 16 i, columns tx + 16 j), K 16 at a time through
+// shared memory. gridDim.z batches the heads of the attention (sA, sB, sC: a z's offsets).
+#define KV_BM 128
+#define KV_BN 128
+#define KV_BK 16
+__device__ __forceinline__ float kv_val(float v) { return v; }
+__device__ __forceinline__ float kv_val(uint16_t v) { return __uint_as_float((uint32_t)v << 16); }
+template <typename BT>
+__global__ void __launch_bounds__(256) kv_gemm(const float *__restrict__ A, int lda, size_t sA,
+                                               const BT *__restrict__ B, int ldb, size_t sB,
+                                               float *__restrict__ C, int ldc, size_t sC,
+                                               int M, int N, int K, int acc) {
+    __shared__ float As[KV_BK][KV_BM + 4], Bs[KV_BK][KV_BN + 4];
+    A += blockIdx.z * sA; B += blockIdx.z * sB; C += blockIdx.z * sC;
+    const int tid = threadIdx.x, tx = tid & 15, ty = tid >> 4;
+    const int m0 = blockIdx.y * KV_BM, n0 = blockIdx.x * KV_BN;
+    const int lr = tid >> 1, lk = (tid & 1) * 8;           // the row and the 8 k a thread loads
+    float c[8][8];
+#pragma unroll
+    for (int i = 0; i < 8; i++)
+#pragma unroll
+        for (int j = 0; j < 8; j++) c[i][j] = 0.0f;
+    const int ra = m0 + lr, rb = n0 + lr;
+    const float *ap = A + (size_t)(ra < M ? ra : 0) * lda;
+    const BT *bp = B + (size_t)(rb < N ? rb : 0) * ldb;
+    for (int k0 = 0; k0 < K; k0 += KV_BK) {
+        const int k = k0 + lk;
+#pragma unroll
+        for (int q = 0; q < 8; q++) {
+            As[lk + q][lr] = (ra < M && k + q < K) ? ap[k + q] : 0.0f;
+            Bs[lk + q][lr] = (rb < N && k + q < K) ? kv_val(bp[k + q]) : 0.0f;
+        }
+        __syncthreads();
+#pragma unroll
+        for (int kk = 0; kk < KV_BK; kk++) {
+            float a[8], b[8];
+#pragma unroll
+            for (int i = 0; i < 8; i++) a[i] = As[kk][ty + 16 * i];
+#pragma unroll
+            for (int j = 0; j < 8; j++) b[j] = Bs[kk][tx + 16 * j];
+#pragma unroll
+            for (int i = 0; i < 8; i++)
+#pragma unroll
+                for (int j = 0; j < 8; j++) c[i][j] = fmaf(a[i], b[j], c[i][j]);
+        }
+        __syncthreads();
+    }
+#pragma unroll
+    for (int i = 0; i < 8; i++) {
+        const int r = m0 + ty + 16 * i;
+        if (r >= M) continue;
+#pragma unroll
+        for (int j = 0; j < 8; j++) {
+            const int col = n0 + tx + 16 * j;
+            if (col < N) { float *o = C + (size_t)r * ldc + col; *o = acc ? *o + c[i][j] : c[i][j]; }
+        }
+    }
+}
+// patches: (channel, row, column) of each 14 x 14, x/255 to f32, minus 0.5, times 2 (media_utils.normalize)
+__global__ void kv_patches(const uint8_t *rgb, int gw, int P, int pin, int pinp, int N, float *X) {
+    const size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x;
+    if (i >= (size_t)N * pinp) return;
+    const int n = (int)(i / pinp), k = (int)(i % pinp);
+    if (k >= pin) { X[i] = 0.0f; return; }
+    const int c = k / (P * P), rr = (k / P) % P, cc = k % P, py = n / gw, px = n % gw;
+    const uint8_t u = rgb[((size_t)(py * P + rr) * (gw * P) + px * P + cc) * 3 + c];
+    const float f = (float)((double)u / 255.0);
+    X[i] = (f - 0.5f) * 2.0f;
+}
+// x += the [ph][pw][D] bf16 table resized bilinearly to gh x gw (F.interpolate, align_corners False)
+__global__ void kv_pos(const uint16_t *pos, int ph, int pw, int gh, int gw, int D, float *x) {
+    const size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x;
+    if (i >= (size_t)gh * gw * D) return;
+    const int d = (int)(i % D), n = (int)(i / D), y = n / gw, xx = n % gw;
+    int y0 = y, y1 = y, x0 = xx, x1 = xx;
+    float ly0 = 1.0f, ly1 = 0.0f, lx0 = 1.0f, lx1 = 0.0f;
+    if (gh != ph) {
+        float fy = (float)ph / gh * (y + 0.5f) - 0.5f;
+        if (fy < 0) fy = 0;
+        y0 = (int)fy; y1 = y0 + (y0 < ph - 1); ly1 = fy - y0; ly0 = 1.0f - ly1;
+    }
+    if (gw != pw) {
+        float fx = (float)pw / gw * (xx + 0.5f) - 0.5f;
+        if (fx < 0) fx = 0;
+        x0 = (int)fx; x1 = x0 + (x0 < pw - 1); lx1 = fx - x0; lx0 = 1.0f - lx1;
+    }
+    const float a = kv_val(pos[((size_t)y0 * pw + x0) * D + d]), b = kv_val(pos[((size_t)y0 * pw + x1) * D + d]);
+    const float c = kv_val(pos[((size_t)y1 * pw + x0) * D + d]), e = kv_val(pos[((size_t)y1 * pw + x1) * D + d]);
+    x[i] += ly0 * (lx0 * a + lx1 * b) + ly1 * (lx0 * c + lx1 * e);
+}
+// a block a row: y = x / sqrt(mean(x^2) + eps) * w
+__global__ void __launch_bounds__(256) kv_rms(const float *x, const float *w, float *y, int D, float eps) {
+    __shared__ float red[256];
+    const float *r = x + (size_t)blockIdx.x * D;
+    float s = 0.0f;
+    for (int i = threadIdx.x; i < D; i += 256) s = fmaf(r[i], r[i], s);
+    red[threadIdx.x] = s;
+    __syncthreads();
+    for (int h = 128; h; h >>= 1) { if (threadIdx.x < h) red[threadIdx.x] += red[threadIdx.x + h]; __syncthreads(); }
+    const float inv = 1.0f / sqrtf(red[0] / D + eps);
+    float *o = y + (size_t)blockIdx.x * D;
+    for (int i = threadIdx.x; i < D; i += 256) o[i] = r[i] * inv * w[i];
+}
+// RoPE on q and k of every head: pair j, j = 2i the column's angle i, 2i+1 the row's; cs [gw + gh][nf] cos then sin
+__global__ void kv_rope(float *qkv, int N, int gw, int H, int hd, int qd, int R3, const float *cs, int ncs) {
+    const size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x;
+    const int half = hd / 2, nf = hd / 4;
+    if (i >= (size_t)N * 2 * H * half) return;
+    const int j = (int)(i % half), hh = (int)(i / half % H), part = (int)(i / half / H % 2), n = (int)(i / half / H / 2);
+    const int fi = j >> 1, p = (j & 1) ? gw + n / gw : n % gw;
+    const float c = cs[p * nf + fi], s = cs[ncs + p * nf + fi];
+    float *q = qkv + (size_t)n * R3 + part * qd + hh * hd + 2 * j;
+    const float a = q[0], b = q[1];
+    q[0] = a * c - b * s;
+    q[1] = a * s + b * c;
+}
+// The attention of a head over every patch, 64 queries a block (blockIdx.y the head): key tiles of
+// 32 through shared memory, the scores times scale, an online softmax (the running max and sum of
+// each query, its outputs rescaled when the max grows), the probabilities against the tile's
+// values. Thread (tq, tk) holds queries tq + 16 i and, for the scores, keys tk + 16 j, for the
+// outputs dimensions tk + 16 j; a query's 16 threads are a half warp (its max and sum by xor
+// shuffles of width 16). q, k, v of row n at qkv + n R3 (+ qd, + 2 qd) + head hd, hd = 128.
+#define KF_Q 64
+#define KF_K 32
+#define KF_D 128
+#define KF_SMEM ((KF_Q * (KF_D + 1) + KF_K * (KF_D + 1) + KF_K * KF_D + KF_Q * (KF_K + 1)) * 4)
+__global__ void __launch_bounds__(256) kv_flash(const float *__restrict__ qkv, int N, int R3, int qd, float scale,
+                                                float *__restrict__ ctx) {
+    extern __shared__ float sm[];
+    float *Qs = sm, *Ks = Qs + KF_Q * (KF_D + 1), *Vs = Ks + KF_K * (KF_D + 1), *Ps = Vs + KF_K * KF_D;
+    const int h = blockIdx.y, q0 = blockIdx.x * KF_Q, tid = threadIdx.x, tq = tid >> 4, tk = tid & 15;
+    for (int i = tid; i < KF_Q * KF_D; i += 256) {
+        const int r = i / KF_D, e = i % KF_D, q = q0 + r;
+        Qs[r * (KF_D + 1) + e] = q < N ? qkv[(size_t)q * R3 + h * KF_D + e] : 0.0f;
+    }
+    float o[4][8], m[4], l[4];
+#pragma unroll
+    for (int i = 0; i < 4; i++) {
+        m[i] = -INFINITY; l[i] = 0.0f;
+#pragma unroll
+        for (int j = 0; j < 8; j++) o[i][j] = 0.0f;
+    }
+    for (int k0 = 0; k0 < N; k0 += KF_K) {
+        __syncthreads();
+        for (int i = tid; i < KF_K * KF_D; i += 256) {
+            const int r = i / KF_D, e = i % KF_D, k = k0 + r;
+            const float *row = qkv + (size_t)(k < N ? k : 0) * R3 + h * KF_D + e;
+            Ks[r * (KF_D + 1) + e] = k < N ? row[qd] : 0.0f;
+            Vs[r * KF_D + e] = k < N ? row[2 * qd] : 0.0f;
+        }
+        __syncthreads();
+        float sc[4][2];
+#pragma unroll
+        for (int i = 0; i < 4; i++) sc[i][0] = sc[i][1] = 0.0f;
+#pragma unroll 8
+        for (int e = 0; e < KF_D; e++) {
+            float a[4];
+#pragma unroll
+            for (int i = 0; i < 4; i++) a[i] = Qs[(tq + 16 * i) * (KF_D + 1) + e];
+            const float b0 = Ks[tk * (KF_D + 1) + e], b1 = Ks[(tk + 16) * (KF_D + 1) + e];
+#pragma unroll
+            for (int i = 0; i < 4; i++) { sc[i][0] = fmaf(a[i], b0, sc[i][0]); sc[i][1] = fmaf(a[i], b1, sc[i][1]); }
+        }
+#pragma unroll
+        for (int i = 0; i < 4; i++) {
+            const float v0 = k0 + tk < N ? sc[i][0] * scale : -INFINITY;
+            const float v1 = k0 + tk + 16 < N ? sc[i][1] * scale : -INFINITY;
+            float mx = fmaxf(v0, v1);
+#pragma unroll
+            for (int w = 8; w; w >>= 1) mx = fmaxf(mx, __shfl_xor_sync(0xffffffffu, mx, w, 16));
+            const float mn = fmaxf(m[i], mx), corr = expf(m[i] - mn);
+            const float p0 = expf(v0 - mn), p1 = expf(v1 - mn);
+            float rs = p0 + p1;
+#pragma unroll
+            for (int w = 8; w; w >>= 1) rs += __shfl_xor_sync(0xffffffffu, rs, w, 16);
+            l[i] = l[i] * corr + rs;
+            m[i] = mn;
+#pragma unroll
+            for (int j = 0; j < 8; j++) o[i][j] *= corr;
+            Ps[(tq + 16 * i) * (KF_K + 1) + tk] = p0;
+            Ps[(tq + 16 * i) * (KF_K + 1) + tk + 16] = p1;
+        }
+        __syncthreads();
+#pragma unroll 4
+        for (int k = 0; k < KF_K; k++) {
+            float pp[4], vv[8];
+#pragma unroll
+            for (int i = 0; i < 4; i++) pp[i] = Ps[(tq + 16 * i) * (KF_K + 1) + k];
+#pragma unroll
+            for (int j = 0; j < 8; j++) vv[j] = Vs[k * KF_D + tk + 16 * j];
+#pragma unroll
+            for (int i = 0; i < 4; i++)
+#pragma unroll
+                for (int j = 0; j < 8; j++) o[i][j] = fmaf(pp[i], vv[j], o[i][j]);
+        }
+    }
+#pragma unroll
+    for (int i = 0; i < 4; i++) {
+        const int q = q0 + tq + 16 * i;
+        if (q >= N) continue;
+        const float inv = 1.0f / l[i];
+#pragma unroll
+        for (int j = 0; j < 8; j++) ctx[(size_t)q * qd + h * KF_D + tk + 16 * j] = o[i][j] * inv;
+    }
+}
+__global__ void kv_gelu_tanh(float *x, size_t n) {
+    const size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    const float v = x[i];
+    x[i] = 0.5f * v * (1.0f + tanhf(0.7978845608028654f * (v + 0.044715f * (v * v * v))));
+}
+__global__ void kv_gelu_erf(float *x, size_t n) {
+    const size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    x[i] = 0.5f * x[i] * (1.0f + erff(x[i] * 0.70710678118654752f));
+}
+// merged row (i, j): patches (2i, 2j), (2i, 2j+1), (2i+1, 2j), (2i+1, 2j+1) side by side
+__global__ void kv_merge(const float *x, int gw, int D, int T, float *mg) {
+    const size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x;
+    if (i >= (size_t)T * 4 * D) return;
+    const int d = (int)(i % D), k = (int)(i / D % 4), t = (int)(i / D / 4);
+    const int r = t / (gw / 2), c = t % (gw / 2), n = (2 * r + (k >> 1)) * gw + 2 * c + (k & 1);
+    mg[i] = x[(size_t)n * D + d];
+}
+
+static unsigned long long n_vis; static double t_vis;
+static cudaStream_t s_vis;
+static int kv_ok(cudaError_t e, const char *what) {   // not `checked`: a failed picture is the CPU's, the rest goes on
+    if (e == cudaSuccess) return 1;
+    fprintf(stderr, "[K3-CUDA] vision: %s: %s (the CPU computes the picture)\n", what, cudaGetErrorString(e));
+    cudaGetLastError();
+    return 0;
+}
+static unsigned kv_blocks(size_t n) { return (unsigned)((n + 255) / 256); }
+template <typename BT>
+static void kv_mm(const float *A, int lda, size_t sA, const BT *B, int ldb, size_t sB, float *C, int ldc, size_t sC,
+                  int M, int N, int K, int acc, int Z) {
+    dim3 g((N + KV_BN - 1) / KV_BN, (M + KV_BM - 1) / KV_BM, Z);
+    kv_gemm<BT><<<g, 256, 0, s_vis>>>(A, lda, sA, B, ldb, sB, C, ldc, sC, M, N, K, acc);
+}
+
+extern "C" int k3cu_vision(const K3cuVision *v, const uint8_t *rgb, int gh, int gw, float *rows) {
+    if (!ready || failed || !on_device() || !v || gh < 2 || gw < 2 || gh % 2 || gw % 2 || v->hd != KF_D) return 0;
+    const double t0 = now_s();
+    const int N = gh * gw, D = v->d, P = v->patch, H = v->heads, hd = v->hd, qd = v->qd, R3 = 3 * qd;
+    const int pin = 3 * P * P, pinp = (pin + 31) / 32 * 32, T = (gh / 2) * (gw / 2), M4 = 4 * D, I = v->inter;
+    const int nf = hd / 4;
+    size_t fr = 0, tot = 0;
+    if (!kv_ok(cudaMemGetInfo(&fr, &tot), "memory")) return 0;
+    float *x, *xn, *qkv, *ctx, *h, *out, *cs, *nv;
+    uint16_t *wq, *wo, *f0, *f1, *p0, *p2, *pos, *pw;
+    uint8_t *px;
+    auto plan = [&](char *at) {   // the buffers from `at` on; their end
+        auto take = [&](size_t bytes) { char *p = at; at += (bytes + 4095) / 4096 * 4096; return p; };
+        x = (float *)take((size_t)N * D * 4); xn = (float *)take((size_t)N * (D > pinp ? D : pinp) * 4);
+        qkv = (float *)take((size_t)N * R3 * 4); ctx = (float *)take((size_t)N * qd * 4);
+        h = (float *)take((size_t)N * (I > M4 ? I : M4) * 4); out = (float *)take((size_t)T * v->out * 4);
+        cs = (float *)take(2 * (size_t)(gw + gh) * nf * 4);
+        nv = (float *)take((size_t)(2 * v->depth + 1) * D * 4 + (size_t)v->out * 4);
+        wq = (uint16_t *)take((size_t)R3 * D * 2); wo = (uint16_t *)take((size_t)D * qd * 2);
+        f0 = (uint16_t *)take((size_t)I * D * 2); f1 = (uint16_t *)take((size_t)D * I * 2);
+        p0 = (uint16_t *)take((size_t)M4 * M4 * 2); p2 = (uint16_t *)take((size_t)v->out * M4 * 2);
+        pos = (uint16_t *)take((size_t)v->ph * v->pw * D * 2); pw = (uint16_t *)take((size_t)D * pin * 2);
+        px = (uint8_t *)take((size_t)N * P * P * 3);
+        return at;
+    };
+    const size_t need = (size_t)plan(nullptr);
+    if (need + ((size_t)256 << 20) > fr) {
+        fprintf(stderr, "[K3-CUDA] vision: a %dx%d picture needs %.2f GB on the device, %.2f GB free: the CPU computes it\n",
+                gh, gw, need / 1e9, fr / 1e9);
+        return 0;
+    }
+    if (!s_vis && (!kv_ok(cudaStreamCreateWithFlags(&s_vis, cudaStreamNonBlocking), "stream") ||
+                   !kv_ok(cudaFuncSetAttribute(kv_flash, cudaFuncAttributeMaxDynamicSharedMemorySize, KF_SMEM), "attention")))
+        return 0;
+    char *mem = nullptr;
+    if (!kv_ok(cudaMalloc(&mem, need), "memory")) return 0;
+    plan(mem);
+    // the host's cos and sin, k3_vision.h's
+    float *hcs = (float *)malloc(2 * (size_t)(gw + gh) * nf * 4);
+    float *hnv = (float *)malloc((size_t)(2 * v->depth + 1) * D * 4 + (size_t)v->out * 4);
+    int ok = hcs && hnv;
+    if (ok) {
+        for (int i = 0; i < nf; i++) {
+            const float fq = 1.0f / powf(10000.0f, (float)(4 * i) / (float)hd);
+            for (int p = 0; p < gw + gh; p++) {
+                const float ang = (float)(p < gw ? p : p - gw) * fq;
+                hcs[p * nf + i] = (float)cos((double)ang);
+                hcs[(gw + gh) * nf + p * nf + i] = (float)sin((double)ang);
+            }
+        }
+        for (int l = 0; l < v->depth; l++) {
+            memcpy(hnv + (size_t)(2 * l) * D, v->n0[l], (size_t)D * 4);
+            memcpy(hnv + (size_t)(2 * l + 1) * D, v->n1[l], (size_t)D * 4);
+        }
+        memcpy(hnv + (size_t)2 * v->depth * D, v->fnorm, (size_t)D * 4);
+        memcpy(hnv + (size_t)(2 * v->depth + 1) * D, v->pnorm, (size_t)v->out * 4);
+    }
+    const float scale = 1.0f / sqrtf((float)hd);
+    ok = ok && kv_ok(cudaMemcpyAsync(px, rgb, (size_t)N * P * P * 3, cudaMemcpyHostToDevice, s_vis), "pixels") &&
+         kv_ok(cudaMemcpyAsync(cs, hcs, 2 * (size_t)(gw + gh) * nf * 4, cudaMemcpyHostToDevice, s_vis), "rope") &&
+         kv_ok(cudaMemcpyAsync(nv, hnv, (size_t)(2 * v->depth + 1) * D * 4 + (size_t)v->out * 4, cudaMemcpyHostToDevice, s_vis), "norms") &&
+         kv_ok(cudaMemcpyAsync(pw, v->patch_w, (size_t)D * pin * 2, cudaMemcpyHostToDevice, s_vis), "patch weights") &&
+         kv_ok(cudaMemcpyAsync(pos, v->pos, (size_t)v->ph * v->pw * D * 2, cudaMemcpyHostToDevice, s_vis), "positions");
+    if (ok) {
+        kv_patches<<<kv_blocks((size_t)N * pinp), 256, 0, s_vis>>>(px, gw, P, pin, pinp, N, xn);
+        kv_mm<uint16_t>(xn, pinp, 0, pw, pin, 0, x, D, 0, N, D, pin, 0, 1);
+        kv_pos<<<kv_blocks((size_t)N * D), 256, 0, s_vis>>>(pos, v->ph, v->pw, gh, gw, D, x);
+        ok = kv_ok(cudaGetLastError(), "kernels");
+    }
+    for (int l = 0; l < v->depth && ok; l++) {
+        ok = kv_ok(cudaMemcpyAsync(wq, v->qkv[l], (size_t)R3 * D * 2, cudaMemcpyHostToDevice, s_vis), "weights") &&
+             kv_ok(cudaMemcpyAsync(wo, v->wo[l], (size_t)D * qd * 2, cudaMemcpyHostToDevice, s_vis), "weights") &&
+             kv_ok(cudaMemcpyAsync(f0, v->fc0[l], (size_t)I * D * 2, cudaMemcpyHostToDevice, s_vis), "weights") &&
+             kv_ok(cudaMemcpyAsync(f1, v->fc1[l], (size_t)D * I * 2, cudaMemcpyHostToDevice, s_vis), "weights");
+        if (!ok) break;
+        kv_rms<<<N, 256, 0, s_vis>>>(x, nv + (size_t)(2 * l) * D, xn, D, v->eps);
+        kv_mm<uint16_t>(xn, D, 0, wq, D, 0, qkv, R3, 0, N, R3, D, 0, 1);
+        kv_rope<<<kv_blocks((size_t)N * 2 * H * (hd / 2)), 256, 0, s_vis>>>(qkv, N, gw, H, hd, qd, R3, cs, (gw + gh) * nf);
+        kv_flash<<<dim3((N + KF_Q - 1) / KF_Q, H), 256, KF_SMEM, s_vis>>>(qkv, N, R3, qd, scale, ctx);
+        kv_mm<uint16_t>(ctx, qd, 0, wo, qd, 0, x, D, 0, N, D, qd, 1, 1);
+        kv_rms<<<N, 256, 0, s_vis>>>(x, nv + (size_t)(2 * l + 1) * D, xn, D, v->eps);
+        kv_mm<uint16_t>(xn, D, 0, f0, D, 0, h, I, 0, N, I, D, 0, 1);
+        kv_gelu_tanh<<<kv_blocks((size_t)N * I), 256, 0, s_vis>>>(h, (size_t)N * I);
+        kv_mm<uint16_t>(h, I, 0, f1, I, 0, x, D, 0, N, D, I, 1, 1);
+        ok = kv_ok(cudaGetLastError(), "kernels") && kv_ok(cudaStreamSynchronize(s_vis), "layer");
+    }
+    if (ok) {
+        kv_rms<<<N, 256, 0, s_vis>>>(x, nv + (size_t)2 * v->depth * D, xn, D, v->eps);
+        kv_merge<<<kv_blocks((size_t)T * M4), 256, 0, s_vis>>>(xn, gw, D, T, h);
+        ok = kv_ok(cudaMemcpyAsync(p0, v->p0, (size_t)M4 * M4 * 2, cudaMemcpyHostToDevice, s_vis), "projector") &&
+             kv_ok(cudaMemcpyAsync(p2, v->p2, (size_t)v->out * M4 * 2, cudaMemcpyHostToDevice, s_vis), "projector");
+    }
+    if (ok) {
+        kv_mm<uint16_t>(h, M4, 0, p0, M4, 0, qkv, M4, 0, T, M4, M4, 0, 1);
+        kv_gelu_erf<<<kv_blocks((size_t)T * M4), 256, 0, s_vis>>>(qkv, (size_t)T * M4);
+        kv_mm<uint16_t>(qkv, M4, 0, p2, M4, 0, out, v->out, 0, T, v->out, M4, 0, 1);
+        kv_rms<<<T, 256, 0, s_vis>>>(out, nv + (size_t)(2 * v->depth + 1) * D, out, v->out, v->peps);
+        ok = kv_ok(cudaGetLastError(), "kernels") &&
+             kv_ok(cudaMemcpyAsync(rows, out, (size_t)T * v->out * 4, cudaMemcpyDeviceToHost, s_vis), "rows") &&
+             kv_ok(cudaStreamSynchronize(s_vis), "picture");
+    }
+    cudaStreamSynchronize(s_vis);
+    cudaFree(mem);
+    free(hcs); free(hnv);
+    if (ok) { n_vis++; t_vis += now_s() - t0; }
+    return ok;
+}
+
 extern "C" void k3cu_report(void) {
     if (!ready) return;
     if (n_steps)
@@ -2578,6 +2932,7 @@ extern "C" void k3cu_report(void) {
     if (n_rt) fprintf(stderr, "[K3-CUDA] the routers: %llu steps, %.1fs\n", n_rt, t_rt);
     if (n_sh) fprintf(stderr, "[K3-CUDA] the shared experts: %llu steps, %.1fs\n", n_sh, t_sh);
     if (n_kda) fprintf(stderr, "[K3-CUDA] the KDA layers: %llu layer steps, %llu rows, %.1fs\n", n_kda, n_kda_rows, t_kda);
+    if (n_vis) fprintf(stderr, "[K3-CUDA] the vision tower: %llu pictures, %.1fs\n", n_vis, t_vis);
 }
 
 extern "C" void k3cu_shutdown(void) {
@@ -2590,6 +2945,7 @@ extern "C" void k3cu_shutdown(void) {
     cudaFree(ar_mem); ar_mem = nullptr; ar_cap = 0;
     if (s_mm) { cudaStreamDestroy(s_mm); s_mm = nullptr; }
     if (s_kda) { cudaStreamDestroy(s_kda); s_kda = nullptr; }
+    if (s_vis) { cudaStreamDestroy(s_vis); s_vis = nullptr; }
     for (int b = 0; b < K3_SLOTS; b++) { cudaStreamDestroy(S[b].s); cudaEventDestroy(S[b].done); }
     cudaStreamDestroy(s_copy); cudaEventDestroy(e_copied);
     ready = 0;

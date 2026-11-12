@@ -933,12 +933,71 @@ predates `dsa_config` and a `coli_cuda_k3.dll` that lacks `k3cu_dsa_mask`). Both
 build: `deploy/kimi-k31/build-windows.ps1` compiles the engine and the DLL together and runs
 `tests/test_k3_cuda_experts.exe --dsa` against the card before copying them into the install.
 
+## Kimi K3.1: pictures (`k3_vision.h`, `k3cu_vision`)
+
+Kimi K3.1 Pro reads pictures. Its checkpoint carries a MoonViT tower (`vision_tower.*`: 27 blocks
+of 1024, attention 1536 wide in 12 heads of 128, patches of 14, positions from a 64 x 64 table) and
+a patchmergerv2 projector (`mm_projector.*`, to the language model's 7168): 168 tensors, 0.89 GB of
+bf16 in the last two shards. A serve loads them (`K3_VISION=0`: not) and says so at its handshake
+(`CAPS vision=1`); the gateway then takes the pictures of a conversation wherever they are -- the
+user's, a tool result's (Kimi Code's Computer Use screenshots), one an Anthropic `tool_result`
+carried -- several a request. Without the tower a tool's picture is a line in its result and the
+user's is refused, as before.
+
+- **The pixels** (`tools/kimi_image.py`): the checkpoint's own processor (`media_utils.py`,
+  `kimi_k3_vision_processing.py`) step for step -- scaled down, never up, to at most 65,536
+  patches and 512 a side (`navit_resize_image`), Pillow's bicubic, the chessboard behind a
+  transparent picture after the resize, black padding to multiples of 28 -- the processor's
+  bytes exactly (nine pictures checked: PNG, JPEG, RGBA, palette with and without transparency,
+  grey, 6000 x 4000, 5 x 3). `K3_MAX_IMAGE_TOKENS` (4,096) caps a picture's rows below the
+  processor's 16,384, by the same patch limit. Each picture is an `IMAGE` frame of RGB bytes
+  (a 1568 x 830 screenshot: 840 x 1568 x 3, 3.95 MB) before the `SUBMIT`, in the conversation's
+  order.
+- **The prompt**: K3CHAT1's `S <role> <pieces>` (a user or system turn) and `R <index> <name>
+  <pieces>` (a tool result) hold their content as pieces, `T <bytes>` a text part and `I
+  <width> <height> <rows>` a picture; `kimi_k3.c` builds `make_image_prompt`'s
+  `<|media_begin|>image WxH<|media_content|>`, one `<|media_pad|>` a row of the tower's output
+  (the model's single pad, expanded as `_merge_input_ids_with_image_features` does), and
+  `<|media_end|>` -- Moonshot's `encoding_k3.py` segments with the pads expanded, checked on a
+  conversation with a picture in a user turn and one in a tool result.
+- **The prompt's ids**: a picture's places carry negative ids, a hash of its bytes, its grid
+  and the row (`k3_img_pid`). Every comparison of prompts by ids -- the state's prefix, the
+  photos, the conversations kept in RAM and in files -- tells one picture from another with no
+  change of its own: a conversation that comes back reuses its state over its pictures, the
+  same words with another picture reuse nothing past its place. The tower runs only for a
+  picture that reaches past the reused prefix, and the last `K3_IMAGE_CACHE` (4) pictures' rows
+  are kept by their hash (a 1,680-row picture: 48 MB).
+- **The tower** in f32 over the bf16 weights: on the card (`coli_cuda_k3.dll`'s `k3cu_vision`,
+  when the card takes a prompt's experts: a tiled GEMM, the attention in one kernel with an
+  online softmax, a layer's weights sent up before the layer, about 0.5 GB of VRAM for a
+  screenshot and nothing kept), else on the CPU (`k3_vision.h`: `matmul_f32.h`'s matmul, the
+  attention as two matrices a head, `exp_f8`). The two orders of the sums give rows 1.5e-5
+  apart; the tower is not one of the engine's exact paths (its rows are held against Moonshot's
+  code, below), so a picture's logits may differ between a GPU and a CPU-only run.
+- **The norms' eps**: the tower's `nn.RMSNorm(hidden)` have none, and torch takes it from the
+  type it computes in. Moonshot's code run in bf16 (torch 2.15) gives rows 4.3% from the f32 run
+  with `FLT_EPSILON` -- bf16's noise -- and 55% (cosine 0.09) from one with bf16's own 2^-7;
+  vLLM builds the same norms. `FLT_EPSILON` here (`K3_VISION_EPS` to try another).
+
+Measured on the 4090 machine (`docs/experiments/kimi-k31-4090-2026-11-10/`, "Pictures"): the
+rows of a 640 x 400 picture (345 rows) and a 1568 x 830 screenshot (1,680 rows) are
+`tools/k3_vision_ref.py`'s -- Moonshot's `MoonViT3dPretrainedModel` and `PatchMergerMLPV2` in f32
+-- within 1.0e-5 (CPU) and 1.3e-5 (GPU) relative; the screenshot's tower takes 0.76 s on the
+card and 18.1 s on the CPU. Through the API, the model read the screenshot's title, its terminal's
+lines word for word, its baud rate and its three buttons, from a user's message and from a tool
+result. A picture's rows are prompt tokens like any other: a screenshot is about 1,700 of them.
+Kimi Code sends its MCP tools' screenshots whatever its model's capabilities say; with
+`image_in` among them (`~/.kimi-code/config.toml`) it sends the user's pictures and
+ReadMediaFile's too. `tests/kimi_k3_vision_harness.py` checks the path on the tiny fixture with
+a tiny tower of its own (numpy's reading of the modeling code for the rows, the builder, the
+reuse, the refusals).
+
 ## Current limitations
 
 - Decode is single-token (no speculative decoding — K3 has no MTP head).
-- Image content is not read: a picture the user sends is refused with HTTP 400; one inside a
-  tool result (Kimi Code's Computer Use screenshots) reaches the model as a line saying an
-  image was there, with the tool's text (`text_only_tool_results` in the gateway).
+- Pictures need Kimi K3.1's tower (above); video is not read, nor a picture in an assistant
+  turn. Without the tower a picture the user sends is refused with HTTP 400 and one inside a
+  tool result reaches the model as a line saying an image was there (`text_only_tool_results`).
 - CPU + optional Vulkan (the shared expert tier) or CUDA for the dense matrices
   (`K3_CUDA_DENSE`, above) and a prompt step's experts, MLA attention and routers
   (`coli_cuda_k3.dll`, Windows builds: its tables hold MinGW's exp_f and tanhf bits); no

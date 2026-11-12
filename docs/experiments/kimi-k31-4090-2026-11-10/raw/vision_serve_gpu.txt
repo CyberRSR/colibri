@@ -1,0 +1,14 @@
+[K3-CUDA] dense: 372 of 1001 matrices on GPU 0, 20.00 of 31.32 GiB (budget 20.00 GiB, 22.49 free); their host copies released; the CPU's arithmetic there (coli_cuda_k3.dll)
+[K3-CUDA] experts: a prompt step's routed experts (steps of 32 rows or more) on GPU 0 beside the CPU, the CPU's bytes (K3_GPU_EXPERTS=0: the CPU's alone)
+[K3][RAM_GB=174.0] resident 12.4 GB + reserve 27.2 GB (page cache 2.5, activations 1.2, read-ahead 20.0, KV 24x4096 0.3, checkpoints 5 2.4) -> 134.4 GB for experts; cache 619->83/layer (17.5 MB/slot, 92 layers; projected peak 173.6 GB)
+[K3] init done in 7.7s | 93 layers | expert cache 83/layer (17.5 MB/slot) | RSS 33.9 GB
+[K3-VISION] the tower: 27 blocks of 1024 (12 heads of 128), projector to 7168, 0.89 GB of bf16 in 0.1s; a picture's rows replace id 163605
+[K3-VISION] a picture of 60x112 patches -> 1680 rows on the GPU in 0.76s
+[K3-VISION] the request's 1 picture(s): 1 through the tower, 0 from the cache, 0 in the reused prefix (0.8s)
+[PREFIX] no reuse: held=0 cap=2088 prompt=1930
+[K3] prompt of 1930 tokens (0 reused) in 105.0s: attention 6.3s (MLA 1.5, K3.1's index keys and picks 0.1), MoE 96.0s (router and reads issued 1.1, latent 1.5, shared 4.5, routed experts computed 27.2, waiting for reads 64.0, their inputs 0.5, their sums 1.0)
+[K3-CUDA] dense (turn): 16609 matmuls on the GPU, 2.8s
+[K3-CKPT] restored pos=1930 of 3236 prompt tokens (recompute 1306)
+[K3-VISION] a picture of 52x92 patches -> 1196 rows on the GPU in 0.65s
+[K3-VISION] the request's 2 picture(s): 1 through the tower, 0 from the cache, 1 in the reused prefix (0.7s)
+[PREFIX] reusing 1930 of 3236 prompt tokens (60%)

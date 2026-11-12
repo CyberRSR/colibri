@@ -1488,7 +1488,9 @@ FAMILIES = (
         # share COMMON_CAP, which says otherwise -- the flag is descriptive
         # (it only feeds the capability dict) so nothing broke, but a client
         # reading it programmatically was told the opposite of the truth.
-        capabilities=FamilyCapabilities(True, False, False, True),
+        # image=True: Kimi K3.1's pictures (expand_kimi_images, kimi_k3.c's tower, k3_vision.h);
+        # whether the checkpoint served has the tower is the engine's CAPS vision=1.
+        capabilities=FamilyCapabilities(True, False, False, True, image=True),
         has_gateway_adapter=True,
         tune_prompt_template="K3CHAT1\nM user {prompt_len}\n{prompt}G 0\n\n",
     ),

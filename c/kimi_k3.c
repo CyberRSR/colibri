@@ -149,6 +149,7 @@
 #include "tok.h"
 #include "quant.h"
 #include "exp_f.h"
+#include "k3_vision.h"   /* Kimi K3.1's vision tower: a picture's rows for the language model (images) */
 #ifdef COLI_CUDA
 #include "backend_cuda.h"
 #include "cu_dense.h"      /* the dense matrices on the CUDA tier's device, a matrix at a time */
@@ -2076,6 +2077,23 @@ static void k3_dho_decide(Model *m, int tier_on, int cuda_on){
 #define K3_F32_DEV(t,y,x,S,I,O) 0
 #endif
 
+/* The tower a serve loads (k3_vision.h): K3_VISION=0 keeps it off. Its bf16 weights, 0.89 GB for
+ * K3.1, stay resident, so the RAM plan sets them aside before the expert cache; its working rows
+ * come and go before a prompt's steps, inside what those set aside. */
+static int k3_vision_wanted(shards *S){
+    const char *e=getenv("K3_VISION");
+    return (!e||!*e||atoi(e)!=0)&&getenv("SERVE")&&getenv("SERVE")[0]=='1'&&
+           st_has(S,"vision_tower.patch_embed.proj.weight");
+}
+static K3Vision *g_k3v; static int g_k3v_pad=-1;   /* the tower, and the id its rows replace */
+static double k3_vision_plan_gb(shards *S){
+    if(!k3_vision_wanted(S)) return 0.0;
+    double b=0;
+    for(int i=0;i<S->n;i++)
+        if(!strncmp(S->t[i].name,"vision_tower.",13)||!strncmp(S->t[i].name,"mm_projector.",13)) b+=(double)S->t[i].nbytes;
+    return b/1e9;
+}
+
 /* ---------- config ---------- */
 static double req_num(jval *r, const char *k){
     jval *v=json_get(r,k);
@@ -2707,7 +2725,7 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
          * slots now: RAM_GB is a whole-process ceiling even for opt-in memory. */
         double ckpt_gb = k3_ckpt_reserve_gb(m,g_k3_ckpt_slots);
         double act_gb = k3_act_gb(), ra_gb = k3_ra_gb();
-        double reserve = 2.5 + act_gb + ra_gb + kv_gb + ckpt_gb;
+        double reserve = 2.5 + act_gb + ra_gb + kv_gb + ckpt_gb + k3_vision_plan_gb(&m->S);
         g_k3_ram_later = (kv_gb + ckpt_gb) * 1e9;   /* allocated once it serves: the tier's host pool leaves it (#2314) */
         g_k3_kv_plan_bytes = kv_gb * 1e9;           /* what the caches take past it, the expert cache lends (k3_cache_lent_sync) */
         double for_experts = 0.0;
@@ -6202,6 +6220,7 @@ static float *g_echo_carry = NULL;      /* logit dell'ultima posizione gia fatta
 static int    g_echo_carry_ok = 0;
 
 static void k3_echo(const char *id, int pos, int token, const float *lo, int V, int k){
+    if(token<0) token=g_k3v_pad>=0?g_k3v_pad:0;   /* a picture's row: its place is the pad's */
     char tail[1024]; coli_logprob_tail(tail, sizeof tail, lo, V, token, k);
     char piece[512]; int n = g_echo_tok ? tok_decode(g_echo_tok, &token, 1, piece, (int)sizeof piece) : 0;
     if(n<0) n=0;
@@ -6210,10 +6229,212 @@ static void k3_echo(const char *id, int pos, int token, const float *lo, int V, 
     fputc('\n', stdout); fflush(stdout);
 }
 
+/* ---- pictures (k3_vision.h) ------------------------------------------------------------
+ * The gateway sends a request's pictures as IMAGE frames just before its SUBMIT, in the order
+ * the conversation holds them: tools/kimi_image.py's resized and padded RGB, <grid_h*14> x
+ * <grid_w*14> x 3 bytes. The K3CHAT1 payload places them (S and R records, I pieces) and
+ * chat_build_wire gives each its span: <|media_begin|>image WxH<|media_content|>, one
+ * <|media_pad|> a row of the tower's output (the model's single pad, expanded as its merge
+ * of the features does), <|media_end|>.
+ *
+ * A span's ids are not the pad's: each position gets a negative id from a hash of the picture's
+ * bytes and grid and of the row (k3_img_pid). Every comparison of prompts by their ids -- the
+ * prefix the state already holds, the photos, the conversations kept in RAM and in files --
+ * then tells one picture from another with no change of its own, and a conversation that comes
+ * back with its pictures reuses its state over them. k3_embed reads such a position's row from
+ * the request's pictures; the tower runs only for the pictures that reach past the reused
+ * prefix, and the last K3_IMAGE_CACHE (4) pictures' rows are kept by their hash. */
+#define K3_IMG_MAX 64
+typedef struct { char id[64]; uint8_t *rgb; size_t bytes; int gh, gw; const char *bad; } K3ImgFrame;
+static K3ImgFrame g_k3_imgq[K3_IMG_MAX]; static int g_k3_imgq_n;   /* IMAGE frames waiting for their SUBMIT */
+typedef struct { int pos, n; } K3ImgSpan;
+static K3ImgSpan g_k3_chat_img[K3_IMG_MAX]; static int g_k3_chat_img_n, g_k3_chat_img_over;   /* chat_build_wire's */
+typedef struct { uint64_t hash; int pos, n; float *rows; int owned; } K3ImgUse;
+static K3ImgUse g_k3_img[K3_IMG_MAX]; static int g_k3_img_n;     /* the request's pictures, in prompt order */
+typedef struct { uint64_t hash; int n; float *rows; } K3ImgRows;
+static K3ImgRows g_k3_imgc[16]; static int g_k3_imgc_n;          /* the last pictures' rows, newest last */
+static int k3_img_max_patches(void){
+    static int n=-1;
+    if(n<0){ const char *e=getenv("K3_VISION_MAX_PATCHES"); n=e&&*e?atoi(e):16384; if(n<4) n=4; }
+    return n;
+}
+static uint64_t k3_img_hash(const uint8_t *p, size_t n, int gh, int gw){
+    uint64_t h=0x6a09e667f3bcc909ull^((uint64_t)(uint32_t)gh<<32|(uint32_t)gw);
+    size_t i=0;
+    for(;i+8<=n;i+=8){ uint64_t w; memcpy(&w,p+i,8); h=(h^w)*0x9E3779B97F4A7C15ull; h^=h>>29; }
+    for(;i<n;i++){ h=(h^p[i])*0x100000001B3ull; }
+    h^=h>>31; h*=0xBF58476D1CE4E5B9ull; h^=h>>27;
+    return h;
+}
+/* a picture's row r: a negative id, never -1, 30 bits of the hash's mix with r */
+static int k3_img_pid(uint64_t h, int r){
+    uint64_t z=h+(uint64_t)(r+1)*0x9E3779B97F4A7C15ull;
+    z=(z^(z>>30))*0xBF58476D1CE4E5B9ull; z=(z^(z>>27))*0x94D049BB133111EBull; z^=z>>31;
+    return -2-(int)(z&0x3FFFFFFFu);
+}
+/* an IMAGE frame: queued for the SUBMIT of its id, or a reason that SUBMIT will be refused */
+static void k3_img_frame(ColiServeCommand *c){
+    if(g_k3_imgq_n>=K3_IMG_MAX){   /* the oldest out: a request of more pictures is refused by their count */
+        free(g_k3_imgq[0].rgb);
+        memmove(g_k3_imgq,g_k3_imgq+1,(size_t)(K3_IMG_MAX-1)*sizeof *g_k3_imgq);
+        g_k3_imgq_n--;
+    }
+    K3ImgFrame *f=&g_k3_imgq[g_k3_imgq_n++];
+    memset(f,0,sizeof *f);
+    snprintf(f->id,sizeof f->id,"%s",c->id);
+    f->gh=c->grid_h; f->gw=c->grid_w;
+    const int P=g_k3v?g_k3v->patch:14;
+    if(!g_k3v) f->bad="this engine loaded no vision tower (K3_VISION=0, or the checkpoint has none)";
+    else if(f->gh<2||f->gw<2||f->gh%2||f->gw%2||f->gh>g_k3v->max_side||f->gw>g_k3v->max_side)
+        f->bad="BAD_IMAGE its grid is not even, or past 512 patches a side";
+    else if((int64_t)f->gh*f->gw>k3_img_max_patches())
+        f->bad="BAD_IMAGE more patches than K3_VISION_MAX_PATCHES";
+    else if(c->payload_bytes!=(uint64_t)f->gh*P*f->gw*P*3)
+        f->bad="BAD_IMAGE its bytes are not its grid's RGB";
+    else { f->rgb=(uint8_t*)coli_serve_command_take_payload(c); f->bytes=(size_t)c->payload_bytes; }
+}
+/* the frames of other requests (refused while one ran, or ended early) out */
+static void k3_img_keep(const char *rid){
+    int k=0;
+    for(int i=0;i<g_k3_imgq_n;i++){
+        if(strcmp(g_k3_imgq[i].id,rid)) free(g_k3_imgq[i].rgb);
+        else g_k3_imgq[k++]=g_k3_imgq[i];
+    }
+    g_k3_imgq_n=k;
+}
+static void k3_img_clear_queue(void){
+    for(int i=0;i<g_k3_imgq_n;i++) free(g_k3_imgq[i].rgb);
+    g_k3_imgq_n=0;
+}
+/* the request's pictures done with: their rows to the cache (the oldest out past K3_IMAGE_CACHE) */
+static void k3_img_done(void){
+    static int cap=-1;
+    if(cap<0){ const char *e=getenv("K3_IMAGE_CACHE"); cap=e&&*e?atoi(e):4; if(cap<0) cap=0; if(cap>16) cap=16; }
+    for(int k=0;k<g_k3_img_n;k++){
+        K3ImgUse *u=&g_k3_img[k];
+        if(!u->owned||!u->rows) continue;
+        int have=0;
+        for(int i=0;i<g_k3_imgc_n;i++) if(g_k3_imgc[i].hash==u->hash) have=1;
+        if(have||!cap){ free(u->rows); continue; }
+        if(g_k3_imgc_n==cap){ free(g_k3_imgc[0].rows); memmove(g_k3_imgc,g_k3_imgc+1,(size_t)(cap-1)*sizeof *g_k3_imgc); g_k3_imgc_n--; }
+        g_k3_imgc[g_k3_imgc_n++]=(K3ImgRows){u->hash,u->n,u->rows};
+    }
+    g_k3_img_n=0;
+}
+/* position pos's row of the request's pictures, NULL when no picture of it holds pos */
+static const float *k3_img_row(int pos, int D){
+    for(int k=0;k<g_k3_img_n;k++){
+        const K3ImgUse *u=&g_k3_img[k];
+        if(pos>=u->pos&&pos<u->pos+u->n&&u->rows) return u->rows+(int64_t)(pos-u->pos)*D;
+    }
+    return NULL;
+}
+/* The request's frames against the spans of its conversation: ids rewritten to the pictures'
+ * (k3_img_pid). 1, or 0 with *why set (the request is refused). The frames' bytes are kept
+ * in g_k3_imgq until k3_img_rows. */
+static int k3_img_bind(const char *rid, int *ids, int base, const char **why){
+    int nf=0;
+    for(int i=0;i<g_k3_imgq_n;i++) if(!strcmp(g_k3_imgq[i].id,rid)) nf++;
+    if(g_k3_chat_img_over){ *why="BAD_IMAGE more than 64 pictures in one conversation"; return 0; }
+    if(nf!=g_k3_chat_img_n){
+        static char msg[160];
+        snprintf(msg,sizeof msg,"BAD_IMAGE the conversation places %d pictures and %d IMAGE frames came",g_k3_chat_img_n,nf);
+        *why=msg; return 0;
+    }
+    int k=0;
+    for(int i=0;i<g_k3_imgq_n;i++){
+        K3ImgFrame *f=&g_k3_imgq[i];
+        if(strcmp(f->id,rid)) continue;
+        if(f->bad){ *why=f->bad; return 0; }
+        const K3ImgSpan *sp=&g_k3_chat_img[k];
+        if(sp->n!=(f->gh/2)*(f->gw/2)){
+            static char msg[160];
+            snprintf(msg,sizeof msg,"BAD_IMAGE a picture has %d places in the prompt, its %dx%d grid gives %d rows",
+                     sp->n,f->gh,f->gw,(f->gh/2)*(f->gw/2));
+            *why=msg; return 0;
+        }
+        K3ImgUse *u=&g_k3_img[k];
+        memset(u,0,sizeof *u);
+        u->hash=k3_img_hash(f->rgb,f->bytes,f->gh,f->gw); u->pos=base+sp->pos; u->n=sp->n;
+        for(int r=0;r<u->n;r++) ids[u->pos+r]=k3_img_pid(u->hash,r);
+        k++;
+    }
+    g_k3_img_n=k;
+    return 1;
+}
+/* A picture through the tower on the card (coli_cuda_k3.dll's k3cu_vision: the same f32 arithmetic,
+ * its own order of the sums, about 20 times sooner than the CPU), when the card takes a prompt's
+ * experts (K3_GPU_EXPERTS) and K3_VISION_GPU is not 0; NULL sends it to the CPU (k3v_run). */
+static float *k3_vision_gpu(const uint8_t *rgb, int gh, int gw, int *n){
+#ifdef COLI_K3_CUDA
+    static int on=-1;
+    if(on<0){ const char *e=getenv("K3_VISION_GPU"); on=!e||!*e||atoi(e)!=0; }
+    if(!on||!g_k3g_on||!g_k3v) return NULL;
+    static K3cuVision cv; static int built;
+    const K3Vision *v=g_k3v;
+    if(!built){
+        const float **n0=malloc((size_t)v->depth*sizeof *n0), **n1=malloc((size_t)v->depth*sizeof *n1);
+        const uint16_t **wq=malloc((size_t)v->depth*sizeof *wq), **wo=malloc((size_t)v->depth*sizeof *wo),
+                       **f0=malloc((size_t)v->depth*sizeof *f0), **f1=malloc((size_t)v->depth*sizeof *f1);
+        if(!n0||!n1||!wq||!wo||!f0||!f1) return NULL;
+        for(int l=0;l<v->depth;l++){ n0[l]=v->b[l].n0; n1[l]=v->b[l].n1; wq[l]=v->b[l].qkv; wo[l]=v->b[l].wo;
+                                     f0[l]=v->b[l].fc0; f1[l]=v->b[l].fc1; }
+        cv=(K3cuVision){v->depth,v->d,v->heads,v->hd,v->qd,v->inter,v->out,v->patch,v->ph,v->pw,v->eps,v->peps,
+                        v->patch_w,v->pos,v->p0,v->p2,v->fnorm,v->pnorm,n0,n1,wq,wo,f0,f1};
+        built=1;
+    }
+    const int T=(gh/2)*(gw/2);
+    float *rows=malloc((size_t)T*v->out*sizeof(float));
+    if(!rows) return NULL;
+    const double t0=now_s();
+    if(!k3cu_vision(&cv,rgb,gh,gw,rows)){ free(rows); return NULL; }
+    *n=T;
+    fprintf(stderr,"[K3-VISION] a picture of %dx%d patches -> %d rows on the GPU in %.2fs\n",gh,gw,T,now_s()-t0);
+    return rows;
+#else
+    (void)rgb; (void)gh; (void)gw; (void)n;
+    return NULL;
+#endif
+}
+/* The rows of every picture that reaches past `reuse`: the cache's, or the tower's. 1, or 0 when
+ * the tower could not run. */
+static int k3_img_rows(const char *rid, int reuse){
+    int k=0, ran=0, kept=0; double t0=now_s();
+    for(int i=0;i<g_k3_imgq_n&&k<g_k3_img_n;i++){
+        K3ImgFrame *f=&g_k3_imgq[i];
+        if(strcmp(f->id,rid)) continue;
+        K3ImgUse *u=&g_k3_img[k++];
+        if(u->pos+u->n<=reuse) continue;   /* every row of it is in the state already */
+        for(int c=0;c<g_k3_imgc_n&&!u->rows;c++)
+            if(g_k3_imgc[c].hash==u->hash&&g_k3_imgc[c].n==u->n) u->rows=g_k3_imgc[c].rows;
+        if(u->rows){ kept++; continue; }
+        int n=0;
+        u->rows=k3_vision_gpu(f->rgb,f->gh,f->gw,&n);
+        if(!u->rows) u->rows=k3v_run(g_k3v,f->rgb,f->gh,f->gw,&n);
+        if(!u->rows||n!=u->n){ free(u->rows); u->rows=NULL; return 0; }
+        u->owned=1; ran++;
+    }
+    if(ran||kept)
+        fprintf(stderr,"[K3-VISION] the request's %d picture(s): %d through the tower, %d from the cache, %d in the "
+                "reused prefix (%.1fs)\n",g_k3_img_n,ran,kept,g_k3_img_n-ran-kept,now_s()-t0);
+    return 1;
+}
+
 /* The input rows of positions pos0..pos0+C-1: the embeddings of ids, or K3_X0's rows. */
 static void k3_embed(Model *m, const int *ids, int pos0, int C, float *hidden){
     int D=m->c.hidden;
     for(int t=0;t<C;t++){
+        if(ids[t]<0){   /* a picture's row (k3_img_pid) */
+            const float *r=k3_img_row(pos0+t,D);
+            if(r) memcpy(hidden+(int64_t)t*D,r,(size_t)D*sizeof(float));
+            else {
+                static int said;
+                if(!said++) fprintf(stderr,"[K3-VISION] position %d is a picture's row this request does not hold: "
+                                   "zeros\n",pos0+t);
+                memset(hidden+(int64_t)t*D,0,(size_t)D*sizeof(float));
+            }
+            continue;
+        }
         if(g_x0){
             if(pos0+t>=g_x0_n){ fprintf(stderr,"K3_X0: pos %d beyond %d injected rows\n",pos0+t,g_x0_n); exit(1); }
             memcpy(hidden+(int64_t)t*D,g_x0+(int64_t)(pos0+t)*D,D*sizeof(float));
@@ -6752,6 +6973,42 @@ static void cb_attr(ChatB *b, const char *key, const char *val){
 static void cb_open_begin(ChatB *b, const char *tag){ cb_special(b,b->sp_open); cb_text(b,tag); }
 static void cb_end(ChatB *b){ cb_special(b,b->sp_sep); }
 
+/* A message's content as pieces (#images): `npieces` of
+ *   T <bytes>\n<text>                 a text part, its own segment (encoding_k3._append_text)
+ *   I <width> <height> <tokens>\n     a picture: kimi_k3_vision_processing.make_image_prompt's
+ *                                     <|media_begin|>image WxH<|media_content|><|media_pad|><|media_end|>
+ *                                     with its one pad as the `tokens` rows the tower gives
+ *                                     (WxH the picture's own size, before the processor's resize)
+ * The pads' span goes to g_k3_chat_img. Returns the end of the pieces, NULL when they do not parse. */
+static const char *chat_pieces(ChatB *b, const char *p, const char *end, int np){
+    for(int k=0;k<np;k++){
+        const char *nl=memchr(p,'\n',(size_t)(end-p));
+        if(!nl) return NULL;
+        if(*p=='T'){
+            int nb=-1;
+            if(sscanf(p,"T %d",&nb)!=1||nb<0||nl+1+nb>end) return NULL;
+            char *text=malloc((size_t)nb+1);
+            if(!text){ fprintf(stderr,"OOM chat piece\n"); exit(1); }
+            memcpy(text,nl+1,(size_t)nb); text[nb]=0;
+            cb_text(b,text); free(text); p=nl+1+nb;
+        } else if(*p=='I'){
+            int w=-1, h=-1, n=-1;
+            if(sscanf(p,"I %d %d %d",&w,&h,&n)!=3||w<1||h<1||w>1000000||h>1000000||n<1||n>65536) return NULL;
+            const int mb=chat_special(b->T,"<|media_begin|>"), mc=chat_special(b->T,"<|media_content|>"),
+                      me=chat_special(b->T,"<|media_end|>"), mp=chat_special(b->T,"<|media_pad|>");
+            if(mb<0||mc<0||me<0||mp<0) return NULL;
+            char head[64]; snprintf(head,sizeof head,"image %dx%d",w,h);
+            cb_special(b,mb); cb_text(b,head); cb_special(b,mc);
+            if(g_k3_chat_img_n<K3_IMG_MAX) g_k3_chat_img[g_k3_chat_img_n++]=(K3ImgSpan){b->n,n};
+            else g_k3_chat_img_over=1;
+            for(int r=0;r<n;r++) cb_special(b,mp);
+            cb_special(b,me);
+            p=nl+1;
+        } else return NULL;
+    }
+    return p;
+}
+
 /* Is a generated XTML tag part of the tool-call structure? Open tags carry
  * attributes ("call tool=\"x\" index=\"1\""), close tags are the bare name. */
 static int k3_tool_tag(const char *t){
@@ -6804,7 +7061,7 @@ static int chat_build_wire(Tok *T, const char *wire, int nwire, int *thinking,
     if(nwire<8||memcmp(p,"K3CHAT1\n",8)) return -1;
     p+=8; *thinking=0;
     int lead=1;   /* still in the leading system records */
-    g_k3_chat_root=0; g_k3_chat_key=0;
+    g_k3_chat_root=0; g_k3_chat_key=0; g_k3_chat_img_n=0; g_k3_chat_img_over=0;
     while(p<end){
         if(!lead&&!g_k3_chat_key) g_k3_chat_key=b.n;   /* the record before this one was the first not the system's */
         const char *nl=memchr(p,'\n',(size_t)(end-p));
@@ -6857,6 +7114,28 @@ static int chat_build_wire(Tok *T, const char *wire, int nwire, int *thinking,
             cb_close(&b,"message"); cb_special(&b,b.sp_eom);
             if(lead) g_k3_chat_root=b.n;
             free(typ); free(body); p=nl+1+ntp+nb; continue;
+        }
+        if(*p=='S'){                /* a user or system message with pictures: S <role> <npieces>\n, its pieces */
+            char role[16]; int np=-1;
+            if(sscanf(p,"S %15s %d",role,&np)!=2||np<1||np>4096) return -1;
+            const char *r=!strcmp(role,"developer")?"system":role;
+            if(strcmp(r,"system")&&strcmp(r,"user")) return -1;
+            cb_open(&b,"message",r);
+            if(!(p=chat_pieces(&b,nl+1,end,np))) return -1;
+            cb_close(&b,"message"); cb_special(&b,b.sp_eom);
+            continue;
+        }
+        if(*p=='R'){                /* a tool result with pictures: R <index> <name-len> <npieces>\n<name>, its pieces */
+            int idx=-1, nn=-1, np=-1;
+            if(sscanf(p,"R %d %d %d",&idx,&nn,&np)!=3||idx<1||nn<1||nn>256||np<1||np>4096||nl+1+nn>end) return -1;
+            char name[260];
+            memcpy(name,nl+1,(size_t)nn); name[nn]=0;
+            char ib[16]; snprintf(ib,sizeof ib,"%d",idx);
+            cb_open_begin(&b,"message"); cb_attr(&b,"role","tool");
+            cb_attr(&b,"tool",name); cb_attr(&b,"index",ib); cb_end(&b);
+            if(!(p=chat_pieces(&b,nl+1+nn,end,np))) return -1;
+            cb_close(&b,"message"); cb_special(&b,b.sp_eom);
+            continue;
         }
         if(*p=='O'){                /* tool result (#1143): O <index> <name-len> <content-len> */
             int idx=-1, nn=-1, nb=-1;
@@ -7421,6 +7700,10 @@ static int serve_read_req(FILE *in, FILE *out, ServeReq *q, const char *active){
         int matched=active&&!strcmp(active,command.id);
         coli_serve_command_dispose(&command); return matched;
     }
+    if(command.kind==COLI_SERVE_COMMAND_IMAGE){   /* a picture for the SUBMIT that follows */
+        k3_img_frame(&command);
+        coli_serve_command_dispose(&command); return 0;
+    }
     if(command.kind!=COLI_SERVE_COMMAND_SUBMIT){
         coli_serve_command_dispose(&command); return 0;
     }
@@ -7569,6 +7852,9 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
     int cap=max_ctx+4096, *ids=malloc((size_t)cap*sizeof(int)), np=0;
     if(!ids){ coli_serve_write_error(stdout,q->id,"out of memory"); return 0; }
     int sp[4]={-1,-1,-1,-1}, chat=0, thinking=0;
+    k3_img_done();     /* the previous request's pictures: their rows to the cache */
+    k3_img_keep(q->id);
+    g_k3_chat_img_n=0; g_k3_chat_img_over=0;
     int chat_root=0;   /* the position after the conversation's leading system records, 0: none */
     int chat_key=0;    /* the position after its first record not the system's (k3_sess_pick) */
     if(m->c.bos>=0) ids[np++]=m->c.bos;
@@ -7601,9 +7887,21 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
                     cap,max_ctx);
         } else if(n<0){
             coli_serve_write_error(stdout,q->id,"invalid K3 chat payload"); free(ids); return 0;
-        } else { chat_root=g_k3_chat_root>0?np+g_k3_chat_root:0; chat_key=np+g_k3_chat_key; np+=n; chat=1; }
+        } else {
+            const char *why=NULL;
+            if(!k3_img_bind(q->id,ids,np,&why)){
+                coli_serve_write_error(stdout,q->id,why);
+                fprintf(stderr,"[K3-VISION] a request refused: %s\n",why);
+                g_k3_img_n=0; k3_img_clear_queue(); free(ids); return 0;
+            }
+            chat_root=g_k3_chat_root>0?np+g_k3_chat_root:0; chat_key=np+g_k3_chat_key; np+=n; chat=1;
+        }
     } else {
         np+=tok_encode(T,q->payload,q->plen,ids+np,cap-np);
+    }
+    if(!chat&&g_k3_imgq_n){   /* a raw prompt has no place for them */
+        coli_serve_write_error(stdout,q->id,"BAD_IMAGE pictures need a K3CHAT1 conversation");
+        k3_img_clear_queue(); free(ids); return 0;
     }
     int budget=coli_serve_budget(np,q->max_tok,max_ctx,q->logprobs>0);
     if(budget<0){
@@ -7659,6 +7957,12 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
     }
     k3_sess_pick(m,ids,np,np+q->max_tok+8,chat?chat_key:np);   /* another conversation's request: the live one aside */
     int reuse=prepare_request_state(m,ids,np,np+q->max_tok+8);
+    if(g_k3_img_n&&!k3_img_rows(q->id,reuse)){   /* the pictures past the reused prefix: their rows */
+        coli_serve_write_error(stdout,q->id,"the vision tower could not compute a picture (out of memory?)");
+        k3_cancel_unpublished_state(m);
+        k3_img_done(); k3_img_clear_queue(); free(ids); return 0;
+    }
+    k3_img_clear_queue();   /* the pixels: the rows are what the steps read */
     /* The system prompt's end, photographed once and kept: every conversation of a client
      * begins with the same instructions and tool declarations (10-20 thousand tokens for an
      * agent, a whole pass over the drives), and without a photo there a new conversation
@@ -7989,6 +8293,8 @@ static void serve_mux(Model *m, Tok *T){
             } else if(result==COLI_SERVE_READ_OK){
                 if(command.kind==COLI_SERVE_COMMAND_STOP||command.kind==COLI_SERVE_COMMAND_CANCEL){
                     for(int i=0;i<n;i++) if(rq[i].active&&!strcmp(rq[i].q.id,command.id)) rq[i].cancel=1;
+                } else if(command.kind==COLI_SERVE_COMMAND_IMAGE){
+                    k3_img_frame(&command);
                 } else if(command.kind==COLI_SERVE_COMMAND_SUBMIT){
                     if(command.slot<0||command.slot>=n) coli_serve_write_error(stdout,command.id,"invalid cache slot");
                     else if(rq[command.slot].active) coli_serve_write_error(stdout,command.id,"SLOT_BUSY");
@@ -8050,7 +8356,7 @@ static void serve_loop(Model *m, Tok *T){
      * (#748). Vive in compat.h perche' colibri.c ce l'ha da #195 e questo motore
      * e' nato senza. */
     coli_serve_stdio_init();
-    coli_serve_write_ready(stdout,rss_gb());
+    coli_serve_write_ready_caps(stdout,rss_gb(),g_k3v?"vision=1":"vision=0");
     serve_emap(m);                        /* after READY and STAT: the boot reader discards what precedes them */
     if(g_k3_mux_slots>1){ serve_mux(m,T); return; }
     for(;;){
@@ -8126,6 +8432,7 @@ int main(int argc, char **argv){
     int nlayers=getenv("K3_LAYERS")?atoi(getenv("K3_LAYERS")):0;
     Model m;
     model_init(&m,snap,nlayers);
+    if(serving&&k3_vision_wanted(&m.S)) g_k3v=k3v_load(&m.S,snap,&g_k3v_pad);   /* pictures (K3_VISION=0: off) */
     rt_init("kimi_k3",m.c.n_layers,m.c.n_experts);   /* counters, identity, ROUTE_TRACE */
     /* A layer with no counter row is a layer that cannot be credited: dense layers do not
      * route, and K3 has no MTP row. Without this a history record naming one of them is

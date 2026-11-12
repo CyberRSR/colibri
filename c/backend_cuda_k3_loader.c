@@ -26,6 +26,7 @@ static int (*p_shared)(float *, const float *, int, int, int, const uint8_t *, c
                        const float *, int, const uint8_t *, const float *, int, float, float);
 static int (*p_kda)(const K3cuKda *, const float *, float *);   /* optional: an older DLL lacks it */
 static int (*p_mla_layer)(const K3cuMlaLayer *, const float *, float *);   /* optional too */
+static int (*p_vision)(const K3cuVision *, const uint8_t *, int, int, float *);   /* optional: pictures (k3_vision.h) */
 static int (*p_matmul_dev)(int, float *, const float *, const void *, const float *, int, int, int, int);   /* and this */
 static int (*p_mla_mask)(const float *, const float *, int, int, int, const float *, const float *, const int8_t *,
                          const float *, int, int, int, int, int, float, const uint32_t *, int, float *);   /* K3.1: and this */
@@ -59,6 +60,7 @@ int k3cu_init(int device) {
     BIND(moe_begin); BIND(moe_expert); BIND(moe_poll); BIND(moe_wait); BIND(moe_end); BIND(matmul); BIND(mla); BIND(router); BIND(shared); BIND(report); BIND(shutdown);
 #undef BIND
     { FARPROC fn = GetProcAddress(h, "k3cu_kda"); if (fn) memcpy(&p_kda, &fn, sizeof fn); else fprintf(stderr, "[K3-CUDA] coli_cuda_k3.dll has no k3cu_kda: KDA on the CPU\n"); }
+    { FARPROC fn = GetProcAddress(h, "k3cu_vision"); if (fn) memcpy(&p_vision, &fn, sizeof fn); else fprintf(stderr, "[K3-CUDA] coli_cuda_k3.dll has no k3cu_vision: pictures through the tower on the CPU\n"); }
     { FARPROC fn = GetProcAddress(h, "k3cu_mla_layer"); if (fn) memcpy(&p_mla_layer, &fn, sizeof fn); else fprintf(stderr, "[K3-CUDA] coli_cuda_k3.dll has no k3cu_mla_layer: the gated MLA call by call\n"); }
     { FARPROC fn = GetProcAddress(h, "k3cu_matmul_dev"); if (fn) memcpy(&p_matmul_dev, &fn, sizeof fn); else fprintf(stderr, "[K3-CUDA] coli_cuda_k3.dll has no k3cu_matmul_dev: coli_cuda.dll's kernels\n"); }
     { FARPROC fn = GetProcAddress(h, "k3cu_mla_mask"); if (fn) memcpy(&p_mla_mask, &fn, sizeof fn); else fprintf(stderr, "[K3-CUDA] coli_cuda_k3.dll has no k3cu_mla_mask: K3.1's sparse rows on the CPU\n"); }
@@ -119,5 +121,6 @@ int k3cu_shared(float *sd, const float *x, int S, int D, int I, const uint8_t *g
 }
 int k3cu_kda(const K3cuKda *a, const float *x, float *out) { return module && p_kda ? p_kda(a, x, out) : 0; }
 int k3cu_mla_layer(const K3cuMlaLayer *a, const float *x, float *out) { return module && p_mla_layer ? p_mla_layer(a, x, out) : 0; }
+int k3cu_vision(const K3cuVision *v, const uint8_t *rgb, int gh, int gw, float *rows) { return module && p_vision ? p_vision(v, rgb, gh, gw, rows) : 0; }
 void k3cu_report(void) { if (module) p_report(); }
 void k3cu_shutdown(void) { if (module) p_shutdown(); }

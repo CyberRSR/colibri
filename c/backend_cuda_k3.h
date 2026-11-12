@@ -143,6 +143,20 @@ typedef struct {
     float *Lc, *Rc;                           /* the layer's cache, [pos0+C][kvl] and [pos0+C][qr] */
 } K3cuMlaLayer;
 K3CU_API int k3cu_mla_layer(const K3cuMlaLayer *a, const float *x, float *out);
+/* Kimi K3.1's vision tower (k3_vision.h) for one picture: rgb [gh*patch][gw*patch][3] uint8 to
+ * rows [(gh/2)*(gw/2)][out], f32 throughout as the CPU's, its own order of the sums (not the CPU's
+ * bytes: the tower's are not kimi_k3.c's to keep). The weights are the host's bf16, a layer's
+ * sent up before the layer; nothing stays on the device. 0 when it cannot (too little free VRAM,
+ * or an older DLL: the loader) -- the CPU's then. */
+typedef struct {
+    int depth, d, heads, hd, qd, inter, out, patch, ph, pw;
+    float eps, peps;
+    const uint16_t *patch_w, *pos, *p0, *p2;    /* [d][3*patch*patch], [ph][pw][d], [4d][4d], [out][4d] */
+    const float *fnorm, *pnorm;
+    const float *const *n0, *const *n1;         /* [depth] each */
+    const uint16_t *const *qkv, *const *wo, *const *fc0, *const *fc1;
+} K3cuVision;
+K3CU_API int k3cu_vision(const K3cuVision *v, const uint8_t *rgb, int gh, int gw, float *rows);
 K3CU_API void k3cu_report(void);
 K3CU_API void k3cu_shutdown(void);
 #ifdef __cplusplus

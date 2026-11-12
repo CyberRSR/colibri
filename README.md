@@ -122,7 +122,10 @@ experts read per token: the drives' pace), the same request sent again starts an
 0.3 s, a new conversation with the same system prompt (16,500 tokens of instructions) in
 20 s instead of 220, and a conversation that another one interrupted, or that a restart of the
 server left behind, comes back from its file in seconds (27-32 s to its next reply, not 220);
-a long prompt whose client gave up resumes where it was when it is sent again. [How it runs](docs/kimi_k3.md#kimi-k31) ·
+a long prompt whose client gave up resumes where it was when it is sent again. It reads
+pictures -- a user's, a tool's screenshot (Kimi Code's Computer Use), several a conversation --
+through the checkpoint's own vision tower, 0.8 s a 1568 x 830 screenshot on the card
+([pictures](docs/kimi_k3.md#kimi-k31-pictures-k3_visionh-k3cu_vision)). [How it runs](docs/kimi_k3.md#kimi-k31) ·
 [the measurements](docs/experiments/kimi-k31-4090-2026-11-10/README.md).
 
 <details>

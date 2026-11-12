@@ -289,6 +289,49 @@ The phase now waits for the bus: the weights' copies took 54 s beside the old ke
 beside the tiles, whose outputs come down into the pinned rows faster (0.33 TB of a prompt against
 the weights' 1.34 TB up; on this machine the two directions together are slower than one).
 
+## Pictures (2026-11-12)
+
+Kimi K3.1's vision tower in the engine (`k3_vision.h`, `k3cu_vision`; docs/kimi_k3.md, "Kimi K3.1:
+pictures"). The oracle is Moonshot's own `MoonViT3dPretrainedModel` and `PatchMergerMLPV2`
+(`modeling_kimi_k3.py` of the Kimi-K3 release, the same vision_config; `tools/k3_vision_ref.py`)
+in f32 on the card, TF32 off, the real weights. Two synthetic pictures (`vision/small.png` 640 x
+400, `vision/big.png` 1568 x 830; `vision/shot2.png` 1280 x 720 for the agent):
+
+| | 640 x 400 (30 x 46 patches, 345 rows) | 1568 x 830 (60 x 112, 1,680 rows) |
+|---|---:|---:|
+| `k3_vision.h` (CPU) against the oracle, rows | 1.03e-5 relative | 1.27e-5 |
+| after the patches and positions / block 0 / the final norm | 5.6e-7 / 1.0e-6 / 8.7e-6 | |
+| `k3cu_vision` (GPU) against the oracle | | 1.34e-5 (1.50e-5 from the CPU's) |
+| the oracle in bf16 against itself in f32 | 4.34e-2 | |
+| the CPU's tower | 2.4 s | 18.1 s (matrices 6.7, attention 11.1) |
+| the GPU's, alone / inside the serve (20 GiB of dense matrices beside it) | | 0.76 / 0.76 s |
+
+The norms' eps (the tower's `nn.RMSNorm(hidden)` have none): the bf16 oracle is 4.3% from the f32
+one with FLT_EPSILON and 55% (the lowest row cosine 0.09) from one with bf16's 2^-7 -- the
+activations' mean squares going into the norms are 0.0005-0.3, so the eps is not a detail.
+FLT_EPSILON is what torch 2.15 uses in bf16 too, and what the model reads well with (below).
+
+`tools/kimi_image.py` gives the processor's pixels byte for byte (`vision/pre_check.py`: PNG, JPEG,
+RGBA, palette with and without transparency, grey, 6000 x 4000 at 16,590 rows, 5 x 3 at 1), and
+the engine's tokens decode to `encoding_k3.py`'s segments with the pads expanded
+(`vision/wire_check.py`: a user picture and a tool result's, 2,025 pads).
+
+Through the API (worktree build, `-Sessions 0`, a fresh expert cache; `raw/vision_api_cpu.txt`,
+`raw/vision_api_agent.txt`, `raw/vision_serve_*.txt`):
+
+- the 640 x 400 picture, "describe it": the title "LookRS232 - COM3 115200 8N1", the terminal's
+  seven lines word for word, the red circle, Connect and Send, "Baud: 115200" (391 prompt tokens,
+  the prompt 80 s, all of it the drives');
+- the screenshot from the user, title / baud rate / buttons: all three right (1,742 tokens,
+  179 s with the answer);
+- the screenshot as a tool result (Kimi Code's Computer Use shape): "Connect, Send, and Clear"
+  (1,921 tokens, 132 s; the rows from the cache);
+- an agent's two turns, GPU tower: after the first screenshot the model called the tool for the
+  settings window; with the second, "No, the LookRS232 window shows a baud rate of 115200, while
+  the serial port settings window shows 9600." The second turn restored the photo of the first
+  prompt's end (1,930 of 3,236 tokens, the first picture in it) and the tower ran only for the new
+  picture (0.65 s).
+
 ## Not done
 
 - **A large step's MoE waits for the bus.** 16,511 rows take 190 s where the drives need 105: the

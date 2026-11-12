@@ -1,0 +1,3 @@
+server up after 10 s
+== A [170.8, {"prompt_tokens": 1930, "completion_tokens": 45, "total_tokens": 1975}, null, [{"id": "call_5709f02858f64b62b885e1be", "type": "function", "function": {"name": "get_window_state", "arguments": "{\"window\": \"Serial Port Settings\"}"}}]]
+== B [137.9, {"prompt_tokens": 3236, "completion_tokens": 33, "total_tokens": 3269}, "No, the LookRS232 window shows a baud rate of 115200, while the serial port settings window shows 9600.", null]

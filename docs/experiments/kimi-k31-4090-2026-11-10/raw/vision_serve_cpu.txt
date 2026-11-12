@@ -1,0 +1,8 @@
+[K3-CUDA] dense: 372 of 1001 matrices on GPU 0, 20.00 of 31.32 GiB (budget 20.00 GiB, 22.49 free); their host copies released; the CPU's arithmetic there (coli_cuda_k3.dll)
+[K3-CUDA] experts: a prompt step's routed experts (steps of 32 rows or more) on GPU 0 beside the CPU, the CPU's bytes (K3_GPU_EXPERTS=0: the CPU's alone)
+[K3][RAM_GB=174.0] resident 12.4 GB + reserve 27.2 GB (page cache 2.5, activations 1.2, read-ahead 20.0, KV 24x4096 0.3, checkpoints 5 2.4) -> 134.4 GB for experts; cache 619->83/layer (17.5 MB/slot, 92 layers; projected peak 173.6 GB)
+[K3] init done in 7.2s | 93 layers | expert cache 83/layer (17.5 MB/slot) | RSS 33.9 GB
+[K3-VISION] the tower: 27 blocks of 1024 (12 heads of 128), projector to 7168, 0.89 GB of bf16 in 0.3s; a picture's rows replace id 163605
+[K3-VISION] a picture of 30x46 patches -> 345 rows in 2.4s (matrices 1.7, attention 0.7)
+[K3-VISION] the request's 1 picture(s): 1 through the tower, 0 from the cache, 0 in the reused prefix (2.4s)
+[K3] prompt of 391 tokens (0 reused) in 80.1s: attention 1.9s (MLA 0.4, K3.1's index keys and picks 0.0), MoE 77.7s (router and reads issued 0.4, latent 0.8, shared 2.3, routed experts computed 3.7, waiting for reads 71.7, their inputs 0.6, their sums 0.2)

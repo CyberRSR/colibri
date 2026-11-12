@@ -554,7 +554,8 @@ class TemplateTest(unittest.TestCase):
         import base64, builtins, tempfile
         from unittest import mock
         import image_engine
-        from openai_server import expand_dsv41_images, expand_glm53_images, expand_qwen38_images
+        from openai_server import (expand_dsv41_images, expand_glm53_images, expand_kimi_images,
+                                   expand_qwen38_images)
         png = image_engine.encode_png(32, 32, bytes(32 * 32 * 3), channels=3)
         uri = "data:image/png;base64," + base64.b64encode(png).decode()
         real_import = builtins.__import__
@@ -565,7 +566,8 @@ class TemplateTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             (Path(d) / "preprocessor_config.json").write_text(json.dumps(
                 {"patch_size": 16, "merge_size": 2, "temporal_patch_size": 2}), encoding="utf-8")
-            for expand in (expand_qwen38_images, expand_dsv41_images, expand_glm53_images):
+            for expand in (expand_qwen38_images, expand_dsv41_images, expand_glm53_images,
+                           expand_kimi_images):
                 with self.subTest(expand=expand.__name__), mock.patch("builtins.__import__", no_pictures):
                     with self.assertRaises(APIError) as caught:
                         expand([{"role": "user", "content": [
@@ -8580,6 +8582,126 @@ class ServedModalityTest(unittest.TestCase):
             with self.request(base, "/v1/messages", body) as response:
                 self.assertEqual(response.status, 200)
             self.assertIn("[the tool returned an image (image/png, about 3 bytes) here", engine.calls[-1][0])
+
+    def kimi_png(self, width, height):
+        try:
+            import base64
+            import numpy
+            from PIL import Image
+        except ImportError as missing:
+            self.skipTest(f"needs Pillow and numpy ({missing})")
+        buffer = io.BytesIO()
+        pixels = (numpy.arange(width * height * 3) % 251).astype("uint8").reshape(height, width, 3)
+        Image.fromarray(pixels).save(buffer, "PNG")
+        return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode()
+
+    def test_kimi_pictures_reach_the_tower_in_their_places(self):
+        """Kimi K3.1 with its tower (the engine's CAPS vision=1): every picture of the
+        conversation -- the user's and a tool result's, Kimi Code's Computer Use screenshot --
+        becomes an I piece of its turn (kimi_k3.c builds make_image_prompt's tokens and one
+        <|media_pad|> a row there) and an IMAGE frame of the processor's padded RGB, in the
+        conversation's order, several a request."""
+        pictures = []
+
+        class SeeingEngine(FakeEngine):
+            vision = True
+
+            def generate(self, prompt, *args, image=None, **kwargs):
+                pictures.append(image)
+                return FakeEngine.generate(self, prompt, *args, **kwargs)
+
+        user_shot, tool_shot = self.kimi_png(60, 40), self.kimi_png(100, 30)
+        call = {"id": "call_1", "type": "function", "function": {"name": "get_window_state", "arguments": "{}"}}
+        messages = [{"role": "user", "content": [{"type": "text", "text": "look"},
+                                                 {"type": "image_url", "image_url": {"url": user_shot}}]},
+                    {"role": "assistant", "content": "", "tool_calls": [call]},
+                    {"role": "tool", "tool_call_id": "call_1", "content": [
+                        {"type": "text", "text": "{title: 'LookRS232'}"},
+                        {"type": "image_url", "image_url": {"url": tool_shot}},
+                        {"type": "text", "text": "<extras/>"}]}]
+        with patch("openai_server.ARCH", "kimi"):
+            engine = SeeingEngine()
+            server = APIServer(("127.0.0.1", 0), engine, "test-model", "secret", 16, kv_slots=1)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+
+            def stop():
+                server.scheduler.close()
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+            self.addCleanup(stop)
+            base = f"http://127.0.0.1:{server.server_port}"
+            with self.request(base, "/v1/models") as response:
+                self.assertEqual(json.load(response)["data"][0]["input_modalities"], ["text", "image"])
+            with self.request(base, "/v1/chat/completions",
+                              {"model": "test-model", "messages": messages}) as response:
+                self.assertEqual(response.status, 200)
+        prompt = engine.calls[-1][0]
+        # 60x40: 84x56 padded, a 6x4 grid, 3x2 rows; 100x30: 112x56, 8x4, 4x2
+        self.assertIn("S user 2\nT 4\nlookI 60 40 6\n", prompt)
+        self.assertIn("R 1 16 3\nget_window_stateT 20\n{title: 'LookRS232'}I 100 30 8\nT 9\n<extras/>", prompt)
+        self.assertNotIn("base64", prompt)
+        frames = pictures[-1]
+        self.assertEqual([(gh, gw) for _rgb, gh, gw in frames], [(4, 6), (4, 8)])
+        self.assertEqual([rgb.shape for rgb, _gh, _gw in frames], [(56, 84, 3), (56, 112, 3)])
+        self.assertEqual(str(frames[0][0].dtype), "uint8")
+        self.assertEqual(int(frames[0][0][40:, :, :].max()), 0)    # the processor's black padding
+
+    def test_kimi_pictures_through_anthropic_messages(self):
+        """/v1/messages: a user's image block and a tool_result's picture (which rides the next
+        user turn) reach the tower as I pieces and IMAGE frames, as on the OpenAI path."""
+        pictures = []
+
+        class SeeingEngine(FakeEngine):
+            vision = True
+
+            def generate(self, prompt, *args, image=None, **kwargs):
+                pictures.append(image)
+                return FakeEngine.generate(self, prompt, *args, **kwargs)
+
+        shot = self.kimi_png(60, 40).split(",", 1)[1]
+        block = {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": shot}}
+        body = {"model": "test-model", "max_tokens": 16, "messages": [
+            {"role": "user", "content": [{"type": "text", "text": "what is this?"}, block]},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_1", "name": "Read",
+                                               "input": {"path": "a.png"}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1",
+                                          "content": [{"type": "text", "text": "a.png:"}, block]}]}]}
+        with patch("openai_server.ARCH", "kimi"):
+            engine = SeeingEngine()
+            server = APIServer(("127.0.0.1", 0), engine, "test-model", "secret", 16, kv_slots=1)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+
+            def stop():
+                server.scheduler.close()
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+            self.addCleanup(stop)
+            with self.request(f"http://127.0.0.1:{server.server_port}", "/v1/messages", body) as response:
+                self.assertEqual(response.status, 200)
+        prompt = engine.calls[-1][0]
+        self.assertEqual(prompt.count("I 60 40 6\n"), 2)
+        self.assertIn("S user 2\nT 13\nwhat is this?I 60 40 6\n", prompt)
+        self.assertEqual([(gh, gw) for _rgb, gh, gw in pictures[-1]], [(4, 6), (4, 6)])
+
+    def test_kimi_without_its_tower_keeps_r8s_lines(self):
+        """An engine that loaded no tower (CAPS vision=0: K3_VISION=0, or a checkpoint without
+        vision_tower.*): a tool's picture is a line in its result, a user's is refused -- the
+        family's image path does not refuse the whole conversation."""
+        shot = {"type": "image_url", "image_url": {"url": "data:image/png;base64," + "A" * 400}}
+        call = {"id": "call_1", "type": "function", "function": {"name": "t", "arguments": "{}"}}
+        with patch("openai_server.ARCH", "kimi"):
+            engine, base = self.serve(False)
+            with self.request(base, "/v1/chat/completions", {"model": "test-model", "messages": [
+                    {"role": "user", "content": "go"}, {"role": "assistant", "content": "", "tool_calls": [call]},
+                    {"role": "tool", "tool_call_id": "call_1", "content": [shot]}]}) as response:
+                self.assertEqual(response.status, 200)
+            self.assertIn("[the tool returned an image", engine.calls[-1][0])
+            with self.request(base, "/v1/models") as response:
+                self.assertEqual(json.load(response)["data"][0]["input_modalities"], ["text"])
 
     def test_tower_less_engine_refuses_a_picture_by_name(self):
         picture = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}

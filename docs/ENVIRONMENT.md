@@ -516,6 +516,13 @@ Read **only** by `c/kimi_k3.c`. The K3 engine has its own loader, cache and quan
 | `K3_SESSION_IDLE` | `30` | Seconds with no request before the live conversation is written to its file. |
 | `K3_SHARED_PAR` | `1` | Kimi K3/K3.1: a prompt step's shared experts on the card from a thread of their own, so the step's thread takes routed experts for the CPU from the start; `0` computes them on the step's thread first. |
 | `K3_DC_AHEAD` | `1` | Kimi K3/K3.1: the dense cache (`K3_DENSE_CACHE`) read ahead in order by threads of their own, up to 4 GB ahead of the load; `0` reads each matrix when the load asks for it. |
+| `K3_VISION` | `1` | Serve: Kimi K3.1's vision tower loaded when the checkpoint has one (`vision_tower.*`, 0.89 GB resident, set aside by the RAM plan); `0` serves text (`CAPS vision=0`). |
+| `K3_VISION_GPU` | `1` | Kimi K3.1: a picture through the tower on the card (`k3cu_vision`, when the card takes a prompt's experts and has the VRAM free), else the CPU (`k3_vision.h`, about 24 times slower); `0` keeps it on the CPU. |
+| `K3_VISION_MAX_PATCHES` | `16384` | Kimi K3.1: the most patches (14 x 14) a picture may have; past it the engine refuses it (`BAD_IMAGE`). |
+| `K3_IMAGE_CACHE` | `4` | Kimi K3.1: the pictures whose rows are kept by their hash for the next requests (at most 16). |
+| `K3_VISION_EPS` | `FLT_EPSILON` | Kimi K3.1: the tower's RMSNorm eps (the checkpoint's norms have none; see docs/kimi_k3.md). |
+| `K3_VISION_DUMP` | unset | Kimi K3.1 checks: the CPU tower writes `pe.f32`, `b0.f32`, `enc.f32` and `rows.f32` into this folder. |
+| `K3_MAX_IMAGE_TOKENS` | `4096` | Kimi K3.1, gateway: a picture's rows at most (the processor's own is 16,384); a larger picture is scaled down further. |
 | `K3_PIN_STEP` | `1` | Kimi K3/K3.1: a prompt step on the card registers its big host buffers with it (`cudaHostRegister`) while it runs, so `coli_cuda_k3.dll` moves their rows on a copy stream beside its kernels; `0` leaves them pageable (the driver stages every copy and the host waits for it). Same bytes either way. |
 | `K3_PIN_GB` | `16` | Kimi K3/K3.1: the most a prompt step registers, in GB; past it the rest stays pageable (a step of 16,384 rows registers 18 buffers, 11.0 GB). |
 | `K3_PIN_LOG` | `0` | Kimi K3/K3.1: `1` prints a line for each buffer a step registers. |

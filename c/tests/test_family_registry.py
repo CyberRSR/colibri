@@ -153,7 +153,7 @@ class FamilyRegistryTest(unittest.TestCase):
         for family_id, expected in (("glm53", True), ("qwen38", True), ("qwen36", True),
                                     ("deepseek_v41", True), ("mimo", True),
                                     ("glm", True),   # Mistral-Large-4's pictures (expand_ml4_images); GLM-5.2's engine says vision=0
-                                    ("kimi", False),
+                                    ("kimi", True),    # Kimi K3.1's pictures (expand_kimi_images)
                                     ("inkling", False), ("olmoe", False),
                                     ("deepseek_v4", False), ("qwen_image", False)):
             with self.subTest(family=family_id):
