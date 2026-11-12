@@ -13,7 +13,7 @@
   English · <a href="README.zh-CN.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.it.md">Italiano</a> · <a href="README.ja.md">日本語</a> · <a href="README.id.md">Bahasa Indonesia</a> · <a href="README.pt-BR.md">Português (Brasil)</a>
 </p>
 
-## Kimi K3.1 Pro, full, on one RTX 4090
+## Kimi K3.1 Pro full, on one RTX 4090
 
 [moonshotai/Kimi-K3.1-Pro](https://huggingface.co/moonshotai/Kimi-K3.1-Pro) unquantized beyond
 its own release: 2.8T parameters, 1.56 TB of MXFP4 experts and BF16, with its vision tower. One
