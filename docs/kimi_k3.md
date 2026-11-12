@@ -256,6 +256,7 @@ Judge quantization choices on real-text logits, not synthetic-vector norms.
 | `K3_PIN_STEP` | 1 | a prompt step on the card registers its big host buffers with it while it runs, and the card's calls move their rows beside their kernels (0: pageable, the driver stages every copy) |
 | `K3_PIN_GB` | 16 | the most a step registers (a step of 16,384 rows: 18 buffers, 11.0 GB) |
 | `K3_PIN_LOG` | 0 | 1: a line for each registration |
+| `K3_GPU_EXPERT_TILES` | 1 | a routed expert's piece of 32 rows or more in the tile kernels (k3_gu_t, k3_dn_t; 0: k3_gate_up and k3_down, the same bytes) |
 | `K3_LOGITS_DECODE` | 0 | the CLI's `K3_LOGITS` file keeps the decode's rows after the prompt's |
 | `K3_CANCEL_TEST` | 0 | tests: the N-th cancel poll of the serve's first prompt cancels it |
 | `K3_LAYERS` | all | truncate the stack (validation) |
@@ -900,9 +901,30 @@ r5, 205.5 / 205.2 s now -- the dense matrices the card does not hold 24.2 -> 13.
 8.5 -> 5.1, the KDA layers 38.9 -> 35.6, the MLA layers 26.4 -> 21.1, the shared experts 44.0 ->
 27.1 beside the routed experts, the experts' copies 67.6 -> 53.7. The same bytes: the 5,862-token
 prompt's logits are the CPU-only run's at every position (116.6 s, as r5's 117.1: that prompt waits
-for the drives) and the 16,511-token prompt's are the ones every release since r2 has had. What a
-large step waits for now is the card's exact kernels: the routed experts' 95-96 s of a step's MoE,
-of which the copies are 54.
+for the drives) and the 16,511-token prompt's are the ones every release since r2 has had.
+
+**The routed experts in tiles** (`K3_GPU_EXPERT_TILES`). `k3_gate_up` and `k3_down` gave a thread
+one lane of one output over 8 rows: each dp4a (4 products) cost two shared-memory loads and an
+int-to-float conversion (16 a clock an SM), and the weights were read again for every 8 rows -- 9-10
+TMAC/s at Kimi K3.1's widths. `k3_gu_t` and `k3_dn_t` take 32 rows and 64 outputs of gate and up
+(128 of down) a block, the weights decoded once into shared memory a stage of 128 columns at a
+time (e2m1 nibbles to int8 by byte permutes), the next stage loaded while this one computes; a
+thread holds all 8 lanes of 4 rows x 2 outputs of both matrices (4 x 4 of down), so one 16-byte
+load serves 8 or 16 dp4a, and a sum becomes a float by adding it to 1.5 x 2^23's bits (exact: a sum
+is at most 4 x 127 x 12). Each lane's fused adds and its tree are the old kernels' in the same
+order. `bench_ke.cu` (the experiment's folder), the old kernels / the tiles on one expert: 64 rows
+0.25 / 0.15 ms, 300 rows 1.09 / 0.55, 1,000 rows 3.18 / 1.58 (18-21 TMAC/s), every byte of gq, gs and
+y the same; under 32 rows the old ones stay (8 rows: 0.06 / 0.18 ms). A 16,511-token prompt, the two
+DLLs in turn: 224.3 / 202.8 s with r6's, 192.3 / 188.7 s with this one (the routed experts 92-105 ->
+82-83 s, waiting for a free slot 12-18 -> 6 s, the shared experts beside them 26-31 -> 22 s); the
+5,862-token prompt, which waits for the drives, 117.5 s. The same bytes on both prompts.
+
+What a large step's MoE waits for now is the bus. Its routed experts' weights go up (1.34 TB of a
+16,511-token prompt, 25 GB/s alone) while their outputs come down into the step's pinned rows (22.7
+M rows x 14 KB, 0.33 TB), and on this machine the two directions together are slower than one: the
+weights' copies took 54 s beside the old kernels and 60 s beside the tiles, of an 83 s phase. Summing
+a token's outputs on the card instead would need the step's outputs there (3.8 GB at 16,384 rows,
+beside 2-2.5 GB free), since the CPU's sum takes a token's experts in the union's order.
 
 Download and run on the 4090 machine: `tools/download_kimi_k31_pro_4090.ps1` (folders
 `C:\AI\Kimi-K3.1-Pro`, `D:\AI\Models\Kimi-K3.1-Pro`) and

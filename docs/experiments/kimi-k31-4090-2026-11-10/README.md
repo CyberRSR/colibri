@@ -252,11 +252,48 @@ time stamp and checksum. `tests/test_k3_cuda_experts --pin` runs every call with
 registered rows in several chunks, so a chunk reuses the buffers of the chunk two before it: the
 CPU's bytes.
 
+## The routed experts in tiles (2026-11-12)
+
+`k3_gu_t` and `k3_dn_t` (`backend_cuda_k3.cu`; `K3_GPU_EXPERT_TILES`) take a routed expert's piece
+of 32 rows or more: 32 rows and 64 outputs of gate and up (128 of down) a block, the weights decoded
+once into shared memory a stage at a time, all 8 lanes of 4 rows x 2-4 outputs a thread, a dp4a's sum
+made a float by adding it to 1.5 x 2^23's bits. `bench_ke.cu` on one random expert at K3.1's widths,
+the old kernels against the tiles, every byte of gq, gs and y the same:
+
+| rows | k3_gate_up + k3_down | k3_gu_t + k3_dn_t |
+|---:|---:|---:|
+| 8 | 0.061 ms (4.3 TMAC/s) | 0.180 ms (1.5) |
+| 32 | 0.175 ms (6.0) | 0.168 ms (6.3) |
+| 64 | 0.245 ms (8.6) | 0.154 ms (13.7) |
+| 300 | 1.088 ms (9.1) | 0.554 ms (17.9) |
+| 1,000 | 3.184 ms (10.4) | 1.577 ms (20.9) |
+
+On the model, r6's `kimi_k3.exe` (fc6b9154) with r6's DLL (1a4faee4) and with this one (314741c4),
+the 16,511-token prompt in turn (`raw/ke_ab_*`):
+
+| | r6's DLL | the tiles |
+|---|---:|---:|
+| the prompt | 224.3 / 202.8 s | 192.3 / 188.7 s |
+| the routed experts, computed | 104.8 / 91.7 s | 83.3 / 82.4 s |
+| their bytes copied / waiting for a slot | 59.3 / 18.0, 56.2 / 11.6 s | 60.3 / 6.3, 60.5 / 5.7 s |
+| the shared experts (beside them) | 30.9 / 25.8 s | 22.8 / 22.2 s |
+| experts the CPU took | 6,381 / 5,678 | 5,056 / 4,952 |
+
+(r6's first run is this series' slow one: its attention took 68 s against 55-61.) The same bytes:
+the 16,511-token prompt's logits are `p15k_16k.f32`'s (`raw/ke_15k_logits`, 243.3 s with them
+written, the attention 68 s there too) and the 5,862-token prompt's `g6k_cpu.f32`'s
+(`raw/ke_6k_logits`, 117.5 s: it waits for the drives, 16.5 s of its MoE); `tests/test_k3_cuda_experts`
+sends 5 of its 11 experts' pieces through the tiles, 0 of 5,526,528 outputs differ from the CPU's.
+
+The phase now waits for the bus: the weights' copies took 54 s beside the old kernels and 60 s
+beside the tiles, whose outputs come down into the pinned rows faster (0.33 TB of a prompt against
+the weights' 1.34 TB up; on this machine the two directions together are slower than one).
+
 ## Not done
 
-- **A large step waits for the card.** 16,511 rows take 205 s where the drives need 105: the
-  exact kernels run the KDA layers, the shared and the routed experts at about half of what
-  the tile kernels reach alone (the routed experts' 95-96 s of the step's MoE, of which their
-  copies are 54). Faster exact kernels are what is left.
+- **A large step's MoE waits for the bus.** 16,511 rows take 190 s where the drives need 105: the
+  routed experts' weights go up (1.34 TB) while their outputs come down (0.33 TB), 60 s of copies
+  in an 83 s phase. Their outputs summed on the card would need 3.8 GB of it at 16,384 rows (2-2.5
+  GB are free); faster kernels gain little more here.
 - The numbers of `docs/kimi_k3-4090.md` are Kimi K3's; its shards are no longer on this
   machine, so nothing here compares the two models on the same day.

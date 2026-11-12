@@ -266,6 +266,284 @@ __global__ void __launch_bounds__(256) k3_down(const uint8_t *__restrict__ w2p, 
     if (p0 + wr < r) y[(size_t)(p0 + wr) * LT + blockIdx.x * K3_TO + j] = sy[wr][j];
 }
 
+// ---- the routed experts in tiles: k3_gate_up's and k3_down's arithmetic, more of it a load -----------------
+// k3_gate_up and k3_down give a thread one lane of one output over 8 rows: each dp4a (4 products) costs two
+// shared-memory loads (the rows' 4 bytes and their scale) and an int-to-float conversion (16 a clock an SM),
+// and the weights are read again for every 8 rows. Here a block takes 32 rows and 64 outputs of gate and up
+// (128 of down), its weights decoded once into shared memory a stage of 4 groups (128 columns) at a time, the
+// next stage loaded while this one computes; a thread holds all 8 lanes of 4 rows x 2 outputs of both matrices
+// (4 x 4 of down), so one 16-byte load of a row's or an output's bytes serves 8 or 16 dp4a. A dp4a's sum
+// becomes a float by adding it to 1.5 * 2^23's bits and taking 1.5 * 2^23 off (exact below 2^22; a sum is at
+// most 4 * 127 * 12). Every lane's fused adds over the groups are k3_gate_up's, in the same order, and its tree
+// is k3d_hsum8's: the same bytes.
+#define KE_BR 32                 // rows a block
+#define KE_S 4                   // groups of 32 columns a stage
+#define KE_LD 144                // a staged row's bytes: KE_S * 32 and 16 of padding (no bank conflicts)
+#define KE_XB (KE_BR * KE_LD)
+#define KE_WB (128 * KE_LD)
+#define KE_SB (KE_S * KE_BR * 4)
+#define KE_HB (KE_S * 256 * 4)
+#define KE_BUF (KE_XB + KE_WB + KE_SB + KE_HB)
+#define KE_SMEM (2 * KE_BUF)
+#define KE_MAGIC 0x4B400000      // 1.5 * 2^23
+
+__device__ __forceinline__ float ke_f(int d) { return __fsub_rn(__int_as_float(d), 12582912.0f); }
+// 4 e2m1 nibbles (the low 16 bits, the first column lowest) as k3d_lut_init's 4 int8 values
+__device__ __forceinline__ uint32_t ke_dec4(uint32_t sel) {
+    const uint32_t s = sel & 0x7777u;
+    const uint32_t p = __byte_perm(0x03020100u, 0x0C080604u, s), n = __byte_perm(0xFDFEFF00u, 0xF4F8FAFCu, s);
+    const uint32_t m = __byte_perm(0u, 0xFFFFFFFFu, (sel >> 1) & 0x4444u);
+    return (p & ~m) | (n & m);
+}
+// a group's 16 packed bytes as 32 int8 into d (32 bytes, 16-byte aligned)
+__device__ __forceinline__ void ke_dec_group(uint4 v, uint8_t *d) {
+    uint4 a, b;
+    a.x = ke_dec4(v.x); a.y = ke_dec4(v.x >> 16); a.z = ke_dec4(v.y); a.w = ke_dec4(v.y >> 16);
+    b.x = ke_dec4(v.z); b.y = ke_dec4(v.z >> 16); b.z = ke_dec4(v.w); b.w = ke_dec4(v.w >> 16);
+    *(uint4 *)d = a; *(uint4 *)(d + 16) = b;
+}
+__device__ __forceinline__ float ke_tree(const float *a) {   // k3d_hsum8's pairs
+    return __fadd_rn(__fadd_rn(__fadd_rn(a[0], a[4]), __fadd_rn(a[2], a[6])), __fadd_rn(__fadd_rn(a[1], a[5]), __fadd_rn(a[3], a[7])));
+}
+__device__ __forceinline__ int ke_w(const int4 &v, int k) { return k == 0 ? v.x : k == 1 ? v.y : k == 2 ? v.z : v.w; }
+
+// The staging a stage: the x rows (32 x 128 bytes, a thread 16), their scales (threads 0..127), the weights
+// (128 outputs' rows -- gate's 64 then up's, or down's 128 -- of 4 groups: a thread 32 packed bytes, two groups)
+// and their scales as floats (k3_gate_up's h). hidx(o, g): where output o's h goes in the stage's h.
+struct KeStage {
+    int4 rx; uint4 rw0, rw1; uint8_t e0, e1; float rs;
+};
+// gate and up of rows p0.. (blockIdx.y * 32) for outputs o0 .. o0 + 63 (blockIdx.x), SiTU, mxfp4_qx's
+// quantization: k3_gate_up's bytes. LT % 128 == 0, MI % 64 == 0.
+__global__ void __launch_bounds__(256, 1) k3_gu_t(const uint8_t *__restrict__ w1p, const uint8_t *__restrict__ w1s,
+                                                  const uint8_t *__restrict__ w3p, const uint8_t *__restrict__ w3s,
+                                                  const int8_t *__restrict__ zq, const float *__restrict__ zs,
+                                                  const int *__restrict__ rows, int r, int LT, int MI, float b1, float b2,
+                                                  int8_t *__restrict__ gq, float *__restrict__ gs) {
+    extern __shared__ __align__(16) uint8_t smem[];
+    const int tid = threadIdx.x, wp = tid >> 5, ln = tid & 31, rq = ln & 7, opl = ln >> 3;
+    const int ng = LT >> 5, ns = ng / KE_S;
+    const int o0 = blockIdx.x * 64, p0 = blockIdx.y * KE_BR;
+    // staging threads
+    const int sxr = tid >> 3, sxc = tid & 7;
+    const int sxp = p0 + sxr < r ? p0 + sxr : r - 1;
+    const int8_t *xsrc = zq + (size_t)(rows ? rows[sxp] : sxp) * LT + sxc * 16;
+    const int ssr = tid & 31, ssg = (tid >> 5) & 3;
+    const int ssp = p0 + ssr < r ? p0 + ssr : r - 1;
+    const float *ssrc = zs + (size_t)(rows ? rows[ssp] : ssp) * ng + ssg;
+    const int sidx = ssg * KE_BR + (ssr & 7) * 4 + (ssr >> 3);   // rows rq + 8 i at rq * 4 + i
+    const int wm = tid >> 7, wo = (tid >> 1) & 63, wh = tid & 1;
+    const uint8_t *wsrc = (wm ? w3p : w1p) + (size_t)(o0 + wo) * (LT >> 1) + wh * 32;
+    const uint8_t *esrc = (wm ? w3s : w1s) + (size_t)(o0 + wo) * ng + wh * 2;
+    // output wo = 8 ow + ol + 4 j: its h at (ow * 4 + ol) * 4 + m * 2 + j of a group's 256
+    const int hidx = (((wo >> 3) * 4 + (wo & 3)) * 4) + wm * 2 + ((wo >> 2) & 1);
+    KeStage st;
+    auto ldg = [&](int s) {
+        st.rx = *(const int4 *)(xsrc + s * 128);
+        st.rw0 = *(const uint4 *)(wsrc + s * 64); st.rw1 = *(const uint4 *)(wsrc + s * 64 + 16);
+        st.e0 = esrc[s * KE_S]; st.e1 = esrc[s * KE_S + 1];
+        if (tid < 128) st.rs = ssrc[s * KE_S];
+    };
+    auto sts = [&](int b) {
+        uint8_t *B = smem + b * KE_BUF;
+        *(int4 *)(B + sxr * KE_LD + sxc * 16) = st.rx;
+        uint8_t *W = B + KE_XB + (wm * 64 + wo) * KE_LD + wh * 64;
+        ke_dec_group(st.rw0, W); ke_dec_group(st.rw1, W + 32);
+        float *H = (float *)(B + KE_XB + KE_WB + KE_SB);
+        H[(2 * wh) * 256 + hidx] = __fmul_rn(__uint_as_float((uint32_t)st.e0 << 23), 0.5f);
+        H[(2 * wh + 1) * 256 + hidx] = __fmul_rn(__uint_as_float((uint32_t)st.e1 << 23), 0.5f);
+        if (tid < 128) ((float *)(B + KE_XB + KE_WB))[sidx] = st.rs;
+    };
+    float acc[2][2][4][8];
+#pragma unroll
+    for (int m = 0; m < 2; m++)
+#pragma unroll
+        for (int j = 0; j < 2; j++)
+#pragma unroll
+            for (int i = 0; i < 4; i++)
+#pragma unroll
+                for (int l = 0; l < 8; l++) acc[m][j][i][l] = 0.0f;
+    ldg(0); sts(0);
+    __syncthreads();
+    for (int s = 0; s < ns; s++) {
+        const int b = s & 1;
+        if (s + 1 < ns) ldg(s + 1);
+        const uint8_t *X = smem + b * KE_BUF, *W = X + KE_XB;
+        const float *S = (const float *)(W + KE_WB), *H = S + KE_S * KE_BR;
+#pragma unroll
+        for (int g = 0; g < KE_S; g++) {
+            const float4 xs4 = *(const float4 *)(S + g * KE_BR + rq * 4);
+            const float4 h4 = *(const float4 *)(H + g * 256 + (wp * 4 + opl) * 4);
+            const float xs[4] = {xs4.x, xs4.y, xs4.z, xs4.w}, hh[2][2] = {{h4.x, h4.y}, {h4.z, h4.w}};
+            float hx[2][2][4];
+#pragma unroll
+            for (int m = 0; m < 2; m++)
+#pragma unroll
+                for (int j = 0; j < 2; j++)
+#pragma unroll
+                    for (int i = 0; i < 4; i++) hx[m][j][i] = __fmul_rn(hh[m][j], xs[i]);
+#pragma unroll
+            for (int half = 0; half < 2; half++) {
+                int4 xv[4], wv[2][2];
+#pragma unroll
+                for (int i = 0; i < 4; i++) xv[i] = *(const int4 *)(X + (rq + 8 * i) * KE_LD + g * 32 + half * 16);
+#pragma unroll
+                for (int m = 0; m < 2; m++)
+#pragma unroll
+                    for (int j = 0; j < 2; j++)
+                        wv[m][j] = *(const int4 *)(W + (m * 64 + wp * 8 + opl + 4 * j) * KE_LD + g * 32 + half * 16);
+#pragma unroll
+                for (int k = 0; k < 4; k++)
+#pragma unroll
+                    for (int m = 0; m < 2; m++)
+#pragma unroll
+                        for (int j = 0; j < 2; j++)
+#pragma unroll
+                            for (int i = 0; i < 4; i++)
+                                acc[m][j][i][half * 4 + k] = __fmaf_rn(ke_f(__dp4a(ke_w(wv[m][j], k), ke_w(xv[i], k), KE_MAGIC)),
+                                                                       hx[m][j][i], acc[m][j][i][half * 4 + k]);
+            }
+        }
+        if (s + 1 < ns) sts(b ^ 1);
+        __syncthreads();
+    }
+    // SiTU into [32 rows][65], then a warp quantizes 8 (row, group of 32 outputs)
+    float *E = (float *)smem;
+#pragma unroll
+    for (int j = 0; j < 2; j++)
+#pragma unroll
+        for (int i = 0; i < 4; i++)
+            E[(rq + 8 * i) * 65 + wp * 8 + opl + 4 * j] = k3d_situ(ke_tree(acc[0][j][i]), ke_tree(acc[1][j][i]), b1, b2);
+    __syncthreads();
+    for (int u = 0; u < 8; u++) {
+        const int row = wp * 4 + (u >> 1), grp = u & 1;
+        if (p0 + row >= r) continue;   // the same for the whole warp
+        const float x = E[row * 65 + grp * 32 + ln];
+        float am = fabsf(x);
+        am = am > 0.0f ? am : 0.0f;
+#pragma unroll
+        for (int sh = 16; sh; sh >>= 1) am = fmaxf(am, __shfl_xor_sync(0xffffffffu, am, sh));
+        float sc = __fdiv_rn(am, 127.0f);
+        if (sc < 1e-20f) sc = 1e-20f;
+        const float inv = __fdiv_rn(1.0f, sc), pr = __fmul_rn(x, inv);
+        int v = pr != pr ? -127 : __float2int_rn(pr);
+        v = v > 127 ? 127 : v < -127 ? -127 : v;
+        gq[(size_t)(p0 + row) * MI + o0 + grp * 32 + ln] = (int8_t)v;
+        if (ln == 0) gs[(size_t)(p0 + row) * (MI >> 5) + (o0 >> 5) + grp] = sc;
+    }
+}
+// down of rows p0.. for outputs o0 .. o0 + 127: gq/gs [r][MI] -> y [r][LT], k3_down's bytes. MI % 128 == 0,
+// LT % 128 == 0. y is the caller's pinned memory: a warp writes whole 128-byte pieces of a row.
+__global__ void __launch_bounds__(256, 1) k3_dn_t(const uint8_t *__restrict__ w2p, const uint8_t *__restrict__ w2s,
+                                                  const int8_t *__restrict__ gq, const float *__restrict__ gs,
+                                                  int r, int MI, int LT, float *__restrict__ y) {
+    extern __shared__ __align__(16) uint8_t smem[];
+    const int tid = threadIdx.x, wp = tid >> 5, ln = tid & 31, rq = ln & 7, opl = ln >> 3;
+    const int ng = MI >> 5, ns = ng / KE_S;
+    const int o0 = blockIdx.x * 128, p0 = blockIdx.y * KE_BR;
+    const int sxr = tid >> 3, sxc = tid & 7;
+    const int sxp = p0 + sxr < r ? p0 + sxr : r - 1;
+    const int8_t *xsrc = gq + (size_t)sxp * MI + sxc * 16;
+    const int ssr = tid & 31, ssg = (tid >> 5) & 3;
+    const int ssp = p0 + ssr < r ? p0 + ssr : r - 1;
+    const float *ssrc = gs + (size_t)ssp * ng + ssg;
+    const int sidx = ssg * KE_BR + (ssr & 7) * 4 + (ssr >> 3);
+    const int wo = tid >> 1, wh = tid & 1;
+    const uint8_t *wsrc = w2p + (size_t)(o0 + wo) * (MI >> 1) + wh * 32;
+    const uint8_t *esrc = w2s + (size_t)(o0 + wo) * ng + wh * 2;
+    // output wo = 16 ow + ol + 4 j: its h at (ow * 4 + ol) * 4 + j of a group's 128
+    const int hidx = ((wo >> 4) * 4 + (wo & 3)) * 4 + ((wo >> 2) & 3);
+    KeStage st;
+    auto ldg = [&](int s) {
+        st.rx = *(const int4 *)(xsrc + s * 128);
+        st.rw0 = *(const uint4 *)(wsrc + s * 64); st.rw1 = *(const uint4 *)(wsrc + s * 64 + 16);
+        st.e0 = esrc[s * KE_S]; st.e1 = esrc[s * KE_S + 1];
+        if (tid < 128) st.rs = ssrc[s * KE_S];
+    };
+    auto sts = [&](int b) {
+        uint8_t *B = smem + b * KE_BUF;
+        *(int4 *)(B + sxr * KE_LD + sxc * 16) = st.rx;
+        uint8_t *W = B + KE_XB + wo * KE_LD + wh * 64;
+        ke_dec_group(st.rw0, W); ke_dec_group(st.rw1, W + 32);
+        float *H = (float *)(B + KE_XB + KE_WB + KE_SB);
+        H[(2 * wh) * 128 + hidx] = __fmul_rn(__uint_as_float((uint32_t)st.e0 << 23), 0.5f);
+        H[(2 * wh + 1) * 128 + hidx] = __fmul_rn(__uint_as_float((uint32_t)st.e1 << 23), 0.5f);
+        if (tid < 128) ((float *)(B + KE_XB + KE_WB))[sidx] = st.rs;
+    };
+    float acc[4][4][8];
+#pragma unroll
+    for (int j = 0; j < 4; j++)
+#pragma unroll
+        for (int i = 0; i < 4; i++)
+#pragma unroll
+            for (int l = 0; l < 8; l++) acc[j][i][l] = 0.0f;
+    ldg(0); sts(0);
+    __syncthreads();
+    for (int s = 0; s < ns; s++) {
+        const int b = s & 1;
+        if (s + 1 < ns) ldg(s + 1);
+        const uint8_t *X = smem + b * KE_BUF, *W = X + KE_XB;
+        const float *S = (const float *)(W + KE_WB), *H = S + KE_S * KE_BR;
+#pragma unroll
+        for (int g = 0; g < KE_S; g++) {
+            const float4 xs4 = *(const float4 *)(S + g * KE_BR + rq * 4);
+            const float4 h4 = *(const float4 *)(H + g * 128 + (wp * 4 + opl) * 4);
+            const float xs[4] = {xs4.x, xs4.y, xs4.z, xs4.w}, hh[4] = {h4.x, h4.y, h4.z, h4.w};
+            float hx[4][4];
+#pragma unroll
+            for (int j = 0; j < 4; j++)
+#pragma unroll
+                for (int i = 0; i < 4; i++) hx[j][i] = __fmul_rn(hh[j], xs[i]);
+#pragma unroll
+            for (int half = 0; half < 2; half++) {
+                int4 xv[4], wv[4];
+#pragma unroll
+                for (int i = 0; i < 4; i++) xv[i] = *(const int4 *)(X + (rq + 8 * i) * KE_LD + g * 32 + half * 16);
+#pragma unroll
+                for (int j = 0; j < 4; j++) wv[j] = *(const int4 *)(W + (wp * 16 + opl + 4 * j) * KE_LD + g * 32 + half * 16);
+#pragma unroll
+                for (int k = 0; k < 4; k++)
+#pragma unroll
+                    for (int j = 0; j < 4; j++)
+#pragma unroll
+                        for (int i = 0; i < 4; i++)
+                            acc[j][i][half * 4 + k] = __fmaf_rn(ke_f(__dp4a(ke_w(wv[j], k), ke_w(xv[i], k), KE_MAGIC)),
+                                                                hx[j][i], acc[j][i][half * 4 + k]);
+            }
+        }
+        if (s + 1 < ns) sts(b ^ 1);
+        __syncthreads();
+    }
+    float *E = (float *)smem;   // [32 rows][129]
+#pragma unroll
+    for (int j = 0; j < 4; j++)
+#pragma unroll
+        for (int i = 0; i < 4; i++) E[(rq + 8 * i) * 129 + wp * 16 + opl + 4 * j] = ke_tree(acc[j][i]);
+    __syncthreads();
+    for (int u = 0; u < 4; u++) {
+        const int row = wp * 4 + u;
+        if (p0 + row >= r) break;
+#pragma unroll
+        for (int k = 0; k < 4; k++) y[(size_t)(p0 + row) * LT + o0 + k * 32 + ln] = E[row * 129 + k * 32 + ln];
+    }
+}
+// K3_GPU_EXPERT_TILES (default 1): an expert's piece of KE_MINROWS rows or more in the tiles (bench_ke.cu at
+// K3.1's widths, the old kernels / the tiles: 64 rows 0.25 / 0.15 ms, 300 rows 1.09 / 0.55, 1,000 rows 3.18 /
+// 1.58; at 32 rows the same, at 8 the old ones 3x faster); 0: k3_gate_up and k3_down for every piece
+#define KE_MINROWS 32
+static int ke_on(int LT, int MI) {
+    static int m = -1;
+    if (m < 0) {
+        const char *e = getenv("K3_GPU_EXPERT_TILES");
+        m = (!e || !*e || atoi(e) != 0) &&
+            cudaFuncSetAttribute(k3_gu_t, cudaFuncAttributeMaxDynamicSharedMemorySize, KE_SMEM) == cudaSuccess &&
+            cudaFuncSetAttribute(k3_dn_t, cudaFuncAttributeMaxDynamicSharedMemorySize, KE_SMEM) == cudaSuccess;
+        cudaGetLastError();
+    }
+    return m && LT % 128 == 0 && MI % 128 == 0;
+}
+static unsigned long long n_ke;   // pieces the tiles took
+
 // ---- the dense matrices the device does not hold, in the CPU's arithmetic ------------------------
 // matmul_i4_grouped (fmt 4): a row's output is, group by group, 8 lanes summing x[i+l] times the
 // weight (its nibble less 8) and then x[i+8+l] times its weight, for each 16 columns, fused; the
@@ -1347,9 +1625,16 @@ extern "C" int k3cu_moe_expert(const uint8_t *bytes, const int *rows, int r, int
         // the piece's rows: a synchronous copy from pageable memory is done when it returns,
         // and the slot's stream orders it behind the slot's kernels before
         if (!checked(cudaMemcpyAsync(s->rows, rows + p, (size_t)pr * sizeof(int), cudaMemcpyHostToDevice, s->s), "expert rows")) return 0;
-        dim3 g1((unsigned)(m_MI / K3_TO), (unsigned)((pr + K3_TP - 1) / K3_TP)), g2((unsigned)(m_LT / K3_TO), (unsigned)((pr + K3_TP - 1) / K3_TP));
-        k3_gate_up<<<g1, 256, s1, s->s>>>(w1p, w1s, w3p, w3s, d_zq, d_zs, s->rows, pr, m_LT, m_MI, m_b1, m_b2, s->gq, s->gs);
-        k3_down<<<g2, 256, s2, s->s>>>(w2p, w2s, s->gq, s->gs, pr, m_MI, m_LT, m_Ydev + (size_t)(pair0 + p) * m_LT);
+        if (pr >= KE_MINROWS && ke_on(m_LT, m_MI)) {
+            dim3 t1((unsigned)(m_MI / 64), (unsigned)((pr + KE_BR - 1) / KE_BR)), t2((unsigned)(m_LT / 128), (unsigned)((pr + KE_BR - 1) / KE_BR));
+            k3_gu_t<<<t1, 256, KE_SMEM, s->s>>>(w1p, w1s, w3p, w3s, d_zq, d_zs, s->rows, pr, m_LT, m_MI, m_b1, m_b2, s->gq, s->gs);
+            k3_dn_t<<<t2, 256, KE_SMEM, s->s>>>(w2p, w2s, s->gq, s->gs, pr, m_MI, m_LT, m_Ydev + (size_t)(pair0 + p) * m_LT);
+            n_ke++;
+        } else {
+            dim3 g1((unsigned)(m_MI / K3_TO), (unsigned)((pr + K3_TP - 1) / K3_TP)), g2((unsigned)(m_LT / K3_TO), (unsigned)((pr + K3_TP - 1) / K3_TP));
+            k3_gate_up<<<g1, 256, s1, s->s>>>(w1p, w1s, w3p, w3s, d_zq, d_zs, s->rows, pr, m_LT, m_MI, m_b1, m_b2, s->gq, s->gs);
+            k3_down<<<g2, 256, s2, s->s>>>(w2p, w2s, s->gq, s->gs, pr, m_MI, m_LT, m_Ydev + (size_t)(pair0 + p) * m_LT);
+        }
         if (!checked(cudaGetLastError(), "expert kernels")) return 0;
         if (p + K3_RCAP < r && !checked(cudaStreamSynchronize(s->s), "expert pieces")) return 0;   // rows' room reused
     }
@@ -2283,6 +2568,7 @@ extern "C" void k3cu_report(void) {
         fprintf(stderr, "[K3-CUDA] experts: %llu steps, %llu experts, %llu rows on the GPU; copying their bytes %.1fs, waiting for slots %.1fs%s\n",
                 n_steps, n_experts, n_rows, t_copy, t_wait, failed ? "; the device failed" : "");
     if (n_pipe) fprintf(stderr, "[K3-CUDA] %llu calls moved their rows from registered memory beside their kernels\n", n_pipe);
+    if (n_ke) fprintf(stderr, "[K3-CUDA] %llu experts' pieces of %d rows or more in the tiles (k3_gu_t, k3_dn_t)\n", n_ke, KE_MINROWS);
     if (n_mm) fprintf(stderr, "[K3-CUDA] the dense matrices the GPU does not hold: %llu matmuls, %llu rows, %.1fs\n", n_mm, n_mm_rows, t_mm);
     if (n_mmd) fprintf(stderr, "[K3-CUDA] the dense matrices the GPU holds, one by one: %llu matmuls, %llu rows, %.1fs\n", n_mmd, n_mmd_rows, t_mmd);
     if (n_mla) fprintf(stderr, "[K3-CUDA] the gated MLA's attention: %llu layer steps (%llu of them K3.1's selections, %llu rows of "
