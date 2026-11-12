@@ -9,7 +9,7 @@ row attends only the 2,048 earlier rows its layer's indexer scores highest. Ever
 format) is K3's. Sources: the model card and TokenSpeed's implementation,
 [lightseekorg/tokenspeed#3015](https://github.com/lightseekorg/tokenspeed/pull/3015).
 
-**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r7: `kimi_k3.exe` and
+**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r8: `kimi_k3.exe` and
 `coli_cuda_k3.dll` here were built on the RTX 4090 machine and checked there on the model
 itself (BUILD-INFO-K31.txt: the commit, the toolchain, the checks). Release kimi-k3-4090-r1's
 `kimi_k3.exe` does not read `dsa_config`: it would run every MLA layer dense, which is K3.1's
@@ -165,6 +165,16 @@ What release r7 adds (2026-11-12; the bytes kept again):
   A 16,511-token prompt 205 -> 190 s; the routed experts' part of it now waits for the bus (their
   weights going up while their outputs come down). Only `coli_cuda_k3.dll` changed;
   `K3_GPU_EXPERT_TILES=0` keeps the old kernels.
+
+What release r8 adds (2026-11-12):
+
+- **A tool's picture no longer stops the conversation.** Kimi Code's Computer Use tool answers
+  with a window's state as text and a screenshot; the model reads text only, and the gateway
+  refused the whole request with HTTP 400 ("Colibri currently supports text message content
+  only."), which stopped the agent mid-task. The screenshot now becomes a line in the tool's
+  result saying an image was there and is not shown, and the tool's text reaches the model. A
+  picture the user sends is still refused, and the server's log now names the reason of every
+  4xx it answers. Only `openai_server.py` changed.
 
 ---
 

@@ -1,7 +1,7 @@
 Kimi K3.1 Pro on the RTX 4090 beside MiMo-V2.6-Pro (release mimo-pro-4090-r7), 2026-11-12
-Release kimi-k31-pro-4090-r7: kimi-k31-pro-4090-r6's install with a new coli_cuda_k3.dll -- the routed experts on the
-card in tile kernels (a 16,511-token prompt 205 -> 190 s), the same bytes. kimi_k3.exe, the launcher and
-openai_server.py are r6's. BUILD-INFO-K31.txt carries the pair's commit, toolchain and checks.
+Release kimi-k31-pro-4090-r8: kimi-k31-pro-4090-r7's install with a new openai_server.py (commit 3eb9f5df) -- a
+picture in a tool result no longer stops a conversation with HTTP 400 (it becomes a line saying an image was there).
+kimi_k3.exe, coli_cuda_k3.dll and the launcher are r7's. BUILD-INFO-K31.txt carries the pair's commit, toolchain and checks.
 A pair older than K3.1's indexer loads, answers and is correct to the bit, but scores every MLA layer's prompt on the
 CPU, so the launcher refuses to start with one.
 

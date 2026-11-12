@@ -3794,6 +3794,57 @@ def qwen36_has_vision(model_dir):
     return isinstance(meta, dict) and isinstance(meta.get("vision"), dict)
 
 
+class ToolPicture(dict):
+    """A picture out of an Anthropic tool_result block, which rides the next user turn (the
+    tool role is text): the same part as any other (equal to it, the same JSON), but a
+    text-only family can tell it from one the user sent."""
+
+
+def _tool_part_note(part):
+    """The line a tool result's non-text part becomes for a text-only model."""
+    kind = part.get("type")
+    media = None
+    image = part.get("image_url")
+    url = image.get("url") if isinstance(image, dict) else image if isinstance(image, str) else None
+    if url is None and isinstance(part.get("image_url"), str):
+        url = part["image_url"]
+    if isinstance(url, str) and url.startswith("data:"):
+        media = url[5:].split(";", 1)[0].split(",", 1)[0] or None
+        payload = url.split(",", 1)[1] if "," in url else ""
+        size = len(payload) * 3 // 4 if ";base64" in url.split(",", 1)[0] else len(payload)
+        what = f"an image ({media or 'unknown type'}, about {size} bytes)"
+    elif kind in ("image_url", "input_image", "image"):
+        what = "an image"
+    else:
+        what = f"a {kind!s} part"
+    return (f"\n[the tool returned {what} here; this model reads text only, so it is not shown]\n")
+
+
+def text_only_tool_results(messages):
+    """For an engine family with no image path: each non-text part of a tool result -- a
+    screenshot an MCP tool returned, say -- becomes a line saying what was there, so the
+    conversation goes on with the tool's text instead of stopping on HTTP 400. A picture the
+    user sent is left alone (content_text() refuses it by name); one Anthropic's conversion
+    carried out of a tool_result block (a ToolPicture) becomes a line too."""
+    if not isinstance(messages, list):
+        return messages
+    out = []
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, list):
+            role = message.get("role")
+
+            def dropped(part):
+                return (isinstance(part, dict) and part.get("type") not in ("text", "input_text")
+                        and (role == "tool" or isinstance(part, ToolPicture)))
+            if any(dropped(part) for part in content):
+                message = dict(message, content=[
+                    {"type": "text", "text": _tool_part_note(part)} if dropped(part) else part
+                    for part in content])
+        out.append(message)
+    return out
+
+
 def has_image_parts(messages):
     """Whether any message carries a picture part (the shapes expand_*_images() read)."""
     for message in messages if isinstance(messages, list) else ():
@@ -5046,7 +5097,7 @@ def anthropic_to_openai(body):
                 if pictures and role != "user":
                     raise APIError(400, "`image` blocks are valid only in user messages.",
                                    where, "unsupported_content_type")
-                carried.extend(pictures)
+                carried.extend(ToolPicture(picture) for picture in pictures)   # a line for a text-only family
             else:
                 raise APIError(400, "Colibri supports `text`, `image`, `tool_use` and "
                                "`tool_result` content blocks only.", f"{where}.type",
@@ -8510,6 +8561,11 @@ class APIHandler(BaseHTTPRequestHandler):
             else:
                 raise APIError(404, "Not found.", None, "not_found")
         except APIError as error:
+            if 400 <= error.status < 500 and error.status not in (401, 404, 429):
+                # the access line says only "400": the reason, so the server's log tells why a
+                # client stopped (a tool result's picture once looked like a crash from there)
+                self.log_error("%d %s%s", error.status, error.message,
+                               f" ({error.param})" if error.param else "")
             self._fail(error, request_id)
         except ClientCancelled:
             pass
@@ -9892,7 +9948,8 @@ class APIHandler(BaseHTTPRequestHandler):
             messages, images = expand_qwen38_images(messages, model_dir,
                                                     int(ceiling) if ceiling else None)
         else:
-            return messages, None
+            # no image path for this family: a tool's picture becomes a line in its result
+            return text_only_tool_results(messages), None
         if len(images) > 1:
             raise APIError(400, "one image per request for now; the engine "
                                 "holds a single pending image.", "messages")
