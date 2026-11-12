@@ -1,11 +1,11 @@
 Kimi K3.1 Pro on the RTX 4090 beside MiMo-V2.6-Pro (release mimo-pro-4090-r7), 2026-11-12
-Release kimi-k31-pro-4090-r6: kimi-k31-pro-4090-r5's install with a new kimi_k3.exe and coli_cuda_k3.dll -- a large
-prompt step's rows move beside the card's kernels (a 16,511-token prompt 228 -> 205 s), the same bytes. The launcher
-and openai_server.py are r5's. BUILD-INFO-K31.txt carries the pair's commit, toolchain and checks.
+Release kimi-k31-pro-4090-r7: kimi-k31-pro-4090-r6's install with a new coli_cuda_k3.dll -- the routed experts on the
+card in tile kernels (a 16,511-token prompt 205 -> 190 s), the same bytes. kimi_k3.exe, the launcher and
+openai_server.py are r6's. BUILD-INFO-K31.txt carries the pair's commit, toolchain and checks.
 A pair older than K3.1's indexer loads, answers and is correct to the bit, but scores every MLA layer's prompt on the
 CPU, so the launcher refuses to start with one.
 
-kimi_k3.exe and coli_cuda_k3.dll: release kimi-k31-pro-4090-r6; see BUILD-INFO-K31.txt
+kimi_k3.exe: release kimi-k31-pro-4090-r6; coli_cuda_k3.dll: release kimi-k31-pro-4090-r7; see BUILD-INFO-K31.txt
 coli_cuda.dll, mimo.exe, coli and its Python modules: commit 9372715b0c0709cb848830d5abf7d82535507be5 (main; their sources unchanged since but for comments)
 kimi_k3.exe: mingw32-make -C c kimi_k3 CUDA_DLL=1 ARCH=native VK=0 (needs AVX-512: Zen 4 or newer)
 coli_cuda.dll: c\build_cuda.bat, coli_cuda_k3.dll: c\build_k3_cuda.bat (sm_89, the CUDA runtime linked statically)
@@ -14,7 +14,7 @@ coli_cuda_mimo.dll: release mimo-pro-4090-r7, commit 1dc7f0376a6d3f32d5d2e664dc3
 Checked: BUILD-INFO-K31.txt (the K3.1 pair, on the card and on the model itself); mimo.exe and the other engines as in kimi-k3-4090-r1.
 
 fc6b9154d17539ac8a82fe9e770a94aee88ae5eecfc6e557d7031b877b6b2d3c  kimi_k3.exe
-1a4faee42146307d5e952fa230e24bdddd76a2458bd7e326aea448a59bca572b  coli_cuda_k3.dll
+314741c43bc5c76bced719cc82ed50479ebcc035868310d42ec0c64ddec24223  coli_cuda_k3.dll
 0ae7268206e60c340c3b9faf3675a1d727580565ebd8fc69b187a4b48d3cccbc  coli_cuda.dll
 d430b118907deee2db401cde118b29f3907e205744531d64c8bbf52209e511c9  mimo.exe
 16d2f3423238f30532d98293c3449564411d9e78bf4a692bc178ea257edbb120  coli_cuda_mimo.dll

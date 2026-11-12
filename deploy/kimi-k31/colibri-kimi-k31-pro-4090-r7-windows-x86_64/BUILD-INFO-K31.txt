@@ -1,11 +1,16 @@
-Kimi K3.1 Pro's engine, release kimi-k31-pro-4090-r6, built 2026-11-12 on the RTX 4090 machine
-commit: 3777923fdfa04fc60c9b81c9f0961bdbfcc3a686
+Kimi K3.1 Pro's engine, release kimi-k31-pro-4090-r7, built 2026-11-12 on the RTX 4090 machine
+commit: bdc14c7703f85aabcd32c911758baff4a6a3b5bc (coli_cuda_k3.dll; kimi_k3.exe is r6's, of 3777923f, its sources unchanged since)
 kimi_k3.exe: mingw32-make -C c kimi_k3 CUDA_DLL=1 ARCH=native VK=0 on the msvcrt C runtime (gcc.exe (MinGW-W64 x86_64-msvcrt-posix-seh, built by Brecht Sanders, r2) 14.2.0)
 ARCH=native is AMD Ryzen 9 7950X3D 16-Core Processor: rebuild with ARCH=znver4 / x86-64-v3 before moving the binaries to another box
 coli_cuda_k3.dll: this commit's (c\build_k3_cuda.bat, CUDA_ARCH=sm_89, CUDA 13.4, MSVC 2022, the CUDA runtime
   linked statically; the file measured below -- two builds of the same source differ in some 5,500 bytes)
 coli_cuda.dll: release kimi-k3-4090-r1's (unchanged by K3.1)
-what changed since r5 (README-KIMI-K31-PRO-4090.md, "What release r6 adds"):
+what changed since r6 (README-KIMI-K31-PRO-4090.md, "What release r7 adds"):
+  The routed experts on the card in tile kernels (k3_gu_t, k3_dn_t: 32 rows a block, the weights
+  decoded once into shared memory; K3_GPU_EXPERT_TILES): 9-10 -> 18-21 TMAC/s, the same bytes. A
+  16,511-token prompt 205 -> 190 s; the 5,862-token prompt, drive-bound, unchanged. Only
+  coli_cuda_k3.dll changed.
+what r6 changed since r5:
   A large prompt step registers its big host buffers with the card while it runs (K3_PIN_STEP) and
   coli_cuda_k3.dll moves their rows on a copy stream beside its kernels; a copy is queued only once
   what it needs is done (this machine's copies run in one queue across streams). A 16,511-token
@@ -28,7 +33,14 @@ what r2 changed since r1's K3.1 pair:
   The load on every core and the dense cache (start 138 -> 9.7 s); a prompt's selecting rows over
   their lists and steps of 16,384 (16,511 tokens 375 -> 221 s); the expert cache lending its slots
   (K3_LEND); no pins by default; the same request again restored whole (27 -> 0.27 s).
-checks, on this pair, on the RTX 4090 and on moonshotai/Kimi-K3.1-Pro itself (r6):
+checks, on this pair, on the RTX 4090 and on moonshotai/Kimi-K3.1-Pro itself (r7):
+  tests\test_k3_cuda_experts.exe (every case, 5 experts' pieces through the tiles; --dsa): ok
+  build-windows.ps1's list (test_k3_dsa, the tiny K3 and K3.1 models, the lending, the dense cache, the
+    photos, the system prompt's photo, the sessions with a cancel): passed
+  a 16,511-token prompt in a step of 16,384: every logit the same bytes as the reference every release
+    since r2 has had (192.3 / 188.7 s against r6's DLL 224.3 / 202.8, run in turn)
+  a 5,862-token prompt's logits at every position = a run with no GPU path
+checks on r6's pair:
   tests\test_k3_cuda_experts.exe (every case, the calls with registered rows among them; --dsa): ok
   test_k3_dsa, test_kimi_k3_tiny, test_kimi_k31_dsa, kimi_k3_lend_harness, kimi_k3_dense_cache_harness,
     test_kimi_k3_ckpt, kimi_k3_root_harness, kimi_k3_sessions_harness (build-windows.ps1's list): passed
@@ -53,5 +65,5 @@ checks made on earlier pairs and not run again on this one: the conversations in
 the record: docs/experiments/kimi-k31-4090-2026-11-10
 
 fc6b9154d17539ac8a82fe9e770a94aee88ae5eecfc6e557d7031b877b6b2d3c  kimi_k3.exe
-1a4faee42146307d5e952fa230e24bdddd76a2458bd7e326aea448a59bca572b  coli_cuda_k3.dll
+314741c43bc5c76bced719cc82ed50479ebcc035868310d42ec0c64ddec24223  coli_cuda_k3.dll
 0ae7268206e60c340c3b9faf3675a1d727580565ebd8fc69b187a4b48d3cccbc  coli_cuda.dll
