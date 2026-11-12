@@ -8532,6 +8532,55 @@ class ServedModalityTest(unittest.TestCase):
             with self.request(base, "/v1/models") as response:
                 self.assertEqual(json.load(response)["data"][0]["input_modalities"], ["text"])
 
+    def test_text_only_family_takes_a_tool_results_picture_as_a_line(self):
+        """Kimi Code's Computer Use tool (get_window_state) answers with the window's state as
+        text and a screenshot as an image_url part. A family with no image path refused the
+        whole request with HTTP 400 and the agent stopped; the picture is now a line in the
+        tool's result and the rest of the conversation goes to the engine. A picture the
+        user sends is still refused."""
+        shot = {"type": "image_url", "image_url": {"url": "data:image/png;base64," + "A" * 400}}
+        call = {"id": "call_1", "type": "function",
+                "function": {"name": "get_window_state", "arguments": "{}"}}
+        messages = [{"role": "user", "content": "look at the window"},
+                    {"role": "assistant", "content": "", "tool_calls": [call]},
+                    {"role": "tool", "tool_call_id": "call_1", "content": [
+                        {"type": "text", "text": "{title: 'LookRS232'}"}, shot,
+                        {"type": "text", "text": "<extras/>"}]}]
+        with patch("openai_server.ARCH", "kimi"):
+            engine, base = self.serve(None)
+            with self.request(base, "/v1/chat/completions",
+                              {"model": "test-model", "messages": messages}) as response:
+                self.assertEqual(response.status, 200)
+            prompt = engine.calls[-1][0]
+            self.assertIn("{title: 'LookRS232'}", prompt)
+            self.assertIn("<extras/>", prompt)
+            self.assertIn("[the tool returned an image (image/png, about 300 bytes) here; "
+                          "this model reads text only, so it is not shown]", prompt)
+            self.assertNotIn("base64", prompt)
+            with self.assertRaises(HTTPError) as caught:
+                self.request(base, "/v1/chat/completions", {
+                    "model": "test-model",
+                    "messages": [{"role": "user", "content": [
+                        {"type": "text", "text": "what is this?"}, shot]}]})
+            self.addCleanup(caught.exception.close)
+            self.assertEqual(caught.exception.code, 400)
+            self.assertIn("text message content only", json.load(caught.exception)["error"]["message"])
+
+    def test_anthropic_tool_result_picture_is_a_line_for_a_text_only_family(self):
+        picture = {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                               "data": "AAAA"}}
+        body = {"model": "test-model", "max_tokens": 16, "messages": [
+            {"role": "user", "content": "read it"},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_1",
+                                               "name": "Read", "input": {"path": "a.png"}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1",
+                                          "content": [{"type": "text", "text": "a.png:"}, picture]}]}]}
+        with patch("openai_server.ARCH", "kimi"):
+            engine, base = self.serve(None)
+            with self.request(base, "/v1/messages", body) as response:
+                self.assertEqual(response.status, 200)
+            self.assertIn("[the tool returned an image (image/png, about 3 bytes) here", engine.calls[-1][0])
+
     def test_tower_less_engine_refuses_a_picture_by_name(self):
         picture = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
         with patch("openai_server.ARCH", "glm53"):

@@ -105,7 +105,11 @@ The server serves one generation at a time: the model stays in one persistent
 process, so concurrent HTTP requests queue instead of loading duplicate model
 copies. Tool calling depends on the active engine; see the support matrix below.
 Images and token penalties return an explicit error rather than being silently
-ignored. The OpenAI-compatible endpoints request log probabilities only from a
+ignored, with one exception: on an engine with no image path, a picture inside a tool
+result (an MCP screenshot tool's, a Read of an image file) becomes a line in that result
+saying an image was there and is not shown, and the conversation goes on with the tool's
+text; a 400 there stopped agents such as Kimi Code mid-task. A picture the user sends is
+still refused. The server's log names the reason of every 4xx it answers. The OpenAI-compatible endpoints request log probabilities only from a
 glm engine (see below); on every other engine such a request is refused with a
 named error, never silently ignored. `seed` is accepted and ignored (see
 below). Audio is accepted only by Inkling checkpoints with audio support. The

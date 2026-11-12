@@ -936,8 +936,9 @@ build: `deploy/kimi-k31/build-windows.ps1` compiles the engine and the DLL toget
 ## Current limitations
 
 - Decode is single-token (no speculative decoding — K3 has no MTP head).
-- Tool declarations/calls and image content are not exposed through the shared
-  gateway yet; unsupported requests fail explicitly.
+- Image content is not read: a picture the user sends is refused with HTTP 400; one inside a
+  tool result (Kimi Code's Computer Use screenshots) reaches the model as a line saying an
+  image was there, with the tool's text (`text_only_tool_results` in the gateway).
 - CPU + optional Vulkan (the shared expert tier) or CUDA for the dense matrices
   (`K3_CUDA_DENSE`, above) and a prompt step's experts, MLA attention and routers
   (`coli_cuda_k3.dll`, Windows builds: its tables hold MinGW's exp_f and tanhf bits); no
