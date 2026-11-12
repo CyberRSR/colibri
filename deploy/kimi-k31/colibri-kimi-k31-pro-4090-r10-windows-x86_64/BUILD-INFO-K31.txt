@@ -1,4 +1,4 @@
-Kimi K3.1 Pro's engine, release kimi-k31-pro-4090-r9, built 2026-11-12 on the RTX 4090 machine
+Kimi K3.1 Pro's engine, release kimi-k31-pro-4090-r10, built 2026-11-12 on the RTX 4090 machine
 commit: 9b1a1dba506aa76c7257e9a870fb42411a37bb38 (kimi_k3.exe, coli_cuda_k3.dll, openai_server.py, tools/kimi_image.py)
 kimi_k3.exe: mingw32-make -C c kimi_k3 CUDA_DLL=1 ARCH=native VK=0 on the msvcrt C runtime (gcc.exe (MinGW-W64 x86_64-msvcrt-posix-seh, built by Brecht Sanders, r2) 14.2.0)
 ARCH=native is AMD Ryzen 9 7950X3D 16-Core Processor: rebuild with ARCH=znver4 / x86-64-v3 before moving the binaries to another box
@@ -7,7 +7,12 @@ coli_cuda_k3.dll: this commit's (c\build_k3_cuda.bat, CUDA_ARCH=sm_89, CUDA 13.4
 coli_cuda.dll: release kimi-k3-4090-r1's (unchanged by K3.1)
 kimi_k3.exe sha256 728b2e8c2a3b73855972bde3fb2536a12107769ce7fbe6ac993524fb59f9d207
 coli_cuda_k3.dll sha256 d36351bde52f73a3e08697d0fb50763d767740978d25b90e5581cf4eafe0810d
-what changed since r8 (README-KIMI-K31-PRO-4090.md, "What release r9 adds"):
+what changed since r9 (README-KIMI-K31-PRO-4090.md, "What release r10 adds"):
+  The gateway (openai_server.py, commit a712b2dd) and the launcher: Kimi Code's stored screenshot
+  (blobref:<mime>;<sha256>, sent after a restart or an undo) is read from its sessions folder by its hash
+  (COLI_CLIENT_BLOB_DIRS), and a picture the gateway cannot read in a tool result becomes a line instead of
+  an HTTP 400 that stopped the session for good. kimi_k3.exe and coli_cuda_k3.dll are r9's.
+what r9 changed since r8:
   Pictures: Kimi K3.1's own vision tower (MoonViT, 0.89 GB) in the engine, on the card (k3cu_vision,
   0.76 s a 1568x830 screenshot) or the CPU (18 s); a user's pictures and a tool result's, several a
   request; a picture's places keyed by its bytes, so a conversation's state is reused over them.

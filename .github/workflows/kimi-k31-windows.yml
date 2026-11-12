@@ -43,13 +43,13 @@ on:
         default: false
       tag:
         description: 'the release tag'
-        default: kimi-k31-pro-4090-r9
+        default: kimi-k31-pro-4090-r10
 
 permissions:
   contents: read
 
 env:
-  BUNDLE: colibri-kimi-k31-pro-4090-r9-windows-x86_64
+  BUNDLE: colibri-kimi-k31-pro-4090-r10-windows-x86_64
 
 jobs:
   build:

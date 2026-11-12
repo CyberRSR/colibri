@@ -9,7 +9,7 @@ row attends only the 2,048 earlier rows its layer's indexer scores highest. Ever
 format) is K3's. Sources: the model card and TokenSpeed's implementation,
 [lightseekorg/tokenspeed#3015](https://github.com/lightseekorg/tokenspeed/pull/3015).
 
-**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r9: `kimi_k3.exe` and
+**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r10: `kimi_k3.exe` and
 `coli_cuda_k3.dll` here were built on the RTX 4090 machine and checked there on the model
 itself (BUILD-INFO-K31.txt: the commit, the toolchain, the checks). Release kimi-k3-4090-r1's
 `kimi_k3.exe` does not read `dsa_config`: it would run every MLA layer dense, which is K3.1's
@@ -187,6 +187,16 @@ What release r9 adds (2026-11-12):
   buttons read right, from a user's message and from a tool result. `K3_VISION=0` serves text as
   r8 did; `K3_MAX_IMAGE_TOKENS` (4,096) caps a picture. In Kimi Code add `image_in` to the model's
   `capabilities` (`~/.kimi-code/config.toml`) so that your own pictures are sent too.
+
+What release r10 adds (2026-11-12):
+
+- **A Kimi Code session with an old screenshot goes on.** Kimi Code keeps a tool's screenshot as
+  its own reference (`blobref:image/png;<sha256>`, a file of its session folder) and, after a
+  restart or an undo, can send that reference instead of the picture. r9 answered it with HTTP 400
+  ("local image paths are disabled on this server"), and every next request of the session too.
+  The gateway now reads such a picture from `%USERPROFILE%\.kimi-code\sessions` (the launcher's
+  `COLI_CLIENT_BLOB_DIRS`), only by its hash and only when the bytes are the hash's; a picture it
+  cannot read in a tool result becomes a line saying so. `openai_server.py` and the launcher changed.
 
 ---
 

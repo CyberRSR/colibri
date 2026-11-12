@@ -1,4 +1,6 @@
 Kimi K3.1 Pro on the RTX 4090 beside MiMo-V2.6-Pro (release mimo-pro-4090-r7), 2026-11-12
+Release kimi-k31-pro-4090-r10: r9's install with a new openai_server.py and launcher (commit a712b2dd): Kimi
+Code's stored screenshots (blobref:) are read, and a picture the gateway cannot read no longer stops a session.
 Release kimi-k31-pro-4090-r9: kimi-k31-pro-4090-r8's install with a new kimi_k3.exe, coli_cuda_k3.dll,
 openai_server.py, family_registry.py and tools/kimi_image.py (commit 9b1a1dba) -- Kimi K3.1 reads
 pictures (the user's and a tool's screenshots) through its own vision tower. The launcher is r8's. BUILD-INFO-K31.txt carries the pair's commit, toolchain and checks.
