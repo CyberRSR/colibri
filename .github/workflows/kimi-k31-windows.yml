@@ -21,6 +21,8 @@ on:
       - c/backend_cuda_k3.cu
       - c/backend_cuda_k3.h
       - c/backend_cuda_k3_dsa.cuh
+      - c/backend_cuda_k3_draft.cuh
+      - c/k3_draft.h
       - c/tools/check_k3_dsa_kernels.cpp
       - c/backend_cuda_k3_loader.c
       - c/tests/test_k3_dsa.c
@@ -43,13 +45,13 @@ on:
         default: false
       tag:
         description: 'the release tag'
-        default: kimi-k31-pro-4090-r10
+        default: kimi-k31-pro-4090-r11
 
 permissions:
   contents: read
 
 env:
-  BUNDLE: colibri-kimi-k31-pro-4090-r10-windows-x86_64
+  BUNDLE: colibri-kimi-k31-pro-4090-r11-windows-x86_64
 
 jobs:
   build:

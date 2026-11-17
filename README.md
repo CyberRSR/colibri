@@ -46,7 +46,7 @@ is still the model's own pick -- the logits are the same bytes with it and witho
 the time changes ([how](docs/kimi_k3.md#kimi-k31-a-draft-model-k3_drafth-k3_draft)).
 
 To run it: take the install from the latest release
-([kimi-k31-pro-4090-r10](https://github.com/CyberRSR/colibri/releases/tag/kimi-k31-pro-4090-r10)),
+([kimi-k31-pro-4090-r11](https://github.com/CyberRSR/colibri/releases/tag/kimi-k31-pro-4090-r11)),
 then from its folder:
 
 ```powershell

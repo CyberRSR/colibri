@@ -9,7 +9,7 @@ row attends only the 2,048 earlier rows its layer's indexer scores highest. Ever
 format) is K3's. Sources: the model card and TokenSpeed's implementation,
 [lightseekorg/tokenspeed#3015](https://github.com/lightseekorg/tokenspeed/pull/3015).
 
-**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r10: `kimi_k3.exe` and
+**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r11: `kimi_k3.exe` and
 `coli_cuda_k3.dll` here were built on the RTX 4090 machine and checked there on the model
 itself (BUILD-INFO-K31.txt: the commit, the toolchain, the checks). Release kimi-k3-4090-r1's
 `kimi_k3.exe` does not read `dsa_config`: it would run every MLA layer dense, which is K3.1's
@@ -197,6 +197,33 @@ What release r10 adds (2026-11-12):
   The gateway now reads such a picture from `%USERPROFILE%\.kimi-code\sessions` (the launcher's
   `COLI_CLIENT_BLOB_DIRS`), only by its hash and only when the bytes are the hash's; a picture it
   cannot read in a tool result becomes a line saying so. `openai_server.py` and the launcher changed.
+
+What release r11 adds (2026-11-17):
+
+- **A draft model: the same replies, 9-18% sooner.** A decode step reads the dense matrices once
+  whether it carries one row or several, so it can also carry the next tokens when they can be
+  guessed: [Inferact/Kimi-K3.1-Pro-DSpark](https://huggingface.co/Inferact/Kimi-K3.1-Pro-DSpark), a
+  draft model trained for K3.1 Pro (5 GB), guesses them from the model's own hidden rows, and each
+  guess the model then picks itself costs no step of its own. Every token is still the model's own
+  pick: the logits are the same bytes with the draft model and without. A recorded Kimi Code turn
+  of 23,295 tokens answered with the same tool call in 103 s instead of 121; one answered by 220
+  tokens of reasoning in 248 s instead of 269. It takes 2.5 GB of the card (the dense matrices
+  there 18.1 GiB instead of 20), 1.9 GB of RAM and 2 s more at the start. `START-KIMI-K31-PRO.cmd`
+  turns it on when the folder beside the model holds it:
+
+  ```powershell
+  $d = 'C:\AI\Kimi-K3.1-Pro-DSpark'; mkdir $d -Force | Out-Null
+  $rev = 'c197a09072916cf63172df2d9d4baef0b77ed83a'   # the files this release was measured with
+  foreach ($f in 'config.json', 'model.safetensors') {   # run again to continue an interrupted download
+      curl.exe -L -C - -o "$d\$f" "https://huggingface.co/Inferact/Kimi-K3.1-Pro-DSpark/resolve/$rev/$f"
+  }
+  (Get-FileHash "$d\model.safetensors").Hash   # 83A4F35D3A68FE69275B548A0658F687B5BDDAF48F8201F999EF81B538F1FB5F
+  ```
+
+  `-NoDraft` runs without it and `-Draft <folder>` names another folder; `-DraftP` (0.98) and
+  `-DraftMax` (3) are its gate: a guess is checked when the draft model gives it that probability
+  or more, at most that many a step (each 0.43 GB of RAM). The launcher's banner says which. How it
+  works and how it was checked: `docs/kimi_k3.md`, "Kimi K3.1: a draft model".
 
 ---
 

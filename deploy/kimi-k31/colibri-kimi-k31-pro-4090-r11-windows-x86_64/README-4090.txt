@@ -9,7 +9,9 @@ Unzip anywhere (e.g. C:\colibri) and start one model at a time:
                            a new conversation starts after its system prompt, kept from the first one (20 s, not 220, for 16.5k tokens);
                            a conversation another one interrupted, or a restart left behind, comes back from its file
                            in <model folder>\k3_sessions (27-32 s to its next reply, not 220; -Sessions 0: off);
-                           a long prompt whose client gave up resumes where it was when it is sent again
+                           a long prompt whose client gave up resumes where it was when it is sent again;
+                           with a draft model in <model folder>-DSpark (Inferact/Kimi-K3.1-Pro-DSpark, 5 GB)
+                           the same replies come 9-18% sooner (README-KIMI-K31-PRO-4090.md, release r11)
   START-MIMO.cmd           MiMo-V2.6-Pro-MOPD (tools\start_mimo_cuda_4090.ps1)  README-MIMO-4090.md
   START-MIMO-HERETIC.cmd   MiMo-V2.6-Pro-MOPD-heretic (the same launcher, -Model heretic)
 

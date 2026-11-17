@@ -1,13 +1,20 @@
-Kimi K3.1 Pro's engine, release kimi-k31-pro-4090-r10, built 2026-11-12 on the RTX 4090 machine
-commit: 9b1a1dba506aa76c7257e9a870fb42411a37bb38 (kimi_k3.exe, coli_cuda_k3.dll, openai_server.py, tools/kimi_image.py)
+Kimi K3.1 Pro's engine, release kimi-k31-pro-4090-r11, built 2026-11-17 on the RTX 4090 machine
+commit: e1101d18cbf3e072f85f520394130c1cd01ca4d1 (kimi_k3.exe, coli_cuda_k3.dll, tools/start_kimi_k31_pro_4090.ps1)
 kimi_k3.exe: mingw32-make -C c kimi_k3 CUDA_DLL=1 ARCH=native VK=0 on the msvcrt C runtime (gcc.exe (MinGW-W64 x86_64-msvcrt-posix-seh, built by Brecht Sanders, r2) 14.2.0)
 ARCH=native is AMD Ryzen 9 7950X3D 16-Core Processor: rebuild with ARCH=znver4 / x86-64-v3 before moving the binaries to another box
 coli_cuda_k3.dll: this commit's (c\build_k3_cuda.bat, CUDA_ARCH=sm_89, CUDA 13.4, MSVC 2022, the CUDA runtime
   linked statically; the file measured below -- two builds of the same source differ in some 5,500 bytes)
 coli_cuda.dll: release kimi-k3-4090-r1's (unchanged by K3.1)
-kimi_k3.exe sha256 728b2e8c2a3b73855972bde3fb2536a12107769ce7fbe6ac993524fb59f9d207
-coli_cuda_k3.dll sha256 d36351bde52f73a3e08697d0fb50763d767740978d25b90e5581cf4eafe0810d
-what changed since r9 (README-KIMI-K31-PRO-4090.md, "What release r10 adds"):
+kimi_k3.exe sha256 58fcc582645a01865467b832642e7894f963b6e1cd63cd422fd1d78fd1d35650
+coli_cuda_k3.dll sha256 5a74777799b0e21fdc3a28814413b58c75cbb586963b1ca24d5629a3d1e39684
+what changed since r10 (README-KIMI-K31-PRO-4090.md, "What release r11 adds"):
+  A draft model (k3_draft.h, backend_cuda_k3_draft.cuh; commit e1101d18): with Inferact/Kimi-K3.1-Pro-DSpark
+  (5 GB, in <model folder>-DSpark; the launcher's -Draft, -NoDraft, -DraftP, -DraftMax) a decode step also carries
+  the next tokens the draft model is sure of, and each one the model then picks costs no step of its own; every
+  token is still the model's own pick and the logits are the same bytes. A recorded agent turn of 23,295 tokens
+  121.4 -> 102.9 s, one of 220 tokens of reasoning 269.0 -> 247.7 s. Without the draft model this pair's logits
+  are r10's.
+what r10 changed since r9:
   The gateway (openai_server.py, commit a712b2dd) and the launcher: Kimi Code's stored screenshot
   (blobref:<mime>;<sha256>, sent after a restart or an undo) is read from its sessions folder by its hash
   (COLI_CLIENT_BLOB_DIRS), and a picture the gateway cannot read in a tool result becomes a line instead of
@@ -52,7 +59,21 @@ what r2 changed since r1's K3.1 pair:
   The load on every core and the dense cache (start 138 -> 9.7 s); a prompt's selecting rows over
   their lists and steps of 16,384 (16,511 tokens 375 -> 221 s); the expert cache lending its slots
   (K3_LEND); no pins by default; the same request again restored whole (27 -> 0.27 s).
-checks, on this pair, on the RTX 4090 and on moonshotai/Kimi-K3.1-Pro itself (r7):
+checks, on this pair, on the RTX 4090 and on moonshotai/Kimi-K3.1-Pro itself (r11):
+  build-windows.ps1's list (test_k3_dsa, the tiny K3 and K3.1 models, the lending, the dense cache, the
+    photos, the system prompt's photo, the sessions) and the new kimi_k3_draft_harness (drafts from a file:
+    right, wrong, mixed, sampled at 0.9, a reply that ends inside a block): passed
+  tests\test_k3_cuda_experts.exe (every case; --dsa): ok
+  a 3,759-token prompt and 32 tokens of its reply, every position's logits: r10's pair = this pair
+    without the draft model = this pair with it, the same bytes (the drafts taken back among them)
+  the same change's earlier build: 120 tokens of that reply, the logits the same with the draft model and
+    without, also at K3_DRAFT_P=0.3 K3_DRAFT_MAX=7 (blocks ended with 0, 1, 2, 3, 4, 6 and 7 drafts
+    standing); a 51-token prompt in steps of 1, 2, 3 and 8 rows, one logits file
+  the draft model's picks on the card against a PyTorch reading of the checkpoint on the same rows
+    (tools\k3_draft_ref.py over K3_DRAFT_DUMP): 821 of 824, the others ties far below the gate
+  through the API, the launcher with the draft model: three requests (a question, code, a second turn)
+    answered by one engine process
+checks on r7's pair, on the RTX 4090 and on moonshotai/Kimi-K3.1-Pro itself:
   tests\test_k3_cuda_experts.exe (every case, 5 experts' pieces through the tiles; --dsa): ok
   build-windows.ps1's list (test_k3_dsa, the tiny K3 and K3.1 models, the lending, the dense cache, the
     photos, the system prompt's photo, the sessions with a cancel): passed
@@ -78,11 +99,11 @@ checks on r5's pair:
   a 5,862-token prompt's logits at every position = a run with no GPU path
   the API: a prompt cancelled by its client (curl gone after 150 s) kept 988 of 2,962 tokens; sent
     again it computed the rest and gave the same reply
-checks made on earlier pairs and not run again on this one: the conversations in files through the
-  API (r4), the system prompt's photo through the API (r3), K3_CHECK=1, RAM_GB=110 and a
-  conversation past the context (r2)
+checks made on earlier pairs and not run again on this one: the 16,511- and 5,862-token references
+  (r7; this pair's logits are r10's pair's, above), the conversations in files through the API (r4), the
+  system prompt's photo through the API (r3), K3_CHECK=1, RAM_GB=110 and a conversation past the context (r2)
 the record: docs/experiments/kimi-k31-4090-2026-11-10
 
-fc6b9154d17539ac8a82fe9e770a94aee88ae5eecfc6e557d7031b877b6b2d3c  kimi_k3.exe
-314741c43bc5c76bced719cc82ed50479ebcc035868310d42ec0c64ddec24223  coli_cuda_k3.dll
+58fcc582645a01865467b832642e7894f963b6e1cd63cd422fd1d78fd1d35650  kimi_k3.exe
+5a74777799b0e21fdc3a28814413b58c75cbb586963b1ca24d5629a3d1e39684  coli_cuda_k3.dll
 0ae7268206e60c340c3b9faf3675a1d727580565ebd8fc69b187a4b48d3cccbc  coli_cuda.dll
