@@ -411,6 +411,85 @@ time answered from its prompt's photo so the time is the reply's; temperature 0)
 The replies are the same text in all eight responses. The start takes 2.1-2.7 s more (5 GB of
 bf16 read and quantized on the card).
 
+## Both drives whole (2026-11-17)
+
+The user asked to keep all the weights on both drives, to say how much faster the drives read and
+how much shorter the waits get, and to have the engine check at every start that `C:` holds them
+all and copy what it lacks from `D:` (`c/k3_mirror.h`; docs/kimi_k3.md, "the weights on both
+drives"). Scripts in `mirror/`.
+
+**The copies.** `D:` got `C:`'s 96 files (934 GB, robocopy `/J /MT:4`, 159 s; `cmpcopy.c`: all
+96 the same bytes, 1,003 GB compared in 177 s), and the engine's first start with `K3_FILL=1`
+copied `D:`'s 92 `.p2` parts to `C:` itself: 558.6 GB in 276 s (2.0 GB/s, one file at a time,
+`CopyFileEx` unbuffered). Each folder now holds all 188 files, 1.45 TB; `C:` has 0.94 TB free. A
+start with nothing to copy checks the 188 headers in 0.2 s.
+
+**A hang on the way.** The first run with the copies stopped in the middle of its prompt: no CPU,
+no reads. gdb: two readers inside `exit()`, one in `k3_io_stop`'s `pthread_join`, the other waiting
+for the C runtime's exit lock the first held. Every reader had opened its own C descriptors per
+file and per copy, and with 188 files on two drives they went past msvcrt's 2,048 for the whole
+process; an open failed, the read failed, and the reader called `exit()`. The readers now keep
+Windows handles (`CreateFile`, `ReadFile` with an `OVERLAPPED` offset: no such limit), a reader's
+read error prints and ends the process with `_exit` (stderr flushed first: msvcrt buffers it when
+it is redirected), and the copies get no C descriptors on Windows.
+
+**The same bytes** (`logits_check.sh`, a 3,759-token prompt and 32 tokens, every position's
+logits): r11 as installed (the cut layout) = the new exe reading the copies (the hybrid below,
+with 2 and with 3 readers a drive) = reading `C:` alone (`K3_MIRROR=0`) = the run whose start
+copied the 558 GB. The replies too.
+
+**How much faster** (`perf_cli.sh`: the same prompt and 128 tokens with the draft model, a fresh
+process a run, the new exe in every column; the cut layout read through a folder of hard links to
+`C:`'s 96 files, so both layouts sit side by side on the drives):
+
+| | prompt | a decode token | waiting for reads | drives together: prompt, decode | runs |
+|---|---:|---:|---:|---:|---|
+| cut layout, 2 readers a drive (as before) | 107.3-107.5 s | 1,205-1,217 ms | 344-377 ms | 13.5, 11.4-11.5 GB/s | 4 |
+| cut layout, 3 readers | 106.7 s | 1,244-1,249 ms | 398-410 ms | 13.6, 11.5 GB/s | 2 |
+| both whole, every read cut 60/40, 2 readers | 111.0-111.1 s | 1,186-1,188 ms | 342-345 ms | 13.0, 11.7 GB/s | 2 |
+| ... 3 readers | 110.4 s | 1,166-1,169 ms | 308-314 ms | 13.1, 12.2 GB/s | 2 |
+| both whole, a prompt's reads whole by the shorter queue, 2 readers | 102.6-102.7 s | 1,168 ms | 325-335 ms | 14.1, 11.8 GB/s | 2 |
+| **... 3 readers (the default now)** | **100.5 s** | **1,138-1,142 ms** | **284-293 ms** | **14.4, 12.3 GB/s** | 2 |
+
+Against the cut layout: the prompt 6% sooner, a decode token 6%, its wait for reads 21% shorter,
+the drives 7% faster together in both phases. The model the replicas were planned on (2026-11-13:
+the last of N reads on idle drives 28-44% sooner) promised more for the decode than this: the
+prefetcher keeps both drives busy 88% of a decode token already, so a read cut in two lands
+sooner only by what balance gives back. Cutting the prompt's reads made it slower (two half-size
+reads cost more than one when both drives are saturated: `C:` 8.5 -> 8.1 GB/s), hence the hybrid,
+which also keeps `D:` busier than the cut layout's fixed 61/39 did (97% of the prompt instead of
+88%). A third reader slows the cut layout (more read ahead, no more read) and speeds up the
+copies'.
+
+**Through the API** (`api_ab.sh`: the launcher on port 18081 with the draft model, the recorded
+Kimi Code turn of the draft model's table sent twice, the second time answered from its prompt's
+photo; cut, copies, copies, cut):
+
+| a recorded turn of 23,295 tokens, answered by a tool call (91 tokens) | cut layout | both drives whole |
+|---|---:|---:|
+| the turn, prompt and reply | 406.5, 404.6 s | 404.4, 404.2 s |
+| its reply alone | 103.9, 103.6 s | 101.2, 101.2 s |
+| the drives together during the reply | 12.1-12.5 GB/s | 12.7-13.1 GB/s |
+
+All eight replies are the same tool call. A prompt this long is the card's (299 s either way, 0.4
+s of it waiting for reads, the drives busy 67-72%), and a reply at 23k positions spends more of a
+token in attention, so the turn gains 2.5% of its reply and nothing of its prompt.
+
+**Copies of some files only** -- what a release user's first start leaves on the download tool's
+layout: `D:`'s parts copied to `C:`, `D:` without `C:`'s files. Cutting reads there would have put
+85% of a decode token's bytes on `C:`, so with any expert file lacking its copy every read of a file
+with one goes whole by queue, 2 readers a drive (`perf_cli.sh partial`: `K3_DIRS` a folder of hard
+links to `D:`'s 92 parts). Against the cut layout, the same exe: the prompt 107.3 s (107.5), a
+decode token 1,158 ms (1,210), its wait 313 ms (367) -- the queue sends some of the parts' reads to
+`C:` when `D:` is the busier. Every file on both drives with the release's exe and the launcher's
+defaults: 100.5 s, 1,150 ms, 275 ms. The release's exe's logits = r11's exe's (run from its backup,
+reading every file from `C:` now: a prompt 174.5 s, which is what going back to r11 without
+deleting `C:`'s copies of the parts would cost).
+
+The first single runs of the day -- r11 waiting 750 ms a token, the copies' first runs 562-581 --
+were on drives that had just taken 934 and 558 GB of writes and were still busy behind them; the
+table's runs came an hour and more later, alternating.
+
 ## Not done
 
 - **The draft model's context is not in the photos.** A conversation that comes back from a file,

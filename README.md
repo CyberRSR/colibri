@@ -27,6 +27,7 @@ logits are the same bytes as a run with no GPU path at all.
 | a 16,511-token prompt | 190 s (5,862 tokens: 117 s, the drives' pace) |
 | a long answer (512 tokens) | 0.86 tokens/s, 1.16 s a token; 0.75-0.8 at 6-16k tokens of context |
 | ... with a draft model beside it | the same tokens 9-18% sooner (an agent's turn at 23k tokens: a tool call 121 -> 103 s, reasoning 269 -> 248 s) |
+| ... with the weights whole on both drives | 6% sooner again, prompts and decode alike (a 3,759-token prompt 107 -> 100.5 s, a token 1.21 -> 1.14 s, its wait for reads 21% shorter) |
 | the same request again | answers in 0.3 s |
 | a new conversation, same 16.5k-token system prompt | 20 s instead of 220 |
 | an interrupted conversation, back from its file | 27-32 s instead of 220 |
@@ -44,6 +45,12 @@ A draft model is the one thing that does help: with
 model is sure of, and each one the model then picks itself costs no step of its own. Every token
 is still the model's own pick -- the logits are the same bytes with it and without -- so only
 the time changes ([how](docs/kimi_k3.md#kimi-k31-a-draft-model-k3_drafth-k3_draft)).
+
+With the weights whole on both drives (`D:\AI\Models\Kimi-K3.1-Pro` holding all 188 files too:
+1.56 TB a drive instead of 1.56 TB over the two), a decode step reads each expert from both at once
+and a prompt step each from the drive with less to do; the same bytes again. At every start the
+engine copies to `C:` whatever of `D:`'s files it lacks
+([how](docs/kimi_k3.md#kimi-k31-the-weights-on-both-drives-k3_mirrorh-k3_mirror-k3_fill)).
 
 To run it: take the install from the latest release
 ([kimi-k31-pro-4090-r11](https://github.com/CyberRSR/colibri/releases/tag/kimi-k31-pro-4090-r11)),

@@ -62,9 +62,19 @@
  *   K3_DIRECT=0|1        O_DIRECT expert reads (default 1; buffered fallback)
  *   K3_IDOT=0|1          int8-activation expert matmuls (default 1; 0 = float)
  *   K3_PIPE=0|1          expert reads on reader threads, beside the compute (default 1)
- *   K3_IO_PER_DRIVE=N    readers per storage device the shards are on (default 2)
+ *   K3_IO_PER_DRIVE=N    readers per storage device the shards are on (default 2; 3 when
+ *                        the files have copies on another drive, K3_MIRROR)
  *   K3_IO_THREADS=N      that many readers on one queue instead (K3_LOAD_THREADS
  *                        alike); 0 = reads on the caller
+ *   K3_MIRROR=0|1        a shard file whole in a K3_DIRS folder on another drive too (the
+ *                        same size and header): each expert's read cut in two, a piece
+ *                        from each drive at once (default 1; k3_mirror.h)
+ *   K3_MIRROR_SPLIT=F    the model folder's share of such a read (default 0.6)
+ *   K3_MIRROR_ROWS=N     a step of more rows reads each expert whole, from the drive whose
+ *                        queue is shorter (default 16: a prompt's; -1 every read cut)
+ *   K3_FILL=0|1          at the start, copy to the model's folder every *.safetensors of
+ *                        the K3_DIRS folders it lacks (default 0; the launcher's 1)
+ *   K3_FILL_KEEP_GB=N    ... while its drive keeps N GB free (default 64)
  *   K3_LOAD_PARALLEL=N   the dense weights of N layers read at the same time while
  *                        the model loads (4 for a prepared U8/GGUF container, where
  *                        each matrix is one straight read on this loop's one thread;
@@ -266,7 +276,9 @@ typedef struct { int eid; uint8_t *buf, *base; uint64_t used; int pinned;
                  _Atomic int state;   /* K3S_LOADING while a reader fills it (K3_PIPE), else K3S_READY */
                  int pref;            /* read ahead by the prefetcher, not asked for yet */
                  int qd; unsigned qp; /* a queued read: its drive and its place in that drive's queue */
-                 int busy;            /* the MoE step being computed still needs it (k3_moe_waves) */
+                 int qd2; unsigned qp2;  /* a read cut in two (K3_MIRROR): its second piece's drive and place */
+                 int qparts, qalloc;  /* its pieces still to land; a reader making base for them (g_io.mx) */
+                 int busy;           /* the MoE step being computed still needs it (k3_moe_waves) */
                  int li;              /* the layer it was read for */
                  int pin_ok, pin_mem; /* a cache or working-set slot, whose bytes may be pinned
                                        * memory (K3_GPU_PIN_GB); base is that, not posix_memalign's */
@@ -363,6 +375,7 @@ typedef struct {
 } Model;
 
 static double now_s(void){ struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return t.tv_sec+t.tv_nsec*1e-9; }
+#include "k3_mirror.h"   /* the weights whole on two drives: an expert read from both at once (K3_MIRROR, K3_FILL) */
 
 /* ---------- K3_DRAFT (k3_draft.h, included after step_chunk): what the code before it reads ----------
  * A decode step may carry the tokens a draft model guesses behind the one it feeds -- a block --
@@ -2475,7 +2488,9 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
     if(layer_begin<0||layer_end>c->n_layers||layer_begin>=layer_end){
         fprintf(stderr,"invalid Kimi K3 layer range [%d,%d) for %d layers\n",
                 layer_begin,layer_end,c->n_layers); exit(1); }
+    if(!segment_mode) k3_fill(snap);   /* K3_FILL: the model's folder gets what K3_DIRS's hold and it lacks */
     st_init_multi(&m->S,snap,getenv("K3_DIRS"));   /* K3_DIRS: extra shard dirs (multi-drive split) */
+    if(!segment_mode) k3_mirror_setup(m);   /* K3_MIRROR: the files whole on another drive too */
     m->pfx[0]=0;   /* probe a layer-0 tensor: embed/head live in one of the LAST shards */
     if(!st_has(&m->S,"model.layers.0.input_layernorm.weight")&&
        st_has(&m->S,"language_model.model.layers.0.input_layernorm.weight"))
@@ -3842,29 +3857,76 @@ static void cache_promote(Model *m,int li,Slot *dst,Slot *loaded){
     dst->used=++m->clock;
     cache_index(m,li,dst);
 }
-/* A shard's handle for a reader: with `own` (a reader thread's table, Windows) one the
- * reader opened itself, on first use -- reads through one synchronous Windows handle are
- * serialized by its file object's lock, so readers sharing the engine's handle read one
- * expert of a shard at a time; elsewhere pread on the shared descriptor runs concurrently.
- * direct: the unbuffered twin (-1 when there is none). */
-static int k3_io_fd(Model *m, int *own, int fi, int direct){
-    if(fi<0) return -1;
+/* A reader's own handles (Windows): opened on first use, each file's unbuffered and buffered one
+ * and its copy's (k3_mirror.h) -- reads through one synchronous Windows handle are serialized by
+ * its file object's lock, so readers sharing the engine's descriptors read one expert of a shard at
+ * a time. They are Windows handles, not C descriptors: msvcrt has 2,048 of those for the whole
+ * process, and with the 188 files of the cut layout whole on both drives the readers' own
+ * descriptors went past them in the middle of a prompt (an open failed, and two readers that
+ * called exit() at once waited for each other in k3_io_stop). Elsewhere a reader reads through
+ * the engine's descriptors (pread runs concurrently on them) and has no table. */
+typedef struct { intptr_t h[2][2][ST_MAX_SHARDS]; } K3Own;   /* [rep][direct][file]: 0 not opened yet, -1 cannot be */
+#ifdef _WIN32
+static void k3_win_read(HANDLE h, void *buf, int64_t n, int64_t off, const char *what){
+    HANDLE ev=CreateEventA(NULL,TRUE,FALSE,NULL);
+    int64_t done=0;
+    while(done<n){
+        DWORD rd=0, err=0;
+        BOOL ok=FALSE;
+        if(ev){
+            const DWORD chunk=(DWORD)(n-done>((int64_t)1<<30)?((int64_t)1<<30):n-done);
+            OVERLAPPED ov; memset(&ov,0,sizeof ov);
+            ov.Offset=(DWORD)((uint64_t)(off+done)&0xFFFFFFFFu); ov.OffsetHigh=(DWORD)((uint64_t)(off+done)>>32);
+            ov.hEvent=ev;
+            ok=ReadFile(h,(char*)buf+done,chunk,&rd,&ov);
+            if(!ok&&GetLastError()==ERROR_IO_PENDING) ok=GetOverlappedResult(h,&ov,&rd,TRUE);
+        }
+        if(!ok) err=GetLastError();
+        if(!ok||!rd){   /* exit() would run k3_io_stop, which waits for this very reader */
+            fprintf(stderr,"%s: %lld bytes at %lld: %s (Windows error %lu)\n",what,(long long)(n-done),(long long)(off+done),
+                    ok?"the file ends there":"read failed",(unsigned long)err);
+            fflush(stderr); _exit(1);
+        }
+        done+=rd;
+    }
+    CloseHandle(ev);
+}
+#endif
+/* n bytes at off of shard fi (rep 1: its copy on another drive) into buf, unbuffered (direct: buf,
+ * off and n 4 KiB multiples) or not: through the reader's own handle (own, Windows), else the
+ * engine's descriptor. A copy that cannot be opened gives way to the model folder's file, and a
+ * missing unbuffered twin to the buffered one: the same bytes either way. */
+static void k3_io_pread(Model *m, K3Own *own, int fi, int rep, int direct, void *buf, int64_t n, int64_t off, const char *what){
+    if(n<=0) return;
+    if(rep&&!g_k3_mpath[fi]) rep=0;
 #ifdef _WIN32
     if(own){
-        int *h=&own[(direct?0:ST_MAX_SHARDS)+fi];
-        if(*h==-2) *h=direct?compat_open_direct(m->S.paths[fi]):open(m->S.paths[fi],COMPAT_O_RDONLY);
-        return *h;
+        intptr_t *h=&own->h[rep][direct][fi];
+        if(!*h){
+            const char *path=rep?g_k3_mpath[fi]:m->S.paths[fi];
+            HANDLE w=CreateFileA(path,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,NULL,OPEN_EXISTING,
+                                 FILE_FLAG_OVERLAPPED|(direct?FILE_FLAG_NO_BUFFERING:0),NULL);
+            *h=w==INVALID_HANDLE_VALUE?-1:(intptr_t)w;
+            if(*h==-1){ fprintf(stderr,"[K3] a reader cannot open %s (Windows error %lu)\n",path,(unsigned long)GetLastError()); fflush(stderr); }
+        }
+        if(*h!=-1){ k3_win_read((HANDLE)*h,buf,n,off,what); return; }
+        if(rep){ k3_io_pread(m,own,fi,0,direct,buf,n,off,what); return; }
     }
 #else
     (void)own;
 #endif
-    return direct?m->S.dfds[fi]:m->S.fds[fi];
+    int fd=rep?(direct?m->S.mdfds[0][fi]:m->S.mfds[0][fi]):(direct?m->S.dfds[fi]:m->S.fds[fi]);
+    if(fd<0&&rep){ k3_io_pread(m,NULL,fi,0,direct,buf,n,off,what); return; }
+    if(fd<0&&direct) fd=m->S.fds[fi];
+    st_pread_full(fd,buf,n,off,what);
 }
 /* The bytes of expert eid of layer li into slot s (s->buf: where they start). Called by
- * the readers with their handles, and on the caller's thread (own NULL). */
-static void expert_read_h0(Model *m, int li, int eid, Slot *s, int *own);
-static void expert_read_h(Model *m, int li, int eid, Slot *s, int *own){
-    expert_read_h0(m,li,eid,s,own);
+ * the readers with their handles, and on the caller's thread (own NULL). part 0: the whole
+ * expert; 1 and 2: the first and the second piece of a read cut in two (K3_MIRROR), from the
+ * model folder's file and from its copy -- s->buf is then k3_io_main's to set, when both landed. */
+static void expert_read_h0(Model *m, int li, int eid, Slot *s, K3Own *own, int part);
+static void expert_read_h(Model *m, int li, int eid, Slot *s, K3Own *own){
+    expert_read_h0(m,li,eid,s,own,0);
     if(g_k3_check){ s->ck=k3_ck_bytes(s->buf,(size_t)m->e_slot); s->ck_li=li; s->ck_eid=eid; }
 }
 /* K3_CHECK: slot s, which expert j of a step of layer li takes, still holds what its read brought */
@@ -3882,17 +3944,41 @@ static void k3_ck_slot(Model *m, Slot *s, int li, int eid, int j, const char *wh
                          atomic_load(&s->state),s->busy,s->ra,s->li,s->eid);
     }
 }
-static void expert_read_h0(Model *m, int li, int eid, Slot *s, int *own){
-    if(!s->base){
+/* slot s's memory (its first read): pinned for the GPU's copies while there is some, else 4 KiB-aligned */
+static void k3_slot_base(Model *m, Slot *s){
+    if(s->base) return;
 #ifdef COLI_K3_CUDA
-        if(s->pin_ok&&g_k3g_on&&(s->base=k3_pin_bytes((size_t)m->e_slot+8192,g_k3ra&&s>=g_k3ra&&s<g_k3ra+g_k3ra_n))) s->pin_mem=1; else
+    if(s->pin_ok&&g_k3g_on&&(s->base=k3_pin_bytes((size_t)m->e_slot+8192,g_k3ra&&s>=g_k3ra&&s<g_k3ra+g_k3ra_n))) s->pin_mem=1; else
 #endif
-        if(posix_memalign((void**)&s->base,4096,(size_t)m->e_slot+8192)){
-            fprintf(stderr,"OOM expert slot\n"); exit(1); }
-    }
+    if(posix_memalign((void**)&s->base,4096,(size_t)m->e_slot+8192)){
+        fprintf(stderr,"OOM expert slot\n"); exit(1); }
+}
+/* The aligned window an expert's unbuffered read covers: from a0 (its offset rounded down to 4
+ * KiB, pad bytes before it), dlen bytes (4 KiB multiples, inside the file) and want-dlen more
+ * bytes past them read buffered (the file's end) */
+static void k3_expert_window(const Model *m, const ERef *er, int64_t *a0, int64_t *pad, int64_t *dlen, int64_t *want){
+    *a0=er->off[0]&~4095LL; *pad=er->off[0]-*a0;
+    *want=*pad+m->e_slot;
+    *dlen=(*want+4095)&~4095LL;
+    const int64_t size=m->S.sizes[er->fi[0]];
+    if(*a0+*dlen>size) *dlen=(size-*a0)&~4095LL;
+}
+static void expert_read_h0(Model *m, int li, int eid, Slot *s, K3Own *own, int part){
+    k3_slot_base(m,s);
     ERef *er=&m->eref[(int64_t)li*m->c.n_experts+eid];
     int64_t sizes[6]={m->e_w1p,m->e_w1s,m->e_w2p,m->e_w2s,m->e_w1p,m->e_w1s};
     if(er->fd[0]<0){ fprintf(stderr,"[K3] expert L%d E%d missing on disk\n",li,eid); exit(1); }
+    if(part){   /* a piece: [0, cut) of the window from the model folder's file, [cut, dlen) and the
+                 * tail from its copy (part 3: all of it from the copy); the same bytes at the same
+                 * places as the whole read's */
+        int64_t a0, pad, dlen, want;
+        k3_expert_window(m,er,&a0,&pad,&dlen,&want);
+        const int64_t cut=part==3?0:k3_mirror_cut(dlen), lo=part==1?0:cut, hi=part==1?cut:dlen;
+        const int rep=part!=1;
+        k3_io_pread(m,own,er->fi[0],rep,g_k3_direct?1:0,s->base+lo,hi-lo,a0+lo,"pread expert piece");
+        if(part!=1) k3_io_pread(m,own,er->fi[0],rep,0,s->base+dlen,want-dlen,a0+dlen,"pread expert tail");
+        return;
+    }
     s->li=li;
     if(m->gx){   /* a GGUF's: w1, w3 and w2 from their three tensors, one after the other */
         uint8_t *dst=s->base;
@@ -3901,31 +3987,25 @@ static void expert_read_h0(Model *m, int li, int eid, Slot *s, int *own){
         return;
     }
     if(er->contig){
-        int dfd = g_k3_direct ? k3_io_fd(m,own,er->fi[0],1) : -1;
-        int bfd = k3_io_fd(m,own,er->fi[0],0);
-        if(bfd<0) bfd=er->fd[0];
-        if(dfd>=0){
+        if(g_k3_direct){
             /* aligned window read; sub-4K head/tail slack handled explicitly.
              * The tail past the last aligned block (or past EOF) is fetched
              * with a tiny buffered pread — O_DIRECT wants aligned lengths. */
-            int64_t a0=er->off[0]&~4095LL, pad=er->off[0]-a0;
-            int64_t want=pad+m->e_slot, size=m->S.sizes[er->fi[0]];
-            int64_t dlen=(want+4095)&~4095LL;
-            if(a0+dlen>size) dlen=(size-a0)&~4095LL;
-            if(dlen>0) st_pread_full(dfd,s->base,dlen,a0,"pread expert direct");
-            if(dlen<want)
-                st_pread_full(bfd,s->base+dlen,want-dlen,a0+dlen,"pread expert tail");
+            int64_t a0, pad, dlen, want;
+            k3_expert_window(m,er,&a0,&pad,&dlen,&want);
+            k3_io_pread(m,own,er->fi[0],0,1,s->base,dlen,a0,"pread expert direct");
+            k3_io_pread(m,own,er->fi[0],0,0,s->base+dlen,want-dlen,a0+dlen,"pread expert tail");
             s->buf=s->base+pad;
         } else {
-            st_pread_full(bfd,s->base,m->e_slot,er->off[0],"pread expert");
+            k3_io_pread(m,own,er->fi[0],0,0,s->base,m->e_slot,er->off[0],"pread expert");
             s->buf=s->base;
         }
     } else {
         uint8_t *dst=s->base;
         for(int k=0;k<6;k++){
             if(er->fd[k]<0){ fprintf(stderr,"[K3] expert L%d E%d tensor %d missing on disk\n",li,eid,k); exit(1); }
-            int fd=k3_io_fd(m,own,er->fi[k],0);
-            st_pread_full(fd>=0?fd:er->fd[k],dst,sizes[k],er->off[k],"pread expert");
+            if(er->fi[k]>=0) k3_io_pread(m,own,er->fi[k],0,0,dst,sizes[k],er->off[k],"pread expert");
+            else st_pread_full(er->fd[k],dst,sizes[k],er->off[k],"pread expert");
             dst+=sizes[k];
         }
         s->buf=s->base;
@@ -4038,20 +4118,31 @@ static VktExpertSrc k3_vk_src(const Model *m, int li, const uint8_t *b){
  *
  * None of this changes a number: an expert is computed once its slot is K3S_READY, from
  * the same bytes, and a step adds its experts in the union's order as before. What
- * changes is when the bytes arrive and which experts stay cached. */
+ * changes is when the bytes arrive and which experts stay cached.
+ *
+ * With the shard files whole on two drives (k3_mirror.h) a read is cut in two: its first
+ * piece queued on the model folder's drive, its second on the copy's, at the same priority,
+ * and the slot is K3S_READY when the second of them lands (qparts). */
 #define LP_MAX 64
 #define K3_IOQ 4096
 #define K3_IO_DRIVES 8
-typedef struct { Slot *s; int li, eid; } K3IoJob;
+typedef struct { Slot *s; int li, eid, part; int64_t nb; } K3IoJob;   /* part: expert_read_h0's (0 whole, 1/2 a piece,
+                                                                       * 3 whole from the copy); nb: its bytes */
 static struct {
     pthread_t th[64];
     int nth, started, quit, ndrive;
     pthread_mutex_t mx;
     pthread_cond_t job, done;
     int drive_of[ST_MAX_SHARDS];                  /* a shard's device: its queue pair */
+    int mdrive_of[ST_MAX_SHARDS];                 /* its copy's device (K3_MIRROR), -1: none */
     K3IoJob q[K3_IO_DRIVES][2][K3_IOQ];           /* [drive][0: demands, 1: prefetches], rings head..tail */
     unsigned head[K3_IO_DRIVES][2], tail[K3_IO_DRIVES][2];
     unsigned long long finished;                  /* reads completed */
+    char dname[K3_IO_DRIVES][8];                  /* a device's name in the reports ("C:") */
+    double rbytes[K3_IO_DRIVES], rbusy[K3_IO_DRIVES];   /* bytes each device's readers read; seconds with a read in flight */
+    double ron[K3_IO_DRIVES]; int ract[K3_IO_DRIVES];   /* since when it has one, how many it has */
+    double qbytes[K3_IO_DRIVES];                  /* bytes queued or being read on each device */
+    unsigned long long rcount[K3_IO_DRIVES];
     Model *m;
 } g_io;                                           /* zeroed (1 MB of queues in .bss): k3_io_start makes its locks */
 
@@ -4060,10 +4151,12 @@ static int g_k3_io_delay_us;                      /* K3_IO_DELAY_US (tests): a s
 static void *k3_io_main(void *arg){
     K3IoArg a=*(K3IoArg*)arg;
     free(arg);
-    int d=a.drive, nh=2*ST_MAX_SHARDS;
-    int *own=malloc((size_t)nh*sizeof(int));
+    int d=a.drive;
+    K3Own *own=NULL;
+#ifdef _WIN32
+    own=calloc(1,sizeof *own);
     if(!own){ fprintf(stderr,"OOM reader handles\n"); exit(1); }
-    for(int i=0;i<nh;i++) own[i]=-2;
+#endif
     pthread_mutex_lock(&g_io.mx);
     for(;;){
         while(!g_io.quit && g_io.head[d][0]==g_io.tail[d][0] && g_io.head[d][1]==g_io.tail[d][1])
@@ -4072,16 +4165,40 @@ static void *k3_io_main(void *arg){
         int p=g_io.head[d][0]!=g_io.tail[d][0]?0:1;
         K3IoJob j=g_io.q[d][p][g_io.head[d][p]++%K3_IOQ];
         if(!j.s) continue;                        /* moved to the demands, or cancelled */
+        if(j.part&&!j.s->base){   /* a piece of a slot not read into before: one of its readers makes the memory */
+            while(j.s->qalloc) pthread_cond_wait(&g_io.done,&g_io.mx);
+            if(!j.s->base){
+                j.s->qalloc=1;
+                pthread_mutex_unlock(&g_io.mx);
+                k3_slot_base(a.m,j.s);
+                pthread_mutex_lock(&g_io.mx);
+                j.s->qalloc=0;
+                pthread_cond_broadcast(&g_io.done);
+            }
+        }
+        if(g_io.ract[d]++==0) g_io.ron[d]=now_s();
         pthread_mutex_unlock(&g_io.mx);
         if(g_k3_io_delay_us) usleep(g_k3_io_delay_us);
-        expert_read_h(a.m,j.li,j.eid,j.s,own);
+        if(j.part) expert_read_h0(a.m,j.li,j.eid,j.s,own,j.part);
+        else expert_read_h(a.m,j.li,j.eid,j.s,own);
         pthread_mutex_lock(&g_io.mx);
+        g_io.rbytes[d]+=(double)j.nb; g_io.rcount[d]++; g_io.qbytes[d]-=(double)j.nb;
+        if(--g_io.ract[d]==0) g_io.rbusy[d]+=now_s()-g_io.ron[d];
+        if(j.part&&--j.s->qparts>0) continue;     /* the other piece is still on its way */
+        if(j.part){   /* both pieces landed: the slot is the whole read's */
+            const ERef *er=&a.m->eref[(int64_t)j.li*a.m->c.n_experts+j.eid];
+            j.s->buf=j.s->base+(er->off[0]&4095); j.s->li=j.li;
+            if(g_k3_check){ j.s->ck=k3_ck_bytes(j.s->buf,(size_t)a.m->e_slot); j.s->ck_li=j.li; j.s->ck_eid=j.eid; }
+        }
         atomic_store_explicit(&j.s->state,K3S_READY,memory_order_release);
         g_io.finished++;
         pthread_cond_broadcast(&g_io.done);
     }
     pthread_mutex_unlock(&g_io.mx);
-    for(int i=0;i<nh;i++) if(own[i]>=0) close(own[i]);
+#ifdef _WIN32
+    for(int r=0;r<2;r++) for(int k=0;k<2;k++) for(int i=0;i<ST_MAX_SHARDS;i++)
+        if(own->h[r][k][i]&&own->h[r][k][i]!=-1) CloseHandle((HANDLE)own->h[r][k][i]);
+#endif
     free(own);
     return NULL;
 }
@@ -4095,9 +4212,12 @@ static void k3_io_stop(void){
         if(!pthread_equal(g_io.th[i],pthread_self())) pthread_join(g_io.th[i],NULL);
     g_io.started=0; g_io.nth=0;
 }
-/* K3_IO_PER_DRIVE readers (2) on each device the shards are on, or K3_IO_THREADS in
- * all on one queue (K3_LOAD_THREADS, the old pool's size, is read as that when set);
- * K3_PIPE=0 or K3_IO_THREADS=0: every read on the caller, as before the pool. */
+/* K3_IO_PER_DRIVE readers on each device the shards are on (2; 3 when the files have copies
+ * on another drive, k3_mirror.h), or K3_IO_THREADS in all on one queue (K3_LOAD_THREADS, the
+ * old pool's size, is read as that when set); K3_PIPE=0 or K3_IO_THREADS=0: every read on the
+ * caller, as before the pool. Measured on the 4090 machine (a 3,759-token prompt and 128 tokens
+ * with the draft model): the cut layout 1,208 ms a token with 2, 1,244 with 3 (more read ahead,
+ * no more read); both drives whole 1,168 with 2, 1,142 with 3. */
 static void k3_io_start(Model *m){
     if(g_io.started) return;
     g_io.started=1;
@@ -4105,25 +4225,45 @@ static void k3_io_start(Model *m){
     pthread_cond_init(&g_io.job,NULL);
     pthread_cond_init(&g_io.done,NULL);
     if(!g_k3_pipe) return;
+    g_k3_mirror_full=g_k3_mirror_on;   /* k3_mirror.h: a copy of every file a routed expert is in? */
+    for(int li=0;li<m->c.n_layers&&g_k3_mirror_full;li++){
+        if(!m->L[li].sparse) continue;
+        for(int e=0;e<m->c.n_experts;e++){
+            const int fi=m->eref[(int64_t)li*m->c.n_experts+e].fi[0];
+            if(fi>=0&&(fi>=ST_MAX_SHARDS||!g_k3_mpath[fi])){ g_k3_mirror_full=0; break; }
+        }
+    }
     const char *pe=getenv("K3_IO_PER_DRIVE"), *te=getenv("K3_IO_THREADS");
     if(!te) te=getenv("K3_LOAD_THREADS");
-    int per=pe?atoi(pe):2, total=te?atoi(te):-1;
+    int per=pe&&*pe?atoi(pe):g_k3_mirror_full?3:2, total=te?atoi(te):-1;
     g_k3_io_delay_us=getenv("K3_IO_DELAY_US")?atoi(getenv("K3_IO_DELAY_US")):0;
     if(g_k3_io_delay_us<0) g_k3_io_delay_us=0;
     long long dev[K3_IO_DRIVES];
     g_io.ndrive=0;
-    for(int i=0;i<m->S.nfd&&i<ST_MAX_SHARDS;i++){
+    for(int i=0;i<2*ST_MAX_SHARDS;i++){   /* the shards' files, then their copies on other drives */
+        const int fi=i%ST_MAX_SHARDS, rep=i>=ST_MAX_SHARDS;
+        if(fi>=m->S.nfd){ if(rep) g_io.mdrive_of[fi]=-1; continue; }
+        const char *path=rep?g_k3_mpath[fi]:m->S.paths[fi];
+        if(!path){ g_io.mdrive_of[fi]=-1; continue; }
         struct stat sb;
-        long long id=stat(m->S.paths[i],&sb)==0?(long long)sb.st_dev:-1;
+        long long id=stat(path,&sb)==0?(long long)sb.st_dev:-1;
+        if(rep&&id>=0&&k3m_any()) id+=1LL<<40;   /* tests: the copies' folder as a drive of its own */
         int k=0;
         while(k<g_io.ndrive&&dev[k]!=id) k++;
         if(k==g_io.ndrive){
-            if(g_io.ndrive<K3_IO_DRIVES&&total<0) dev[g_io.ndrive++]=id;
+            if(g_io.ndrive<K3_IO_DRIVES&&total<0){
+                dev[g_io.ndrive]=id;
+#ifdef _WIN32
+                if(path[0]&&path[1]==':'&&!(rep&&k3m_any())) snprintf(g_io.dname[g_io.ndrive],sizeof g_io.dname[0],"%c:",path[0]); else
+#endif
+                snprintf(g_io.dname[g_io.ndrive],sizeof g_io.dname[0],"#%d",g_io.ndrive);
+                g_io.ndrive++;
+            }
             else k=0;
         }
-        g_io.drive_of[i]=k;
+        if(rep) g_io.mdrive_of[fi]=k; else g_io.drive_of[fi]=k;
     }
-    if(!g_io.ndrive) g_io.ndrive=1;
+    if(!g_io.ndrive){ g_io.ndrive=1; snprintf(g_io.dname[0],sizeof g_io.dname[0],"#0"); }
     int n=total>=0?total:per*g_io.ndrive;
     if(n<0) n=0;
     if(n>64) n=64;
@@ -4140,11 +4280,55 @@ static void k3_io_start(Model *m){
         g_io.nth++;
     }
     if(g_io.nth&&g_io.nth<g_io.ndrive){   /* too few to give each drive one: one shared queue */
-        for(int i=0;i<ST_MAX_SHARDS;i++) g_io.drive_of[i]=0;
+        for(int i=0;i<ST_MAX_SHARDS;i++){ g_io.drive_of[i]=0; if(g_io.mdrive_of[i]>0) g_io.mdrive_of[i]=0; }
         g_io.ndrive=1;
     }
     atexit(k3_io_stop);
-    fprintf(stderr,"[K3] expert readers: %d on %d device(s)\n",g_io.nth,g_io.ndrive);
+    int nm=0;
+    for(int i=0;i<m->S.nfd&&i<ST_MAX_SHARDS;i++) nm+=g_io.mdrive_of[i]>=0;
+    fprintf(stderr,"[K3] expert readers: %d on %d device(s)%s\n",g_io.nth,g_io.ndrive,
+            !(g_k3_mirror_on&&nm&&g_io.nth>1)?"":
+            g_k3_mirror_full?"; a read of a file with a copy on another drive is cut in two, a piece on each":
+            "; some files have no copy: a read of a file with one goes whole to the drive whose queue is shorter");
+}
+/* each drive's reads so far: what its readers read and the seconds their reads took (a snapshot,
+ * for a phase's own share: k3_io_drives_report) */
+typedef struct { double bytes[K3_IO_DRIVES], busy[K3_IO_DRIVES]; unsigned long long n[K3_IO_DRIVES]; double t; } K3IoStat;
+static void k3_io_stat(K3IoStat *st){
+    memset(st,0,sizeof *st);
+    st->t=now_s();
+    if(!g_io.nth) return;
+    pthread_mutex_lock(&g_io.mx);
+    for(int d=0;d<g_io.ndrive;d++){
+        st->bytes[d]=g_io.rbytes[d]; st->n[d]=g_io.rcount[d];
+        st->busy[d]=g_io.rbusy[d]+(g_io.ract[d]>0?st->t-g_io.ron[d]:0);
+    }
+    pthread_mutex_unlock(&g_io.mx);
+}
+/* "[K3] reads (<scope>): C: 512 GB ..., 9.1 GB/s while reading (61% of the time) ..." from `from` (NULL:
+ * the start) to `to` (NULL: now) */
+static void k3_io_drives_report(const char *scope, const K3IoStat *from, const K3IoStat *to){
+    if(!g_io.nth) return;
+    K3IoStat now;
+    if(to) now=*to; else k3_io_stat(&now);
+    const double wall=from?now.t-from->t:0;
+    double all=0;
+    char line[1024]; int at=0;
+    for(int d=0;d<g_io.ndrive;d++){
+        /* busy: the seconds the drive had a read in flight; its rate then, and the share of the time */
+        const double b=now.bytes[d]-(from?from->bytes[d]:0), busy=now.busy[d]-(from?from->busy[d]:0);
+        const unsigned long long n=now.n[d]-(from?from->n[d]:0);
+        all+=b;
+        if(!n) continue;
+        at+=snprintf(line+at,sizeof line-at,"%s %s %.1f GB in %llu reads, %.1f GB/s while reading",at?";":"",
+                     g_io.dname[d],b/1e9,n,b/1e9/(busy+1e-12));
+        if(wall>0&&at<(int)sizeof line) at+=snprintf(line+at,sizeof line-at," (%.0f%% of the time)",100.0*busy/wall);
+        if(at>=(int)sizeof line) break;
+    }
+    if(!at) return;
+    fprintf(stderr,"[K3] reads (%s):%s",scope,line);
+    if(wall>0) fprintf(stderr,"; together %.1f GB/s over %.1f s",all/1e9/wall,wall);
+    fprintf(stderr,"\n");
 }
 /* Queue p of drive d with its jobs moved up over the holes (under g_io.mx; a moved prefetch's
  * slot follows it, qp). A prefetch a step asks for moves to the demands and leaves NULL where it
@@ -4158,13 +4342,20 @@ static void k3_io_compact(int d, int p){
     for(unsigned k=h;k!=t;k++){
         K3IoJob j=g_io.q[d][p][k%K3_IOQ];
         if(!j.s) continue;
-        if(w!=k){ g_io.q[d][p][w%K3_IOQ]=j; if(p) j.s->qp=w; }
+        if(w!=k){ g_io.q[d][p][w%K3_IOQ]=j; if(p){ if(j.part==2) j.s->qp2=w; else j.s->qp=w; } }
         w++;
     }
     g_io.tail[d][p]=w;
 }
+/* room for `need` more jobs in queue p of drive d (under g_io.mx; compacted first when full) */
+static int k3_io_room(int d, int p, unsigned need){
+    if(g_io.tail[d][p]-g_io.head[d][p]+need>K3_IOQ) k3_io_compact(d,p);
+    return g_io.tail[d][p]-g_io.head[d][p]+need<=K3_IOQ;
+}
 /* Slot s gets expert eid of layer li: queued for a reader (K3S_LOADING until it is
- * complete), or read now when there is no reader. The caller owns s->eid. */
+ * complete), or read now when there is no reader. The caller owns s->eid. A shard file with
+ * a copy on another drive (K3_MIRROR): two jobs, the read's first piece on the file's drive
+ * and its second on the copy's. */
 static void k3_io_submit(Model *m, Slot *s, int li, int eid, int prefetch){
     if(!g_io.started) k3_io_start(m);
     if(!g_io.nth){
@@ -4172,45 +4363,78 @@ static void k3_io_submit(Model *m, Slot *s, int li, int eid, int prefetch){
         atomic_store_explicit(&s->state,K3S_READY,memory_order_release);
         return;
     }
-    int fi=m->eref[(int64_t)li*m->c.n_experts+eid].fi[0];
+    const ERef *er=&m->eref[(int64_t)li*m->c.n_experts+eid];
+    int fi=er->fi[0];
     int d=fi>=0?g_io.drive_of[fi]:0, p=prefetch?1:0;
+    int d2=g_k3_mirror_on&&fi>=0&&g_k3_mpath[fi]&&er->contig&&!m->gx&&g_io.nth>1?g_io.mdrive_of[fi]:-1;
+    int part=0;
+    int64_t nb=m->e_slot, nb2=0;
+    const int whole=g_k3_io_whole||!g_k3_mirror_full;   /* a large step's read, or copies of some files only */
+    if(d2>=0&&!whole){   /* cut in two: the window's first piece here, the rest and the tail from the copy */
+        int64_t a0, pad, dlen, want;
+        k3_expert_window(m,er,&a0,&pad,&dlen,&want);
+        const int64_t cut=k3_mirror_cut(dlen);
+        part=1; nb=cut; nb2=dlen-cut+(want>dlen?want-dlen:0);
+    }
     atomic_store_explicit(&s->state,K3S_LOADING,memory_order_relaxed);
     pthread_mutex_lock(&g_io.mx);
-    if(g_io.tail[d][p]-g_io.head[d][p]>=K3_IOQ) k3_io_compact(d,p);
-    if(g_io.tail[d][p]-g_io.head[d][p]>=K3_IOQ){
+    if(d2>=0&&whole){   /* whole, from the drive whose queue is shorter for its share */
+        const double e=(double)m->e_slot;
+        if((g_io.qbytes[d2]+e)/(1.0-g_k3_msplit)<(g_io.qbytes[d]+e)/g_k3_msplit){ part=3; d=d2; }
+        d2=-1;
+    }
+    if(!k3_io_room(d,p,d2==d?2:1)||(d2>=0&&d2!=d&&!k3_io_room(d2,p,1))){
         pthread_mutex_unlock(&g_io.mx);   /* exit's k3_io_stop takes it: held, the process hung there */
         fprintf(stderr,"[K3] reader queue overflow\n"); exit(1);
     }
+    s->qparts=d2>=0?2:1; s->qd2=d2;
     s->qd=d; s->qp=g_io.tail[d][p];
-    g_io.q[d][p][g_io.tail[d][p]++%K3_IOQ]=(K3IoJob){s,li,eid};
+    g_io.q[d][p][g_io.tail[d][p]++%K3_IOQ]=(K3IoJob){s,li,eid,part,nb};
+    g_io.qbytes[d]+=(double)nb;
+    if(d2>=0){
+        s->qp2=g_io.tail[d2][p];
+        g_io.q[d2][p][g_io.tail[d2][p]++%K3_IOQ]=(K3IoJob){s,li,eid,2,nb2};
+        g_io.qbytes[d2]+=(double)nb2;
+    }
     pthread_cond_broadcast(&g_io.job);
     pthread_mutex_unlock(&g_io.mx);
 }
-/* is s's prefetch still in its queue (no reader has taken it)? under g_io.mx */
-static int k3_io_queued(Slot *s){
-    int d=s->qd;
-    return s->qp-g_io.head[d][1]<g_io.tail[d][1]-g_io.head[d][1] && g_io.q[d][1][s->qp%K3_IOQ].s==s;
+/* is s's prefetch still in its queue (no reader has taken it)? k 1: its second piece's. Under g_io.mx */
+static int k3_io_queued_k(Slot *s, int k){
+    const int d=k?s->qd2:s->qd;
+    const unsigned qp=k?s->qp2:s->qp;
+    if(d<0) return 0;
+    const K3IoJob *j=&g_io.q[d][1][qp%K3_IOQ];
+    return qp-g_io.head[d][1]<g_io.tail[d][1]-g_io.head[d][1] && j->s==s && (j->part==2)==(k==1);
 }
-/* A prefetch the step asks for, still queued: it moves to the demands. */
+/* A prefetch the step asks for, still queued: it moves to the demands (each piece still queued). */
 static void k3_io_promote(Slot *s){
     if(!g_io.nth) return;
     pthread_mutex_lock(&g_io.mx);
-    if(k3_io_queued(s)&&g_io.tail[s->qd][0]-g_io.head[s->qd][0]<K3_IOQ){   /* demands full: it is read where it waits */
-        int d=s->qd;
-        g_io.q[d][0][g_io.tail[d][0]++%K3_IOQ]=g_io.q[d][1][s->qp%K3_IOQ];
-        g_io.q[d][1][s->qp%K3_IOQ].s=NULL;
+    for(int k=0;k<2;k++){
+        if(!k3_io_queued_k(s,k)) continue;
+        const int d=k?s->qd2:s->qd;
+        const unsigned qp=k?s->qp2:s->qp;
+        if(g_io.tail[d][0]-g_io.head[d][0]>=K3_IOQ) continue;   /* demands full: it is read where it waits */
+        g_io.q[d][0][g_io.tail[d][0]++%K3_IOQ]=g_io.q[d][1][qp%K3_IOQ];
+        g_io.q[d][1][qp%K3_IOQ].s=NULL;
         pthread_cond_broadcast(&g_io.job);
     }
     pthread_mutex_unlock(&g_io.mx);
 }
 /* A prefetch its layer's step did not ask for, still queued: it leaves the queue and its
  * slot is free (1). 0 when a reader holds it already (the read finishes, the slot goes
- * first). Left queued it would be read before the next layer's prefetches. */
+ * first) -- or one of its two pieces. Left queued it would be read before the next layer's
+ * prefetches. */
 static int k3_io_cancel(Model *m, int li, Slot *s){
     if(!g_io.nth) return 0;
     pthread_mutex_lock(&g_io.mx);
-    int queued=k3_io_queued(s);
-    if(queued) g_io.q[s->qd][1][s->qp%K3_IOQ].s=NULL;
+    int queued=k3_io_queued_k(s,0)&&(s->qd2<0||k3_io_queued_k(s,1));
+    if(queued){
+        K3IoJob *j=&g_io.q[s->qd][1][s->qp%K3_IOQ];
+        g_io.qbytes[s->qd]-=(double)j->nb; j->s=NULL;
+        if(s->qd2>=0){ j=&g_io.q[s->qd2][1][s->qp2%K3_IOQ]; g_io.qbytes[s->qd2]-=(double)j->nb; j->s=NULL; }
+    }
     pthread_mutex_unlock(&g_io.mx);
     if(!queued) return 0;
     cache_unindex(m,li,s);
@@ -4401,7 +4625,11 @@ static void k3_prefetch_pending(Model *m){
     unsigned waiting=0;
     k3_io_start(m);
     pthread_mutex_lock(&g_io.mx);
-    for(int d=0;d<g_io.ndrive;d++) waiting+=g_io.tail[d][1]-g_io.head[d][1];
+    for(int d=0;d<g_io.ndrive;d++){
+        if(!g_k3_mirror_on){ waiting+=g_io.tail[d][1]-g_io.head[d][1]; continue; }
+        for(unsigned k=g_io.head[d][1];k!=g_io.tail[d][1];k++)   /* a read cut in two counts once */
+            waiting+=g_io.q[d][1][k%K3_IOQ].part!=2||!g_io.q[d][1][k%K3_IOQ].s;
+    }
     pthread_mutex_unlock(&g_io.mx);
     int room=m->ecache[li].cap/2;
     for(int k=0;k<no&&room>0&&waiting<(unsigned)g_k3_pf_limit;k++){
@@ -6046,6 +6274,7 @@ static void moe_forward(Model *m, Layer *l, int li, const float *x, int C, float
     Cfg *c=&m->c; Moe *o=&l->moe;
     int E=c->n_experts, K=c->topk, LT=c->latent;
     double t0=now_s();
+    g_k3_io_whole=g_k3_mirror_on&&g_k3_mirror_rows>=0&&C>g_k3_mirror_rows;   /* k3_mirror.h: whole reads in a large step */
     float *sco=k3_balloc((int64_t)C*E);
     if(!K3_F32_DEV(o->vk_router,sco,x,C,c->hidden,E)) k3_router_scores(o,sco,x,C,c->hidden,E);
     int *idxs=malloc((size_t)C*K*sizeof(int)); float *wsels=falloc((int64_t)C*K);
@@ -7849,7 +8078,7 @@ static void serve_hits(Model *m){
 }
 
 /* When a request's prefill began, and the counters then: DONE and PROF report its share. */
-typedef struct { double t0, a0, e0, d0, h0; uint64_t hit0, miss0; } K3ReqClock;
+typedef struct { double t0, a0, e0, d0, h0; uint64_t hit0, miss0; K3IoStat io0; } K3ReqClock;
 /* A served prompt's stages. "MoE 3291s" alone says only that the experts spent it: this says
  * whether the CPU computed them, waited on a drive or summed them, and whether the reads the
  * prefetcher made were the ones asked for. A step of thousands of rows runs for minutes, so
@@ -8054,6 +8283,7 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
 #endif
     clk->t0=now_s(); clk->a0=m->t_attn; clk->e0=m->t_moe; clk->d0=m->t_eload; clk->h0=m->t_head;
     clk->hit0=m->hits; clk->miss0=m->miss;
+    k3_io_stat(&clk->io0);
     float *lo=NULL;
     /* `i` is the ABSOLUTE position: attention and the MLA Lc/Rc slots are
      * position-indexed, so the loop starts at `reuse`, not at 0. */
@@ -8139,6 +8369,7 @@ static int serve_one(Model *m, Tok *T, ServeReq *q){
     char buf[512], xtag[320];   /* tool-call open tags carry attributes: call tool="..." index="..." (#1143) */
     double tg=now_s();
     int forwards=1;                       /* the prefill; decode steps are counted where they run */
+    K3IoStat io_reply; k3_io_stat(&io_reply);
     k3d_stats_reset();
     for(int s=0;s<q->max_tok&&!cancelled;s++){
         int tk=sample_tok(lo,m->c.vocab,q->temp,q->top_p);
@@ -8216,7 +8447,10 @@ static int serve_one(Model *m, Tok *T, ServeReq *q){
            dt,np,gen,disk,0.0,moe>disk?moe-disk:moe,m->t_attn-a0,m->t_head-h0,forwards);
     fflush(stdout);
     k3_io_report(m,"turn");
+    k3_io_drives_report("the turn's prompt",&clk.io0,&io_reply);
+    k3_io_drives_report("the turn's reply",&io_reply,NULL);
     k3d_report("turn",gen);
+    fflush(stderr);   /* the turn's lines now, not when msvcrt's buffer of a redirected stderr fills */
 #ifdef COLI_CUDA
     k3_cuda_report("turn");
 #endif
@@ -8599,6 +8833,7 @@ int main(int argc, char **argv){
         fprintf(stderr,"[K3] K3_TRACE set: prefill chunk forced to 1\n");
     }
     double t0=now_s(), pf0=k3_page_faults(); float *lo=NULL;
+    K3IoStat io_prompt; k3_io_stat(&io_prompt);
     k3d_sync(ids,0);
     /* K3_SNAP_TEST=N (tests): the KDA layers' calls of the step that crosses position N made in
      * two, as the system prompt's photo makes them (kda_forward) -- the logits must not move */
@@ -8622,6 +8857,7 @@ int main(int argc, char **argv){
             "their sums %.1f); %.0f GB read\n",
             m.t_attn,m.t_attn-m.t_mla,m.t_mla,m.t_moe,m.t_route,m.t_lat,m.t_shared,m.t_wave,m.t_eload,m.t_qx,m.t_wsum,
             m.ebytes/1e9);
+    k3_io_drives_report("the prompt",&io_prompt,NULL);
     fprintf(stderr,"[K3] the prompt's KDA on the CPU: f32 projections %.1fs, conv %.1fs, heads %.1fs; on the GPU %.1fs; "
             "%.0f page faults\n",m.t_kda_f32,m.t_kda_conv,m.t_kda_heads,m.t_kda_gpu,k3_page_faults()-pf0);
     if(k3_dsa_indexer_on())
@@ -8658,6 +8894,7 @@ int main(int argc, char **argv){
         return 0;
     }
     double tg=now_s(); int ntok=0;
+    K3IoStat io_decode; k3_io_stat(&io_decode);
     char buf[512];
     /* chat print filter: hide the XTML structure, label the channels.
      * Structural runs are <|open|>/<|close|> TAGTEXT <|sep|> — suppress them
@@ -8727,6 +8964,7 @@ int main(int argc, char **argv){
         }
     }
     k3_io_report(&m,"run");
+    k3_io_drives_report("the decode",&io_decode,NULL);
     k3d_report("run",ntok);
     k3_reuse_save(&m);
 #ifdef COLI_CUDA

@@ -1,0 +1,198 @@
+# perf_cli.sh runs 01-06 (every read cut: mirror, mirror3), 13-20 (the hybrid: hyb, hyb3) and 29-31 (the release's exe: cut, partial = D: holding its parts only, full = the launcher's defaults); the exe beside C:\colibri's DLLs
+== 01 cut rc=0, 278.3 s in all (19:36)
+   [K3] init done in 8.9s | 93 layers | expert cache 82/layer (17.5 MB/slot) | RSS 34.3 GB
+   [K3] expert readers: 4 on 2 device(s)
+   [K3] prefill done in 107.3s (35.04 tok/s)
+   [K3] the prompt: attention 13.1s (KDA 9.1, MLA 4.0), MoE 88.0s (router and reads issued 2.0, latent 1.8, shared 5.2, routed experts computed 39.1, waiting for reads 41.3, their inputs 0.7, their sums 1.8); 1446 GB read
+   [K3] reads (the prompt): C: 887.9 GB in 50600 reads, 8.5 GB/s while reading (98% of the time); D: 558.6 GB in 31832 reads, 5.8 GB/s while reading (89% of the time); together 13.5 GB/s over 107.3 s
+   [K3] decode 128 tokens in 155.8s (0.82 tok/s) | expert hit 48.2% (118413/245812) | 3219.0 GB streamed
+   [K3] a decode token: 1217 ms -- attention 162, MoE 1034 (router and reads issued 34, latent 45, shared 117, routed experts computed 457, waiting for reads 377), head 1; 13.8 GB read
+   [K3] prefetch (run): 63322 experts read ahead, 39536 used, 23786 not (9059 of them cancelled unread); 58.7% of the routed experts were predicted; predicting took 2.3s
+   [K3] reads (the decode): C: 1078.1 GB in 61440 reads, 7.9 GB/s while reading (88% of the time); D: 694.4 GB in 39575 reads, 5.1 GB/s while reading (88% of the time); together 11.4 GB/s over 155.8 s
+   [K3-DRAFT] run: 128 tokens in 75 steps (1.71 a step); 53 of 55 drafts stood (by place: 23/24 17/18 13/13); the draft model 2.5s (74 passes)
+== 02 mirror rc=0, 277.8 s in all (19:41)
+   [K3-MIRROR] 188 of 188 shard files (1561 GB) also on another drive: an expert's read takes 60% of its bytes from the model's folder and 40% from the copy at once (K3_MIRROR_SPLIT)
+   [K3] init done in 8.5s | 93 layers | expert cache 82/layer (17.5 MB/slot) | RSS 34.3 GB
+   [K3] expert readers: 4 on 2 device(s); a read of a file with a copy on another drive is cut in two, a piece on each
+   [K3] prefill done in 111.0s (33.88 tok/s)
+   [K3] the prompt: attention 13.1s (KDA 9.2, MLA 3.9), MoE 91.9s (router and reads issued 1.9, latent 1.8, shared 5.3, routed experts computed 22.0, waiting for reads 62.4, their inputs 0.8, their sums 1.8); 1446 GB read
+   [K3] reads (the prompt): C: 868.1 GB in 82432 reads, 8.1 GB/s while reading (97% of the time); D: 578.7 GB in 82432 reads, 5.9 GB/s while reading (88% of the time); together 13.0 GB/s over 111.0 s
+   [K3] decode 128 tokens in 151.9s (0.84 tok/s) | expert hit 47.9% (117818/245812) | 3222.2 GB streamed
+   [K3] a decode token: 1186 ms -- attention 165, MoE 1001 (router and reads issued 34, latent 45, shared 117, routed experts computed 458, waiting for reads 342), head 1; 13.9 GB read
+   [K3] prefetch (run): 61132 experts read ahead, 38582 used, 22550 not (7281 of them cancelled unread); 58.7% of the routed experts were predicted; predicting took 2.3s
+   [K3] reads (the decode): C: 1065.7 GB in 101197 reads, 7.9 GB/s while reading (89% of the time); D: 710.5 GB in 101197 reads, 5.0 GB/s while reading (94% of the time); together 11.7 GB/s over 151.9 s
+   [K3-DRAFT] run: 128 tokens in 75 steps (1.71 a step); 53 of 55 drafts stood (by place: 23/24 17/18 13/13); the draft model 2.5s (74 passes)
+== 03 mirror3 rc=0, 274.9 s in all (19:45)
+   [K3-MIRROR] 188 of 188 shard files (1561 GB) also on another drive: an expert's read takes 60% of its bytes from the model's folder and 40% from the copy at once (K3_MIRROR_SPLIT)
+   [K3] init done in 8.6s | 93 layers | expert cache 82/layer (17.5 MB/slot) | RSS 34.3 GB
+   [K3] expert readers: 6 on 2 device(s); a read of a file with a copy on another drive is cut in two, a piece on each
+   [K3] prefill done in 110.4s (34.06 tok/s)
+   [K3] the prompt: attention 12.9s (KDA 9.1, MLA 3.8), MoE 91.4s (router and reads issued 2.0, latent 1.8, shared 5.3, routed experts computed 22.8, waiting for reads 60.9, their inputs 0.8, their sums 1.8); 1446 GB read
+   [K3] reads (the prompt): C: 868.1 GB in 82432 reads, 8.1 GB/s while reading (97% of the time); D: 578.7 GB in 82432 reads, 6.1 GB/s while reading (86% of the time); together 13.1 GB/s over 110.4 s
+   [K3] decode 128 tokens in 149.6s (0.86 tok/s) | expert hit 48.1% (118145/245812) | 3272.6 GB streamed
+   [K3] a decode token: 1169 ms -- attention 167, MoE 980 (router and reads issued 34, latent 45, shared 116, routed experts computed 466, waiting for reads 314), head 1; 14.3 GB read
+   [K3] prefetch (run): 61956 experts read ahead, 39050 used, 22906 not (4907 of them cancelled unread); 58.7% of the routed experts were predicted; predicting took 2.3s
+   [K3] reads (the decode): C: 1095.9 GB in 104069 reads, 8.4 GB/s while reading (87% of the time); D: 730.6 GB in 104069 reads, 5.3 GB/s while reading (92% of the time); together 12.2 GB/s over 149.6 s
+   [K3-DRAFT] run: 128 tokens in 75 steps (1.71 a step); 53 of 55 drafts stood (by place: 23/24 17/18 13/13); the draft model 2.5s (74 passes)
+== 04 mirror3 rc=0, 275.4 s in all (19:50)
+   [K3-MIRROR] 188 of 188 shard files (1561 GB) also on another drive: an expert's read takes 60% of its bytes from the model's folder and 40% from the copy at once (K3_MIRROR_SPLIT)
+   [K3] init done in 8.9s | 93 layers | expert cache 82/layer (17.5 MB/slot) | RSS 34.3 GB
+   [K3] expert readers: 6 on 2 device(s); a read of a file with a copy on another drive is cut in two, a piece on each
+   [K3] prefill done in 110.4s (34.08 tok/s)
+   [K3] the prompt: attention 13.0s (KDA 9.1, MLA 3.9), MoE 91.2s (router and reads issued 2.0, latent 1.8, shared 5.2, routed experts computed 23.3, waiting for reads 60.2, their inputs 0.7, their sums 1.8); 1446 GB read
+   [K3] reads (the prompt): C: 868.1 GB in 82432 reads, 8.1 GB/s while reading (97% of the time); D: 578.7 GB in 82432 reads, 6.1 GB/s while reading (86% of the time); together 13.1 GB/s over 110.4 s
+   [K3] decode 128 tokens in 149.3s (0.86 tok/s) | expert hit 48.1% (118160/245812) | 3270.9 GB streamed
+   [K3] a decode token: 1166 ms -- attention 169, MoE 976 (router and reads issued 34, latent 46, shared 117, routed experts computed 467, waiting for reads 308), head 1; 14.3 GB read
+   [K3] prefetch (run): 61942 experts read ahead, 39013 used, 22929 not (4971 of them cancelled unread); 58.7% of the routed experts were predicted; predicting took 2.3s
+   [K3] reads (the decode): C: 1094.9 GB in 103975 reads, 8.5 GB/s while reading (87% of the time); D: 730.0 GB in 103975 reads, 5.3 GB/s while reading (92% of the time); together 12.2 GB/s over 149.3 s
+   [K3-DRAFT] run: 128 tokens in 75 steps (1.71 a step); 53 of 55 drafts stood (by place: 23/24 17/18 13/13); the draft model 2.5s (74 passes)
+== 05 mirror rc=0, 278.5 s in all (19:55)
+   [K3-MIRROR] 188 of 188 shard files (1561 GB) also on another drive: an expert's read takes 60% of its bytes from the model's folder and 40% from the copy at once (K3_MIRROR_SPLIT)
+   [K3] init done in 8.6s | 93 layers | expert cache 82/layer (17.5 MB/slot) | RSS 34.3 GB
+   [K3] expert readers: 4 on 2 device(s); a read of a file with a copy on another drive is cut in two, a piece on each
+   [K3] prefill done in 111.1s (33.85 tok/s)
+   [K3] the prompt: attention 13.1s (KDA 9.2, MLA 3.9), MoE 91.9s (router and reads issued 1.9, latent 1.8, shared 5.3, routed experts computed 22.4, waiting for reads 62.0, their inputs 0.7, their sums 1.8); 1446 GB read
+   [K3] reads (the prompt): C: 868.1 GB in 82432 reads, 8.1 GB/s while reading (97% of the time); D: 578.7 GB in 82432 reads, 5.9 GB/s while reading (88% of the time); together 13.0 GB/s over 111.1 s
+   [K3] decode 128 tokens in 152.1s (0.84 tok/s) | expert hit 47.9% (117842/245812) | 3226.4 GB streamed
+   [K3] a decode token: 1188 ms -- attention 165, MoE 1003 (router and reads issued 34, latent 45, shared 115, routed experts computed 460, waiting for reads 345), head 1; 13.9 GB read
+   [K3] prefetch (run): 61194 experts read ahead, 38608 used, 22586 not (7077 of them cancelled unread); 58.7% of the routed experts were predicted; predicting took 2.3s
+   [K3] reads (the decode): C: 1068.2 GB in 101439 reads, 7.9 GB/s while reading (89% of the time); D: 712.2 GB in 101439 reads, 5.0 GB/s while reading (94% of the time); together 11.7 GB/s over 152.1 s
+   [K3-DRAFT] run: 128 tokens in 75 steps (1.71 a step); 53 of 55 drafts stood (by place: 23/24 17/18 13/13); the draft model 2.5s (74 passes)
+== 06 cut rc=0, 276.8 s in all (19:59)
+   [K3] init done in 8.3s | 93 layers | expert cache 82/layer (17.5 MB/slot) | RSS 34.3 GB
+   [K3] expert readers: 4 on 2 device(s)
+   [K3] prefill done in 107.4s (35.03 tok/s)
+   [K3] the prompt: attention 13.2s (KDA 9.2, MLA 4.0), MoE 88.0s (router and reads issued 1.9, latent 1.9, shared 5.1, routed experts computed 38.9, waiting for reads 41.4, their inputs 0.7, their sums 1.8); 1446 GB read
+   [K3] reads (the prompt): C: 887.9 GB in 50600 reads, 8.5 GB/s while reading (98% of the time); D: 558.6 GB in 31832 reads, 5.9 GB/s while reading (88% of the time); together 13.5 GB/s over 107.4 s
+   [K3] decode 128 tokens in 154.5s (0.83 tok/s) | expert hit 48.2% (118394/245812) | 3219.1 GB streamed
+   [K3] a decode token: 1207 ms -- attention 163, MoE 1024 (router and reads issued 34, latent 44, shared 116, routed experts computed 459, waiting for reads 367), head 1; 13.8 GB read
+   [K3] prefetch (run): 63321 experts read ahead, 39538 used, 23783 not (9073 of them cancelled unread); 58.7% of the routed experts were predicted; predicting took 2.3s
+   [K3] reads (the decode): C: 1076.9 GB in 61369 reads, 7.9 GB/s while reading (88% of the time); D: 695.7 GB in 39650 reads, 5.1 GB/s while reading (88% of the time); together 11.5 GB/s over 154.5 s
+   [K3-DRAFT] run: 128 tokens in 75 steps (1.71 a step); 53 of 55 drafts stood (by place: 23/24 17/18 13/13); the draft model 2.5s (74 passes)
+== 13 cut rc=0, 276.8 s in all (20:08)
+   [K3] init done in 8.6s | 93 layers | expert cache 82/layer (17.5 MB/slot) | RSS 34.3 GB
+   [K3] expert readers: 4 on 2 device(s)
+   [K3] prefill done in 107.3s (35.06 tok/s)
+   [K3] the prompt: attention 13.2s (KDA 9.2, MLA 4.0), MoE 87.8s (router and reads issued 1.9, latent 1.9, shared 5.2, routed experts computed 39.1, waiting for reads 41.2, their inputs 0.7, their sums 1.8); 1446 GB read
+   [K3] reads (the prompt): C: 887.9 GB in 50600 reads, 8.5 GB/s while reading (98% of the time); D: 558.6 GB in 31832 reads, 5.9 GB/s while reading (88% of the time); together 13.5 GB/s over 107.3 s
+   [K3] decode 128 tokens in 154.6s (0.83 tok/s) | expert hit 48.2% (118406/245812) | 3218.1 GB streamed
+   [K3] a decode token: 1208 ms -- attention 163, MoE 1024 (router and reads issued 34, latent 45, shared 116, routed experts computed 457, waiting for reads 368), head 1; 13.8 GB read
+   [K3] prefetch (run): 63300 experts read ahead, 39528 used, 23772 not (9096 of them cancelled unread); 58.7% of the routed experts were predicted; predicting took 2.3s
+   [K3] reads (the decode): C: 1076.2 GB in 61334 reads, 7.9 GB/s while reading (88% of the time); D: 695.4 GB in 39628 reads, 5.1 GB/s while reading (88% of the time); together 11.5 GB/s over 154.6 s
+   [K3-DRAFT] run: 128 tokens in 75 steps (1.71 a step); 53 of 55 drafts stood (by place: 23/24 17/18 13/13); the draft model 2.5s (74 passes)
+== 14 cut3 rc=0, 280.7 s in all (20:12)
+   [K3] init done in 8.5s | 93 layers | expert cache 82/layer (17.5 MB/slot) | RSS 34.3 GB
+   [K3] expert readers: 6 on 2 device(s)
+   [K3] prefill done in 106.7s (35.24 tok/s)
+   [K3] the prompt: attention 13.2s (KDA 9.2, MLA 4.0), MoE 87.2s (router and reads issued 1.9, latent 1.9, shared 5.1, routed experts computed 39.4, waiting for reads 40.2, their inputs 0.7, their sums 1.8); 1446 GB read
+   [K3] reads (the prompt): C: 887.9 GB in 50600 reads, 8.5 GB/s while reading (98% of the time); D: 558.6 GB in 31832 reads, 5.9 GB/s while reading (89% of the time); together 13.6 GB/s over 106.7 s
+   [K3] decode 128 tokens in 159.3s (0.80 tok/s) | expert hit 48.2% (118432/245812) | 3279.7 GB streamed
+   [K3] a decode token: 1244 ms -- attention 158, MoE 1065 (router and reads issued 34, latent 44, shared 113, routed experts computed 460, waiting for reads 410), head 1; 14.3 GB read
+   [K3] prefetch (run): 63319 experts read ahead, 39556 used, 23763 not (5575 of them cancelled unread); 58.7% of the routed experts were predicted; predicting took 2.3s
+   [K3] reads (the decode): C: 1112.2 GB in 63384 reads, 8.2 GB/s while reading (85% of the time); D: 721.1 GB in 41092 reads, 5.3 GB/s while reading (86% of the time); together 11.5 GB/s over 159.3 s
+   [K3-DRAFT] run: 128 tokens in 75 steps (1.71 a step); 53 of 55 drafts stood (by place: 23/24 17/18 13/13); the draft model 2.5s (74 passes)
+== 15 hyb3 rc=0, 262.4 s in all (20:17)
+   [K3-MIRROR] 188 of 188 shard files (1561 GB) also on another drive: an expert's read takes 60% of its bytes from the model's folder and 40% from the copy at once (K3_MIRROR_SPLIT); in a step of more than 16 rows each whole, from the drive whose queue is shorter (K3_MIRROR_ROWS)
+   [K3] init done in 9.0s | 93 layers | expert cache 82/layer (17.5 MB/slot) | RSS 34.3 GB
+   [K3] expert readers: 6 on 2 device(s); a read of a file with a copy on another drive is cut in two, a piece on each
+   [K3] prefill done in 100.5s (37.43 tok/s)
+   [K3] the prompt: attention 13.0s (KDA 9.1, MLA 3.9), MoE 81.0s (router and reads issued 2.0, latent 1.9, shared 5.3, routed experts computed 36.4, waiting for reads 36.7, their inputs 0.9, their sums 1.9); 1446 GB read
+   [K3] reads (the prompt): C: 840.8 GB in 47917 reads, 8.6 GB/s while reading (98% of the time); D: 605.6 GB in 34515 reads, 6.2 GB/s while reading (97% of the time); together 14.4 GB/s over 100.5 s
+   [K3] decode 128 tokens in 146.2s (0.88 tok/s) | expert hit 48.1% (118121/245812) | 3249.1 GB streamed
+   [K3] a decode token: 1142 ms -- attention 163, MoE 958 (router and reads issued 34, latent 45, shared 116, routed experts computed 465, waiting for reads 293), head 1; 14.1 GB read
+   [K3] prefetch (run): 61997 experts read ahead, 39037 used, 22960 not (6311 of them cancelled unread); 58.7% of the routed experts were predicted; predicting took 2.3s
+   [K3] reads (the decode): C: 1081.8 GB in 102721 reads, 8.4 GB/s while reading (88% of the time); D: 721.2 GB in 102717 reads, 5.4 GB/s while reading (92% of the time); together 12.3 GB/s over 146.2 s
+   [K3-DRAFT] run: 128 tokens in 75 steps (1.71 a step); 53 of 55 drafts stood (by place: 23/24 17/18 13/13); the draft model 2.5s (74 passes)
+== 16 hyb rc=0, 267.3 s in all (20:21)
+   [K3-MIRROR] 188 of 188 shard files (1561 GB) also on another drive: an expert's read takes 60% of its bytes from the model's folder and 40% from the copy at once (K3_MIRROR_SPLIT); in a step of more than 16 rows each whole, from the drive whose queue is shorter (K3_MIRROR_ROWS)
+   [K3] init done in 8.6s | 93 layers | expert cache 82/layer (17.5 MB/slot) | RSS 34.3 GB
+   [K3] expert readers: 4 on 2 device(s); a read of a file with a copy on another drive is cut in two, a piece on each
+   [K3] prefill done in 102.7s (36.62 tok/s)
+   [K3] the prompt: attention 13.2s (KDA 9.2, MLA 4.0), MoE 83.2s (router and reads issued 1.9, latent 1.9, shared 5.2, routed experts computed 30.0, waiting for reads 45.6, their inputs 0.8, their sums 1.8); 1446 GB read
+   [K3] reads (the prompt): C: 852.5 GB in 48583 reads, 8.5 GB/s while reading (98% of the time); D: 594.0 GB in 33849 reads, 6.0 GB/s while reading (97% of the time); together 14.1 GB/s over 102.7 s
+   [K3] decode 128 tokens in 149.5s (0.86 tok/s) | expert hit 48.0% (117885/245812) | 3204.2 GB streamed
+   [K3] a decode token: 1168 ms -- attention 161, MoE 985 (router and reads issued 34, latent 44, shared 112, routed experts computed 456, waiting for reads 335), head 1; 13.7 GB read
+   [K3] prefetch (run): 61164 experts read ahead, 38622 used, 22542 not (8273 of them cancelled unread); 58.7% of the routed experts were predicted; predicting took 2.3s
+   [K3] reads (the decode): C: 1054.9 GB in 100162 reads, 7.9 GB/s while reading (90% of the time); D: 703.2 GB in 100158 reads, 5.0 GB/s while reading (93% of the time); together 11.8 GB/s over 149.5 s
+   [K3-DRAFT] run: 128 tokens in 75 steps (1.71 a step); 53 of 55 drafts stood (by place: 23/24 17/18 13/13); the draft model 2.5s (74 passes)
+== 17 hyb rc=0, 267.3 s in all (20:26)
+   [K3-MIRROR] 188 of 188 shard files (1561 GB) also on another drive: an expert's read takes 60% of its bytes from the model's folder and 40% from the copy at once (K3_MIRROR_SPLIT); in a step of more than 16 rows each whole, from the drive whose queue is shorter (K3_MIRROR_ROWS)
+   [K3] init done in 8.4s | 93 layers | expert cache 82/layer (17.5 MB/slot) | RSS 34.3 GB
+   [K3] expert readers: 4 on 2 device(s); a read of a file with a copy on another drive is cut in two, a piece on each
+   [K3] prefill done in 102.6s (36.66 tok/s)
+   [K3] the prompt: attention 13.1s (KDA 9.2, MLA 3.9), MoE 83.2s (router and reads issued 1.9, latent 1.9, shared 5.1, routed experts computed 30.4, waiting for reads 45.1, their inputs 0.7, their sums 1.8); 1446 GB read
+   [K3] reads (the prompt): C: 852.6 GB in 48591 reads, 8.5 GB/s while reading (98% of the time); D: 593.8 GB in 33841 reads, 6.0 GB/s while reading (97% of the time); together 14.1 GB/s over 102.6 s
+   [K3] decode 128 tokens in 149.5s (0.86 tok/s) | expert hit 47.9% (117864/245812) | 3207.3 GB streamed
+   [K3] a decode token: 1168 ms -- attention 165, MoE 982 (router and reads issued 34, latent 45, shared 116, routed experts computed 458, waiting for reads 325), head 1; 13.8 GB read
+   [K3] prefetch (run): 61377 experts read ahead, 38727 used, 22650 not (8327 of them cancelled unread); 58.7% of the routed experts were predicted; predicting took 2.3s
+   [K3] reads (the decode): C: 1056.8 GB in 100344 reads, 7.9 GB/s while reading (89% of the time); D: 704.5 GB in 100338 reads, 5.1 GB/s while reading (93% of the time); together 11.8 GB/s over 149.5 s
+   [K3-DRAFT] run: 128 tokens in 75 steps (1.71 a step); 53 of 55 drafts stood (by place: 23/24 17/18 13/13); the draft model 2.5s (74 passes)
+== 18 hyb3 rc=0, 261.2 s in all (20:30)
+   [K3-MIRROR] 188 of 188 shard files (1561 GB) also on another drive: an expert's read takes 60% of its bytes from the model's folder and 40% from the copy at once (K3_MIRROR_SPLIT); in a step of more than 16 rows each whole, from the drive whose queue is shorter (K3_MIRROR_ROWS)
+   [K3] init done in 8.3s | 93 layers | expert cache 82/layer (17.5 MB/slot) | RSS 34.3 GB
+   [K3] expert readers: 6 on 2 device(s); a read of a file with a copy on another drive is cut in two, a piece on each
+   [K3] prefill done in 100.5s (37.43 tok/s)
+   [K3] the prompt: attention 13.1s (KDA 9.2, MLA 3.9), MoE 80.9s (router and reads issued 1.9, latent 1.9, shared 5.2, routed experts computed 35.9, waiting for reads 37.3, their inputs 0.7, their sums 1.9); 1446 GB read
+   [K3] reads (the prompt): C: 840.1 GB in 47877 reads, 8.6 GB/s while reading (98% of the time); D: 606.3 GB in 34555 reads, 6.3 GB/s while reading (96% of the time); together 14.4 GB/s over 100.5 s
+   [K3] decode 128 tokens in 145.7s (0.88 tok/s) | expert hit 48.1% (118131/245812) | 3242.9 GB streamed
+   [K3] a decode token: 1138 ms -- attention 166, MoE 951 (router and reads issued 34, latent 45, shared 116, routed experts computed 467, waiting for reads 284), head 1; 14.0 GB read
+   [K3] prefetch (run): 62057 experts read ahead, 39040 used, 23017 not (6712 of them cancelled unread); 58.7% of the routed experts were predicted; predicting took 2.3s
+   [K3] reads (the decode): C: 1078.1 GB in 102370 reads, 8.4 GB/s while reading (88% of the time); D: 718.7 GB in 102366 reads, 5.4 GB/s while reading (92% of the time); together 12.3 GB/s over 145.7 s
+   [K3-DRAFT] run: 128 tokens in 75 steps (1.71 a step); 53 of 55 drafts stood (by place: 23/24 17/18 13/13); the draft model 2.5s (74 passes)
+== 19 cut3 rc=0, 281.6 s in all (20:35)
+   [K3] init done in 8.6s | 93 layers | expert cache 82/layer (17.5 MB/slot) | RSS 34.3 GB
+   [K3] expert readers: 6 on 2 device(s)
+   [K3] prefill done in 106.7s (35.25 tok/s)
+   [K3] the prompt: attention 13.1s (KDA 9.2, MLA 3.9), MoE 87.3s (router and reads issued 1.9, latent 1.9, shared 5.2, routed experts computed 39.6, waiting for reads 39.9, their inputs 0.8, their sums 1.8); 1446 GB read
+   [K3] reads (the prompt): C: 887.9 GB in 50600 reads, 8.5 GB/s while reading (98% of the time); D: 558.6 GB in 31832 reads, 5.9 GB/s while reading (89% of the time); together 13.6 GB/s over 106.7 s
+   [K3] decode 128 tokens in 159.8s (0.80 tok/s) | expert hit 48.2% (118461/245812) | 3280.1 GB streamed
+   [K3] a decode token: 1249 ms -- attention 164, MoE 1063 (router and reads issued 34, latent 45, shared 117, routed experts computed 464, waiting for reads 398), head 1; 14.3 GB read
+   [K3] prefetch (run): 63297 experts read ahead, 39539 used, 23758 not (5503 of them cancelled unread); 58.7% of the routed experts were predicted; predicting took 2.3s
+   [K3] reads (the decode): C: 1112.4 GB in 63397 reads, 8.2 GB/s while reading (85% of the time); D: 721.2 GB in 41100 reads, 5.3 GB/s while reading (85% of the time); together 11.5 GB/s over 159.8 s
+   [K3-DRAFT] run: 128 tokens in 75 steps (1.71 a step); 53 of 55 drafts stood (by place: 23/24 17/18 13/13); the draft model 2.5s (74 passes)
+== 20 cut rc=0, 277.0 s in all (20:39)
+   [K3] init done in 8.8s | 93 layers | expert cache 82/layer (17.5 MB/slot) | RSS 34.3 GB
+   [K3] expert readers: 4 on 2 device(s)
+   [K3] prefill done in 107.5s (35.00 tok/s)
+   [K3] the prompt: attention 13.5s (KDA 9.5, MLA 4.0), MoE 87.7s (router and reads issued 2.0, latent 1.9, shared 5.3, routed experts computed 39.3, waiting for reads 40.7, their inputs 0.8, their sums 1.8); 1446 GB read
+   [K3] reads (the prompt): C: 887.9 GB in 50600 reads, 8.4 GB/s while reading (98% of the time); D: 558.6 GB in 31832 reads, 5.9 GB/s while reading (88% of the time); together 13.5 GB/s over 107.5 s
+   [K3] decode 128 tokens in 154.2s (0.83 tok/s) | expert hit 48.2% (118387/245812) | 3220.2 GB streamed
+   [K3] a decode token: 1205 ms -- attention 170, MoE 1014 (router and reads issued 34, latent 47, shared 121, routed experts computed 465, waiting for reads 344), head 1; 13.9 GB read
+   [K3] prefetch (run): 63271 experts read ahead, 39508 used, 23763 not (8965 of them cancelled unread); 58.7% of the routed experts were predicted; predicting took 2.3s
+   [K3] reads (the decode): C: 1076.8 GB in 61367 reads, 8.0 GB/s while reading (88% of the time); D: 696.9 GB in 39716 reads, 5.2 GB/s while reading (87% of the time); together 11.5 GB/s over 154.2 s
+   [K3-DRAFT] run: 128 tokens in 75 steps (1.71 a step); 53 of 55 drafts stood (by place: 23/24 17/18 13/13); the draft model 2.5s (74 passes)
+== 29 cut rc=0, 277.8 s in all (21:44)
+   [K3] init done in 8.7s | 93 layers | expert cache 82/layer (17.5 MB/slot) | RSS 34.3 GB
+   [K3] expert readers: 4 on 2 device(s)
+   [K3] prefill done in 107.5s (34.99 tok/s)
+   [K3] the prompt: attention 13.6s (KDA 9.5, MLA 4.1), MoE 87.7s (router and reads issued 2.0, latent 1.9, shared 5.3, routed experts computed 39.1, waiting for reads 40.8, their inputs 0.7, their sums 1.8); 1446 GB read
+   [K3] reads (the prompt): C: 887.9 GB in 50600 reads, 8.4 GB/s while reading (98% of the time); D: 558.6 GB in 31832 reads, 5.9 GB/s while reading (88% of the time); together 13.5 GB/s over 107.5 s
+   [K3] decode 128 tokens in 154.9s (0.83 tok/s) | expert hit 48.2% (118414/245812) | 3219.8 GB streamed
+   [K3] a decode token: 1210 ms -- attention 164, MoE 1026 (router and reads issued 34, latent 45, shared 116, routed experts computed 460, waiting for reads 367), head 1; 13.9 GB read
+   [K3] prefetch (run): 63319 experts read ahead, 39536 used, 23783 not (9010 of them cancelled unread); 58.7% of the routed experts were predicted; predicting took 2.3s
+   [K3] reads (the decode): C: 1077.3 GB in 61393 reads, 7.9 GB/s while reading (88% of the time); D: 696.0 GB in 39666 reads, 5.1 GB/s while reading (88% of the time); together 11.4 GB/s over 154.9 s
+   [K3-DRAFT] run: 128 tokens in 75 steps (1.71 a step); 53 of 55 drafts stood (by place: 23/24 17/18 13/13); the draft model 2.5s (74 passes)
+== 30 partial rc=0, 270.8 s in all (21:48)
+   [K3-MIRROR] 92 of 188 shard files (559 GB) also on another drive: an expert's read takes 60% of its bytes from the model's folder and 40% from the copy at once (K3_MIRROR_SPLIT); in a step of more than 16 rows each whole, from the drive whose queue is shorter (K3_MIRROR_ROWS)
+   [K3] init done in 8.8s | 93 layers | expert cache 82/layer (17.5 MB/slot) | RSS 34.3 GB
+   [K3] expert readers: 4 on 2 device(s); some files have no copy: a read of a file with one goes whole to the drive whose queue is shorter
+   [K3] prefill done in 107.3s (35.04 tok/s)
+   [K3] the prompt: attention 13.4s (KDA 9.5, MLA 3.9), MoE 87.7s (router and reads issued 2.0, latent 1.8, shared 5.3, routed experts computed 40.7, waiting for reads 39.4, their inputs 0.8, their sums 1.8); 1446 GB read
+   [K3] reads (the prompt): C: 887.9 GB in 50600 reads, 8.5 GB/s while reading (98% of the time); D: 558.6 GB in 31832 reads, 5.9 GB/s while reading (87% of the time); together 13.5 GB/s over 107.3 s
+   [K3] decode 128 tokens in 148.2s (0.86 tok/s) | expert hit 48.2% (118440/245812) | 3196.0 GB streamed
+   [K3] a decode token: 1158 ms -- attention 165, MoE 971 (router and reads issued 34, latent 45, shared 114, routed experts computed 461, waiting for reads 313), head 2; 13.7 GB read
+   [K3] prefetch (run): 63343 experts read ahead, 39552 used, 23791 not (10360 of them cancelled unread); 58.7% of the routed experts were predicted; predicting took 2.3s
+   [K3] reads (the decode): C: 1132.7 GB in 64549 reads, 8.1 GB/s while reading (94% of the time); D: 616.9 GB in 35158 reads, 5.1 GB/s while reading (81% of the time); together 11.8 GB/s over 148.2 s
+   [K3-DRAFT] run: 128 tokens in 75 steps (1.71 a step); 53 of 55 drafts stood (by place: 23/24 17/18 13/13); the draft model 2.6s (74 passes)
+== 31 full rc=0, 264.3 s in all (21:52)
+   [K3-MIRROR] 188 of 188 shard files (1561 GB) also on another drive: an expert's read takes 60% of its bytes from the model's folder and 40% from the copy at once (K3_MIRROR_SPLIT); in a step of more than 16 rows each whole, from the drive whose queue is shorter (K3_MIRROR_ROWS)
+   [K3] init done in 9.2s | 93 layers | expert cache 82/layer (17.5 MB/slot) | RSS 34.3 GB
+   [K3] expert readers: 6 on 2 device(s); a read of a file with a copy on another drive is cut in two, a piece on each
+   [K3] prefill done in 100.5s (37.43 tok/s)
+   [K3] the prompt: attention 13.7s (KDA 9.7, MLA 4.0), MoE 80.3s (router and reads issued 2.1, latent 2.1, shared 6.1, routed experts computed 37.9, waiting for reads 34.2, their inputs 0.8, their sums 1.9); 1446 GB read
+   [K3] reads (the prompt): C: 839.4 GB in 47839 reads, 8.6 GB/s while reading (98% of the time); D: 607.0 GB in 34593 reads, 6.3 GB/s while reading (96% of the time); together 14.4 GB/s over 100.5 s
+   [K3] decode 128 tokens in 147.2s (0.87 tok/s) | expert hit 48.1% (118113/245812) | 3254.5 GB streamed
+   [K3] a decode token: 1150 ms -- attention 173, MoE 956 (router and reads issued 35, latent 47, shared 121, routed experts computed 474, waiting for reads 275), head 1; 14.1 GB read
+   [K3] prefetch (run): 61975 experts read ahead, 39025 used, 22950 not (5987 of them cancelled unread); 58.7% of the routed experts were predicted; predicting took 2.3s
+   [K3] reads (the decode): C: 1085.1 GB in 103031 reads, 8.5 GB/s while reading (87% of the time); D: 723.4 GB in 103027 reads, 5.4 GB/s while reading (91% of the time); together 12.3 GB/s over 147.2 s
+   [K3-DRAFT] run: 128 tokens in 75 steps (1.71 a step); 53 of 55 drafts stood (by place: 23/24 17/18 13/13); the draft model 2.5s (74 passes)

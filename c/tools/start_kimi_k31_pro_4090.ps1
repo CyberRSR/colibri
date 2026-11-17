@@ -3,13 +3,15 @@
 # (dsa_config): past 2,048 positions a query row attends the 2,048 rows its layer's indexer
 # picks. kimi_k3.exe needs to be a build that reads dsa_config (checked below); the rest is K3's
 # profile. The checkpoint as tools/download_kimi_k31_pro_4090.ps1 lays it out: the model folder on C:
-# and every MoE layer's other part on D:, read by two readers per drive. The largest
+# and every MoE layer's other part on D:, read by two readers per drive -- or every file on both
+# drives, each expert then read from both at once (-MirrorSplit; the engine copies to C: at every
+# start what it lacks of D:'s files, -NoFill). The largest
 # dense matrices go to the GPU (K3_CUDA_DENSE), their host copies released for the
 # expert cache. A decode step's routed experts run on the CPU, which reads them in place;
 # a prompt step's go to the GPU too as they are read, with its other dense matrices
 # (coli_cuda_k3.dll, the CPU's bytes), unless -CpuExperts.
 param(
-    # The engine's model folder (config, tokenizer, 61% of every layer's experts)
+    # The engine's model folder (config, tokenizer, 61% of every layer's experts -- or all of them)
     [string]$ModelDir = 'C:\AI\Kimi-K3.1-Pro',
     # The other drive's folders, ';'-separated (K3_DIRS); "" for a model in one folder
     [string]$ShardDir = 'D:\AI\Models\Kimi-K3.1-Pro',
@@ -18,7 +20,23 @@ param(
     # The whole process's RAM ceiling, GB: the expert cache gets what the rest leaves
     [ValidateRange(16,190)][double]$RamGB = 174,
     [ValidateRange(1,32)][int]$Threads = 16,
-    [ValidateRange(1,8)][int]$IoPerDrive = 2,
+    # Readers per drive; 0: the engine's choice -- 2, or 3 when the files are on both drives (a third
+    # reader slowed the cut layout's decode and sped up the copies')
+    [ValidateRange(0,8)][int]$IoPerDrive = 0,
+    # Every model file whole on both drives (the model folder and -ShardDir each holding all of
+    # them): a decode step's expert read then takes -MirrorSplit of its bytes from the model
+    # folder's drive and the rest from the copy on the other at once, and a prompt step's goes
+    # whole to the drive with less to do (K3_MIRROR); a 3,759-token prompt 107 -> 100.5 s, a decode
+    # token 1.21 -> 1.14 s here. A copy is used when its size and header are the model folder's
+    # file's; the bytes read are the same. -NoMirror: each file from one drive. 0.6: C: reads 9.4
+    # GB/s here, D: 6.3 (17.5 MB reads, four in flight)
+    [switch]$NoMirror,
+    [ValidateRange(0.05,0.95)][double]$MirrorSplit = 0.6,
+    # At every start the engine copies to -ModelDir each model file of -ShardDir it lacks (K3_FILL:
+    # D:'s parts, or a file deleted from C:), while C: keeps -FillKeepGB free (0: the conversations'
+    # -SessionDiskGB plus 64); what does not fit is read from D:. -NoFill: nothing is copied
+    [switch]$NoFill,
+    [ValidateRange(0,100000)][double]$FillKeepGB = 0,
     # Read the next MoE layer's predicted experts ahead (decode)
     [ValidateRange(0,1)][int]$Prefetch = 1,
     # Dense matrices on the GPU, GiB, and the VRAM left free beside them; -DenseGB 21.5
@@ -172,6 +190,11 @@ $env:K3_DRAFT = $draftDir
 $env:K3_DRAFT_P = [string]$DraftP
 $env:K3_DRAFT_MAX = [string]$DraftMax
 $env:K3_DIRS = $shardDirs -join ';'
+$env:K3_MIRROR = $(if ($NoMirror) { '0' } else { '1' })
+$env:K3_MIRROR_SPLIT = [string]$MirrorSplit
+$env:K3_FILL = $(if ($NoFill -or !$shardDirs.Count) { '0' } else { '1' })
+$fillKeep = $(if ($FillKeepGB -gt 0) { $FillKeepGB } elseif ($Sessions -gt 0) { $SessionDiskGB + 64 } else { 64 })
+$env:K3_FILL_KEEP_GB = [string]$fillKeep
 $env:K3_CUDA = '0'                     # no VRAM tier: a decode step's experts on the CPU, read in place
 $env:K3_GPU_EXPERTS = $(if ($Cpu -or $CpuExperts) { '0' } else { '1' })
 $env:K3_READAHEAD_GB = $(if ($Cpu -or $CpuExperts) { '0' } else { [string]$ReadAheadGB })
@@ -186,7 +209,7 @@ $env:K3_DENSE_CACHE = $(if ($NoDenseCache) { '0' } elseif ($DenseCache) { $Dense
 $env:AUTOPIN = $(if ($Pins) { '1' } else { '0' })
 $env:K3_DIRECT = '1'
 $env:K3_PIPE = '1'
-$env:K3_IO_PER_DRIVE = [string]$IoPerDrive
+if ($IoPerDrive -gt 0) { $env:K3_IO_PER_DRIVE = [string]$IoPerDrive } else { Remove-Item -LiteralPath Env:K3_IO_PER_DRIVE -ErrorAction SilentlyContinue }
 $env:K3_PREFETCH = [string]$Prefetch
 $env:COLI_K3_CKPT = [string]$Photos
 $sessionPath = $(if ($SessionDir) { $SessionDir } else { Join-Path $ModelDir 'k3_sessions' })
@@ -208,11 +231,15 @@ if ($null -eq $env:COLI_CLIENT_BLOB_DIRS) {
 }
 foreach ($key in @('K3_LAYERS', 'K3_TRACE', 'K3_LOGITS', 'K3_X0', 'K3_MMAP', 'K3_IO_THREADS', 'K3_LOAD_THREADS',
                    'K3_IO_DELAY_US', 'K3_VK', 'COLI_GPU_FAIL_AFTER', 'K3_VAL_LOGITS', 'K3_VALIDATE_LAYER',
-                   'COLI_K3_CKPT_DIR', 'K3_SNAP_TEST', 'K3_DRAFT_DUMP', 'K3_DRAFT_ORACLE', 'K3_DRAFT_MINCTX')) {
+                   'COLI_K3_CKPT_DIR', 'K3_SNAP_TEST', 'K3_DRAFT_DUMP', 'K3_DRAFT_ORACLE', 'K3_DRAFT_MINCTX',
+                   'K3_MIRROR_ANY')) {
     Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue
 }
 Write-Host "Kimi K3.1 Pro: $ModelDir$(if ($shardDirs.Count) { '; experts also from ' + ($shardDirs -join '; ') })"
-Write-Host "RAM $RamGB GB, CPU $Threads, readers $IoPerDrive per drive, prefetch $Prefetch, $(if ($env:K3_CUDA_DENSE -eq '1') { "dense matrices on the GPU up to $DenseGB GiB" } else { 'dense matrices on the CPU' })$(if ($env:K3_GPU_EXPERTS -eq '1') { ', a prompt step''s experts on the GPU too' })"
+if ($shardDirs.Count) {
+    Write-Host "Files on both drives: $(if ($NoMirror) { 'each read from one drive (-NoMirror)' } else { "an expert read $([math]::Round(100 * $MirrorSplit))% from the model folder, the rest from the copy" }); $(if ($NoFill) { 'nothing copied at the start (-NoFill)' } else { "what $ModelDir lacks of them copied there at the start (keeping $fillKeep GB free)" })"
+}
+Write-Host "RAM $RamGB GB, CPU $Threads, readers $(if ($IoPerDrive -gt 0) { $IoPerDrive } else { '2 (3 with the files on both drives)' }) per drive, prefetch $Prefetch, $(if ($env:K3_CUDA_DENSE -eq '1') { "dense matrices on the GPU up to $DenseGB GiB" } else { 'dense matrices on the CPU' })$(if ($env:K3_GPU_EXPERTS -eq '1') { ', a prompt step''s experts on the GPU too' })"
 Write-Host "K3.1's index scores and picks: $(if ($indexerOnGpu) { 'on the GPU (k3cu_dsa_mask)' } elseif ($Cpu -or $CpuExperts) { 'on the CPU, as asked' } else { 'ON THE CPU: a long prompt waits here, see coli_cuda_k3.dll' })"
 Write-Host "Context $Context tokens, replies up to $MaxOutput tokens, prompt steps of $Chunk (read-ahead $($env:K3_READAHEAD_GB) GB), $Photos photos (the system prompt's end and the turns')"
 Write-Host "Dense matrices' quantization: $(if ($NoDenseCache) { 'from the checkpoint at every start (-NoDenseCache)' } else { 'kept in ' + $(if ($DenseCache) { $DenseCache } else { Join-Path $ModelDir 'k3_dense_cache.bin' }) + ' (33 GB, written by the first start)' })"

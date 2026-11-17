@@ -217,7 +217,7 @@ Judge quantization choices on real-text logits, not synthetic-vector norms.
 | `K3_DIRECT` | 1 | O_DIRECT expert reads (0 = buffered + WILLNEED) |
 | `K3_IDOT` | 1 | int8-activation expert matmuls (0 = exact-float kernel) |
 | `K3_PIPE` | 1 | expert reads on reader threads, beside the compute |
-| `K3_IO_PER_DRIVE` | 2 | readers per storage device the shards are on |
+| `K3_IO_PER_DRIVE` | 2; 3 with copies | readers per storage device the shards are on (3 when every expert file is whole on two drives, `K3_MIRROR`: a third reader slowed the cut layout's decode and sped up the copies') |
 | `K3_IO_THREADS` | — | that many readers on one queue instead (`K3_LOAD_THREADS`, the old loader's size, is read as this); 0 = reads on the caller |
 | `K3_LOAD_PARALLEL` | 4 prepared / 1 BF16 | the dense weights of this many layers read at once while the model loads: 4 where each matrix is one straight read (a repacked U8 or GGUF container), 1 where the load loop is busy quantizing a BF16 checkpoint on every core instead (the layers then go one after the other, each matrix over the whole team); `K3_MMAP=1` forces it |
 | `K3_DENSE_CACHE` | off | `1`: `<model dir>/k3_dense_cache.bin`, or a path. The quantized dense matrices written by the first start and read by the next ones instead of reading and quantizing a BF16 checkpoint (Kimi K3.1 Pro: 33.9 GB; the start 28 -> 9.7 s on the RTX 4090 machine). A matrix comes from the file only when its name, shape, bits and its source's place in the checkpoint are the record's and its bytes sum to what was written ([the start](#kimi-k31)) |
@@ -238,6 +238,12 @@ Judge quantization choices on real-text logits, not synthetic-vector norms.
 | `K3_CHUNK` | 32 | the most prompt tokens a prefill step takes, at most 16384 (1 = token-at-a-time; forced 1 under `K3_TRACE`). A prompt's steps are of one size and none is short: up to an eighth past `K3_CHUNK` is one step, more is equal steps. Past 512 rows a step holds 1.4 MB of activations a row, borrowed from the expert cache while it runs (`K3_LEND`) |
 | `K3_THINK` | 1 | chat mode: open the structural think channel (0 = response-only) |
 | `K3_DIRS` | — | extra shard directories (multi-drive split, no duplication; `tools/k3_download.py` cuts every layer over them) |
+| `K3_MIRROR` | 1 | a shard file of the model's folder whole in a `K3_DIRS` folder on another drive too (the same size and header): each expert's read cut in two, a piece from each drive at once ("the weights on both drives", below); 0 = each file from one drive |
+| `K3_MIRROR_SPLIT` | 0.6 | the model folder's share of such a read |
+| `K3_MIRROR_ROWS` | 16 | a step of more rows (a prompt's) reads each expert whole instead, from the drive whose queue is shorter for its share; -1: every read cut, 0: none |
+| `K3_FILL` | 0 | at the start, every `*.safetensors` of the `K3_DIRS` folders that the model's folder lacks is copied there first (the launcher: 1) |
+| `K3_FILL_KEEP_GB` | 64 | ... as long as its drive keeps this much free (the launcher: the session files' `-SessionDiskGB` plus 64) |
+| `K3_MIRROR_ANY` | 0 | tests: a folder on the model's own drive counts as another drive |
 | `K3_MAXT` | prompt+ngen | context capacity |
 | `K3_KV_GROW` | 1 | the MLA caches and the index keys grow with the conversation: a request allocates its prompt's positions plus `K3_KV_GEN` of the answer's and doubles as it writes them; what they hold past `K3_KV_MIN` positions comes out of the expert cache for as long as they hold it (`K3_LEND`) (0 = the whole `K3_MAXT` at the first request; off under `KV_SLOTS>1`) |
 | `K3_KV_GEN` | 1024 | answer positions allocated with the prompt's, before the caches start doubling |
@@ -1074,6 +1080,78 @@ sessions' replay the gate's costs and gains come to about +13%. The start takes 
 prompt 1-2% longer, and the dense matrices on the card are 18.1 GiB instead of 20.
 `tests/kimi_k3_draft_harness.py` checks the blocks on the tiny fixture with drafts read from a
 file (`K3_DRAFT_ORACLE`: right ones, wrong ones, mixed, at a temperature) on any build.
+
+## Kimi K3.1: the weights on both drives (`k3_mirror.h`, `K3_MIRROR`, `K3_FILL`)
+
+`tools/k3_download.py` cuts every MoE layer's shard over the drives in proportion to their speeds
+(61% of each layer's experts on `C:`, the rest on `D:` on the 4090 machine), so an expert is read
+from one drive, and a layer waits for whichever drive got more of its reads: a decode token's
+16 experts a layer are drawn at random, so one layer finds most of its misses on `D:` and the
+next most on `C:`. With every file on both drives instead -- the model's folder and a `K3_DIRS`
+folder each holding all of them, 1.45 TB each -- an expert is read from both at once:
+
+- **A small step's read cut in two.** In a decode step (and its drafts' rows: up to
+  `K3_MIRROR_ROWS`, 16, rows) a layer waits for the last of a few reads, so `k3_io_submit` queues
+  an expert's read as two jobs: the first `K3_MIRROR_SPLIT` (0.6) of its unbuffered window, cut at
+  a 4 KiB boundary, on the model folder's drive, the rest and the buffered tail on the copy's, each
+  at the read's priority (a demand or a prefetch). Each drive's `K3_IO_PER_DRIVE` readers take
+  their pieces; the slot is complete when the second piece lands. A prefetch the step asks for
+  moves both of its queued pieces to the demands; one it did not ask for leaves the queues only
+  when neither piece was taken. Each drive then carries its share of every layer's bytes, whatever
+  experts the layer chose.
+- **A large step's read whole.** A prompt's step keeps both drives busy whatever it does, and two
+  half-size reads take longer than one there (a 3,759-token prompt 107 -> 111 s with every read
+  cut), so in a step of more than `K3_MIRROR_ROWS` rows each expert is read whole, from the drive
+  whose queued bytes, over its share, are fewer (`moe_forward` sets the mode for its step;
+  `K3_MIRROR_ROWS=-1` cuts every read, 0 none).
+- **Copies of some files only.** Reads are cut only when every file a routed expert is read from
+  has its copy (`k3_io_start` looks). The cut layout after the fill below -- `D:`'s parts copied to
+  `C:`, `D:` still without `C:`'s -- has copies of the parts only, and cutting their reads 60/40
+  while the other files' stay on `C:` would put 85% of a decode token's bytes on `C:` (61% in the
+  cut layout); there every read of a file with a copy goes whole by queue instead, balancing around
+  the others, and `K3_IO_PER_DRIVE` stays 2.
+- **Which copies count.** After the shards are indexed, a file of the model's folder gets a
+  replica when a `K3_DIRS` folder on another device holds a file of the same name, size and
+  safetensors header (`st_mirror_add`'s rule: the same header names the same offsets). A file
+  without one is read from where it is, as before, so the cut layout's own parts (found through
+  `K3_DIRS`) and a partial copy work as they did. The bytes read are the same in every case;
+  `K3_MIRROR=0` reads each file from one drive.
+- **The fill** (`K3_FILL=1`, the launcher's default). Before the shards are indexed, every
+  `*.safetensors` of the `K3_DIRS` folders that the model's folder lacks is copied there
+  (`CopyFileEx` unbuffered, as `<name>.k3fill`, renamed when whole; an interrupted copy's
+  leftover is removed at the next start), as long as the drive keeps `K3_FILL_KEEP_GB` free
+  (the launcher: the session files' budget plus 64 GB). So the model's folder holds every file
+  again after some were deleted, and what does not fit is read from the other drive. A file of
+  the same name that differs is left alone and named; one with the same header but shorter is an
+  interrupted copy and is copied again. A start with nothing to copy checks 188 headers in a
+  fraction of a second.
+
+Each phase ends with a line of what each drive read: `[K3] reads (the decode): C: 1078.1 GB in
+102370 reads, 8.4 GB/s while reading (88% of the time); D: ...; together 12.3 GB/s`, the time a
+drive had a read in flight being "while reading".
+
+Measured on the 4090 machine (`docs/experiments/kimi-k31-4090-2026-11-10/`, "Both drives whole"):
+a 3,759-token prompt and 128 tokens of reply with the draft model, a fresh process a run, the cut
+layout and the copies alternating:
+
+| | the cut layout, 2 readers a drive | 3 readers | both drives whole, every read cut | the same, a prompt's reads whole by queue, 3 readers |
+|---|---:|---:|---:|---:|
+| the prompt | 107.4 s | 106.7 s | 110.4-111.1 s | **100.5 s** |
+| a decode token | 1,209 ms | 1,247 ms | 1,167-1,187 ms | **1,140 ms** |
+| ... of it waiting for reads | 364 ms | 404 ms | 311-344 ms | **289 ms** |
+| the drives together: prompt, decode | 13.5, 11.5 GB/s | 13.6, 11.5 | 13.0, 11.7-12.2 | **14.4, 12.3** |
+
+The gain is the drives' balance, not their latency: in the cut layout `C:` is busy 98% of a
+prompt and `D:` 88% (61% of each layer's bytes on the faster drive is not quite its share), and
+a decode token's reads keep both busy 88% of the time (the prefetcher reads ahead), so a read cut in
+two lands sooner only where the drives have idle time to give. A third reader does nothing for
+the cut layout (more is read ahead, no more is read: 11.5 GB/s either way), while with the copies
+it lifts the decode's reads from 11.8 to 12.3 GB/s; so `K3_IO_PER_DRIVE` is 3 with copies and 2
+without. The logits of a 3,759-token prompt and 32 tokens are r11's bytes in every mode (the
+copies read, `C:` alone, the fill). `tests/kimi_k3_mirror_harness.py` checks it on the tiny fixture (copies in a
+second folder that `K3_MIRROR_ANY=1` lets count as another drive): the logits and tokens of a
+folder alone at several shares, buffered, with slow readers, with a copy missing or differing,
+and the fill (missing, shortened, an interrupted copy's leftover, no room).
 
 ## Current limitations
 

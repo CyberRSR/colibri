@@ -1,0 +1,55 @@
+# api_ab.sh: cut, mirror, mirror, cut; the request (a recorded Kimi Code turn) is not in the repository
+== 01 cut: server up after 10 s (20:45)
+   req_c.json pass 1: HTTP 200 in 406.5 s; {'prompt_tokens': 23295, 'completion_tokens': 91, 'total_tokens': 23386}
+   req_c.json pass 2: HTTP 200 in 103.9 s; {'prompt_tokens': 23295, 'completion_tokens': 91, 'total_tokens': 23386}
+   [K3] expert readers: 4 on 2 device(s)
+   [K3] prompt of 23295 tokens (0 reused) in 298.4s: attention 85.0s (MLA 30.6, K3.1's index keys and picks 7.2), MoE 180.7s (router and reads issued 11.2, latent 9.4, shared 30.6, routed experts computed 137.5, waiting for reads 1.2, their inputs 2.7, their sums 11.1)
+   [K3] prefetch (turn): 45793 experts read ahead, 26144 used, 19649 not (8091 of them cancelled unread); 57.9% of the routed experts were predicted; predicting took 1.3s
+   [K3] reads (the turn's prompt): C: 1774.6 GB in 101134 reads, 8.3 GB/s while reading (72% of the time); D: 1117.1 GB in 63661 reads, 5.7 GB/s while reading (66% of the time); together 9.7 GB/s over 298.4 s
+   [K3] reads (the turn's reply): C: 792.6 GB in 45169 reads, 8.1 GB/s while reading (90% of the time); D: 520.0 GB in 29632 reads, 5.3 GB/s while reading (90% of the time); together 12.2 GB/s over 108.0 s
+   [K3-DRAFT] turn: 91 tokens in 38 steps (2.39 a step); 53 of 61 drafts stood (by place: 27/30 18/20 8/11); the draft model 0.9s (38 passes)
+   [K3] prompt of 23295 tokens: the photo of its end restored, nothing to compute
+   [K3] prefetch (turn): 90538 experts read ahead, 51343 used, 39195 not (15949 of them cancelled unread); 57.9% of the routed experts were predicted; predicting took 2.6s
+   [K3] reads (the turn's reply): C: 781.2 GB in 44522 reads, 8.4 GB/s while reading (90% of the time); D: 508.7 GB in 28992 reads, 5.4 GB/s while reading (91% of the time); together 12.4 GB/s over 103.7 s
+   [K3-DRAFT] turn: 91 tokens in 38 steps (2.39 a step); 53 of 61 drafts stood (by place: 27/30 18/20 8/11); the draft model 0.9s (38 passes)
+== 02 mirror: server up after 8 s (20:54)
+   req_c.json pass 1: HTTP 200 in 404.4 s; {'prompt_tokens': 23295, 'completion_tokens': 91, 'total_tokens': 23386}
+   req_c.json pass 2: HTTP 200 in 101.2 s; {'prompt_tokens': 23295, 'completion_tokens': 91, 'total_tokens': 23386}
+   [K3-MIRROR] 188 of 188 shard files (1561 GB) also on another drive: an expert's read takes 60% of its bytes from the model's folder and 40% from the copy at once (K3_MIRROR_SPLIT); in a step of more than 16 rows each whole, from the drive whose queue is shorter (K3_MIRROR_ROWS)
+   [K3] expert readers: 6 on 2 device(s); a read of a file with a copy on another drive is cut in two, a piece on each
+   [K3] prompt of 23295 tokens (0 reused) in 299.4s: attention 85.2s (MLA 30.5, K3.1's index keys and picks 7.1), MoE 181.4s (router and reads issued 11.3, latent 9.6, shared 31.6, routed experts computed 138.6, waiting for reads 0.4, their inputs 2.6, their sums 11.3)
+   [K3] prefetch (turn): 44346 experts read ahead, 25472 used, 18874 not (5844 of them cancelled unread); 57.9% of the routed experts were predicted; predicting took 1.3s
+   [K3] reads (the turn's prompt): C: 1703.5 GB in 97081 reads, 8.5 GB/s while reading (67% of the time); D: 1188.2 GB in 67714 reads, 5.8 GB/s while reading (68% of the time); together 9.7 GB/s over 299.5 s
+   [K3] reads (the turn's reply): C: 800.9 GB in 76047 reads, 8.6 GB/s while reading (89% of the time); D: 533.9 GB in 76044 reads, 5.5 GB/s while reading (93% of the time); together 12.7 GB/s over 104.7 s
+   [K3-DRAFT] turn: 91 tokens in 38 steps (2.39 a step); 53 of 61 drafts stood (by place: 27/30 18/20 8/11); the draft model 0.9s (38 passes)
+   [K3] prompt of 23295 tokens: the photo of its end restored, nothing to compute
+   [K3] prefetch (turn): 87778 experts read ahead, 50126 used, 37652 not (11312 of them cancelled unread); 57.9% of the routed experts were predicted; predicting took 2.6s
+   [K3] reads (the turn's reply): C: 789.7 GB in 74993 reads, 8.6 GB/s while reading (91% of the time); D: 526.5 GB in 74993 reads, 5.5 GB/s while reading (96% of the time); together 13.0 GB/s over 101.0 s
+   [K3-DRAFT] turn: 91 tokens in 38 steps (2.39 a step); 53 of 61 drafts stood (by place: 27/30 18/20 8/11); the draft model 0.9s (38 passes)
+== 03 mirror: server up after 8 s (21:03)
+   req_c.json pass 1: HTTP 200 in 404.2 s; {'prompt_tokens': 23295, 'completion_tokens': 91, 'total_tokens': 23386}
+   req_c.json pass 2: HTTP 200 in 101.2 s; {'prompt_tokens': 23295, 'completion_tokens': 91, 'total_tokens': 23386}
+   [K3-MIRROR] 188 of 188 shard files (1561 GB) also on another drive: an expert's read takes 60% of its bytes from the model's folder and 40% from the copy at once (K3_MIRROR_SPLIT); in a step of more than 16 rows each whole, from the drive whose queue is shorter (K3_MIRROR_ROWS)
+   [K3] expert readers: 6 on 2 device(s); a read of a file with a copy on another drive is cut in two, a piece on each
+   [K3] prompt of 23295 tokens (0 reused) in 299.5s: attention 85.1s (MLA 30.5, K3.1's index keys and picks 7.1), MoE 181.6s (router and reads issued 11.3, latent 9.5, shared 31.7, routed experts computed 138.5, waiting for reads 0.7, their inputs 2.7, their sums 11.2)
+   [K3] prefetch (turn): 44328 experts read ahead, 25470 used, 18858 not (5945 of them cancelled unread); 57.9% of the routed experts were predicted; predicting took 1.3s
+   [K3] reads (the turn's prompt): C: 1703.8 GB in 97098 reads, 8.5 GB/s while reading (67% of the time); D: 1187.9 GB in 67697 reads, 5.8 GB/s while reading (68% of the time); together 9.7 GB/s over 299.6 s
+   [K3] reads (the turn's reply): C: 800.3 GB in 75989 reads, 8.6 GB/s while reading (89% of the time); D: 533.5 GB in 75987 reads, 5.5 GB/s while reading (93% of the time); together 12.8 GB/s over 104.4 s
+   [K3-DRAFT] turn: 91 tokens in 38 steps (2.39 a step); 53 of 61 drafts stood (by place: 27/30 18/20 8/11); the draft model 0.9s (38 passes)
+   [K3] prompt of 23295 tokens: the photo of its end restored, nothing to compute
+   [K3] prefetch (turn): 87775 experts read ahead, 50146 used, 37629 not (11080 of them cancelled unread); 57.9% of the routed experts were predicted; predicting took 2.6s
+   [K3] reads (the turn's reply): C: 793.2 GB in 75324 reads, 8.6 GB/s while reading (91% of the time); D: 528.8 GB in 75324 reads, 5.5 GB/s while reading (96% of the time); together 13.1 GB/s over 101.0 s
+   [K3-DRAFT] turn: 91 tokens in 38 steps (2.39 a step); 53 of 61 drafts stood (by place: 27/30 18/20 8/11); the draft model 0.9s (38 passes)
+== 04 cut: server up after 8 s (21:12)
+   req_c.json pass 1: HTTP 200 in 404.6 s; {'prompt_tokens': 23295, 'completion_tokens': 91, 'total_tokens': 23386}
+   req_c.json pass 2: HTTP 200 in 103.6 s; {'prompt_tokens': 23295, 'completion_tokens': 91, 'total_tokens': 23386}
+   [K3] expert readers: 4 on 2 device(s)
+   [K3] prompt of 23295 tokens (0 reused) in 295.9s: attention 83.4s (MLA 30.1, K3.1's index keys and picks 7.1), MoE 180.0s (router and reads issued 11.1, latent 9.1, shared 29.9, routed experts computed 136.7, waiting for reads 1.2, their inputs 3.1, their sums 11.1)
+   [K3] prefetch (turn): 45810 experts read ahead, 26146 used, 19664 not (8088 of them cancelled unread); 57.9% of the routed experts were predicted; predicting took 1.3s
+   [K3] reads (the turn's prompt): C: 1774.7 GB in 101137 reads, 8.3 GB/s while reading (72% of the time); D: 1117.0 GB in 63658 reads, 5.7 GB/s while reading (67% of the time); together 9.8 GB/s over 296.0 s
+   [K3] reads (the turn's reply): C: 793.9 GB in 45245 reads, 8.1 GB/s while reading (91% of the time); D: 518.8 GB in 29565 reads, 5.3 GB/s while reading (90% of the time); together 12.1 GB/s over 108.4 s
+   [K3-DRAFT] turn: 91 tokens in 38 steps (2.39 a step); 53 of 61 drafts stood (by place: 27/30 18/20 8/11); the draft model 0.9s (38 passes)
+   [K3] prompt of 23295 tokens: the photo of its end restored, nothing to compute
+   [K3] prefetch (turn): 90585 experts read ahead, 51363 used, 39222 not (16033 of them cancelled unread); 57.9% of the routed experts were predicted; predicting took 2.6s
+   [K3] reads (the turn's reply): C: 780.6 GB in 44488 reads, 8.4 GB/s while reading (90% of the time); D: 508.3 GB in 28965 reads, 5.4 GB/s while reading (91% of the time); together 12.5 GB/s over 103.5 s
+   [K3-DRAFT] turn: 91 tokens in 38 steps (2.39 a step); 53 of 61 drafts stood (by place: 27/30 18/20 8/11); the draft model 0.9s (38 passes)

@@ -1,0 +1,95 @@
+# logits_check.sh, 2026-11-17: r11's logits kept from its first run (before the copies were made)
+## r11, and the copies' first runs (the fill run here hung: the descriptor limit; rerun below)
+r11 rc=0
+   [K3] expert readers: 4 on 2 device(s)
+   [K3] prefill done in 111.9s (33.60 tok/s)
+   [K3] decode 32 tokens in 58.1s (0.55 tok/s) | expert hit 28.5% (36376/127745) | 1882.9 GB streamed
+   [K3] a decode token: 1817 ms -- attention 254, MoE 1551 (router and reads issued 52, latent 67, shared 167, routed experts computed 509, waiting for reads 750), head 1; 13.6 GB read
+   logits 2485780480 bytes
+
+## the fixed exe: fill (nothing left to copy), nomir, mirror (every read cut)
+r11: its logits from before
+fill rc=0
+   [K3-FILL] C:/AI/Kimi-K3.1-Pro: 188 of the other drive's 188 model file(s) here (checked in 0.2 s)
+   [K3-MIRROR] 188 of 188 shard files (1561 GB) also on another drive: an expert's read takes 60% of its bytes from the model's folder and 40% from the copy at once (K3_MIRROR_SPLIT)
+   [K3] expert readers: 4 on 2 device(s); a read of a file with a copy on another drive is cut in two, a piece on each
+   [K3] prefill done in 115.6s (32.52 tok/s)
+   [K3] reads (the prompt): C: 868.1 GB in 82432 reads, 8.0 GB/s while reading (93% of the time); D: 578.7 GB in 82432 reads, 5.9 GB/s while reading (85% of the time); together 12.5 GB/s over 115.6 s
+   [K3] decode 32 tokens in 51.8s (0.62 tok/s) | expert hit 28.5% (36365/127745) | 1882.0 GB streamed
+   [K3] a decode token: 1618 ms -- attention 223, MoE 1383 (router and reads issued 54, latent 68, shared 172, routed experts computed 521, waiting for reads 562), head 2; 13.6 GB read
+   [K3] reads (the decode): C: 261.4 GB in 24821 reads, 6.8 GB/s while reading (75% of the time); D: 174.3 GB in 24821 reads, 4.0 GB/s while reading (85% of the time); together 8.4 GB/s over 51.8 s
+   logits 2485780480 bytes
+nomir rc=0
+   [K3] expert readers: 2 on 1 device(s)
+   [K3] prefill done in 174.2s (21.59 tok/s)
+   [K3] reads (the prompt): C: 1446.5 GB in 82432 reads, 8.6 GB/s while reading (96% of the time); together 8.3 GB/s over 174.2 s
+   [K3] decode 32 tokens in 54.2s (0.59 tok/s) | expert hit 28.5% (36364/127745) | 1848.9 GB streamed
+   [K3] a decode token: 1694 ms -- attention 197, MoE 1484 (router and reads issued 51, latent 66, shared 162, routed experts computed 489, waiting for reads 711), head 1; 12.6 GB read
+   [K3] reads (the decode): C: 402.5 GB in 22936 reads, 7.6 GB/s while reading (97% of the time); together 7.4 GB/s over 54.2 s
+   logits 2485780480 bytes
+mirror rc=0
+   [K3-MIRROR] 188 of 188 shard files (1561 GB) also on another drive: an expert's read takes 60% of its bytes from the model's folder and 40% from the copy at once (K3_MIRROR_SPLIT)
+   [K3] expert readers: 4 on 2 device(s); a read of a file with a copy on another drive is cut in two, a piece on each
+   [K3] prefill done in 115.3s (32.61 tok/s)
+   [K3] reads (the prompt): C: 868.1 GB in 82432 reads, 8.1 GB/s while reading (93% of the time); D: 578.7 GB in 82432 reads, 5.9 GB/s while reading (85% of the time); together 12.5 GB/s over 115.3 s
+   [K3] decode 32 tokens in 52.3s (0.61 tok/s) | expert hit 28.5% (36352/127745) | 1881.3 GB streamed
+   [K3] a decode token: 1636 ms -- attention 224, MoE 1400 (router and reads issued 54, latent 68, shared 174, routed experts computed 518, waiting for reads 581), head 1; 13.6 GB read
+   [K3] reads (the decode): C: 260.9 GB in 24779 reads, 5.8 GB/s while reading (87% of the time); D: 174.0 GB in 24779 reads, 3.9 GB/s while reading (86% of the time); together 8.3 GB/s over 52.3 s
+   logits 2485780480 bytes
+LOGITS r11 = fill: the same bytes
+REPLY r11 = fill
+LOGITS r11 = nomir: the same bytes
+REPLY r11 = nomir
+LOGITS r11 = mirror: the same bytes
+REPLY r11 = mirror
+verify done: ALL OK
+
+## the hybrid, 2 readers a drive
+r11: its logits from before
+mirror rc=0
+   [K3-MIRROR] 188 of 188 shard files (1561 GB) also on another drive: an expert's read takes 60% of its bytes from the model's folder and 40% from the copy at once (K3_MIRROR_SPLIT); in a step of more than 16 rows each whole, from the drive whose queue is shorter (K3_MIRROR_ROWS)
+   [K3] expert readers: 4 on 2 device(s); a read of a file with a copy on another drive is cut in two, a piece on each
+   [K3] prefill done in 106.8s (35.21 tok/s)
+   [K3] reads (the prompt): C: 852.3 GB in 48570 reads, 8.5 GB/s while reading (94% of the time); D: 594.2 GB in 33862 reads, 6.0 GB/s while reading (93% of the time); together 13.5 GB/s over 106.8 s
+   [K3] decode 32 tokens in 43.1s (0.74 tok/s) | expert hit 28.5% (36360/127745) | 1878.5 GB streamed
+   [K3] a decode token: 1348 ms -- attention 214, MoE 1123 (router and reads issued 53, latent 64, shared 160, routed experts computed 500, waiting for reads 341), head 1; 13.5 GB read
+   [K3] reads (the decode): C: 259.3 GB in 24616 reads, 7.0 GB/s while reading (85% of the time); D: 172.9 GB in 24616 reads, 4.6 GB/s while reading (87% of the time); together 10.0 GB/s over 43.1 s
+   logits 2485780480 bytes
+LOGITS r11 = mirror: the same bytes
+REPLY r11 = mirror
+verify done: ALL OK
+
+## the final exe with the launcher's readers (3 a drive)
+r11: its logits from before
+final rc=0
+   [K3-MIRROR] 188 of 188 shard files (1561 GB) also on another drive: an expert's read takes 60% of its bytes from the model's folder and 40% from the copy at once (K3_MIRROR_SPLIT); in a step of more than 16 rows each whole, from the drive whose queue is shorter (K3_MIRROR_ROWS)
+   [K3] expert readers: 6 on 2 device(s); a read of a file with a copy on another drive is cut in two, a piece on each
+   [K3] prefill done in 104.7s (35.91 tok/s)
+   [K3] reads (the prompt): C: 839.7 GB in 47854 reads, 8.5 GB/s while reading (94% of the time); D: 606.7 GB in 34578 reads, 6.3 GB/s while reading (93% of the time); together 13.8 GB/s over 104.7 s
+   [K3] decode 32 tokens in 47.3s (0.68 tok/s) | expert hit 28.5% (36367/127745) | 1891.6 GB streamed
+   [K3] a decode token: 1479 ms -- attention 227, MoE 1240 (router and reads issued 54, latent 69, shared 175, routed experts computed 529, waiting for reads 408), head 2; 13.9 GB read
+   [K3] reads (the decode): C: 267.1 GB in 25363 reads, 8.0 GB/s while reading (71% of the time); D: 178.1 GB in 25363 reads, 4.4 GB/s while reading (85% of the time); together 9.4 GB/s over 47.3 s
+   logits 2485780480 bytes
+LOGITS r11 = final: the same bytes
+REPLY r11 = final
+verify done: ALL OK
+
+## the release's exe (628ebac6, partial copies read whole by queue) against r11's exe run from its backup
+r11s rc=0
+   [K3] expert readers: 2 on 1 device(s)
+   [K3] prefill done in 174.5s (21.56 tok/s)
+   [K3] decode 32 tokens in 52.2s (0.61 tok/s) | expert hit 28.5% (36365/127745) | 1849.9 GB streamed
+   [K3] a decode token: 1630 ms -- attention 201, MoE 1416 (router and reads issued 51, latent 67, shared 165, routed experts computed 490, waiting for reads 638), head 2; 12.6 GB read
+   logits 2485780480 bytes
+final rc=0
+   [K3-MIRROR] 188 of 188 shard files (1561 GB) also on another drive: an expert's read takes 60% of its bytes from the model's folder and 40% from the copy at once (K3_MIRROR_SPLIT); in a step of more than 16 rows each whole, from the drive whose queue is shorter (K3_MIRROR_ROWS)
+   [K3] expert readers: 6 on 2 device(s); a read of a file with a copy on another drive is cut in two, a piece on each
+   [K3] prefill done in 104.9s (35.85 tok/s)
+   [K3] reads (the prompt): C: 840.6 GB in 47907 reads, 8.6 GB/s while reading (94% of the time); D: 605.8 GB in 34525 reads, 6.2 GB/s while reading (93% of the time); together 13.8 GB/s over 104.9 s
+   [K3] decode 32 tokens in 41.3s (0.77 tok/s) | expert hit 28.5% (36366/127745) | 1891.3 GB streamed
+   [K3] a decode token: 1291 ms -- attention 210, MoE 1069 (router and reads issued 54, latent 65, shared 163, routed experts computed 515, waiting for reads 266), head 2; 13.9 GB read
+   [K3] reads (the decode): C: 267.0 GB in 25349 reads, 7.9 GB/s while reading (82% of the time); D: 178.0 GB in 25349 reads, 5.1 GB/s while reading (85% of the time); together 10.8 GB/s over 41.3 s
+   logits 2485780480 bytes
+LOGITS r11s = final: the same bytes
+REPLY r11s = final
+verify done: ALL OK
