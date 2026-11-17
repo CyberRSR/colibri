@@ -22,7 +22,7 @@ param(
     # The colibri checkout (this script's ..\..)
     [string]$Repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     # The install the binaries go into
-    [string]$Bundle = (Join-Path $PSScriptRoot 'colibri-kimi-k31-pro-4090-r11-windows-x86_64'),
+    [string]$Bundle = (Join-Path $PSScriptRoot 'colibri-kimi-k31-pro-4090-r12-windows-x86_64'),
     # The GPU's architecture: sm_89 = RTX 40xx, sm_120 = RTX 50xx, sm_86 = RTX 30xx
     [string]$CudaArch = 'sm_89',
     # Rebuild coli_cuda.dll too
@@ -128,6 +128,8 @@ try {
                 & $python tests/kimi_k3_root_harness.py --binary ./kimi_k3.exe --fixture ./kimi_k31_tiny }
             Run 'conversations kept aside, in RAM and in files, across a restart; the caches'' count; the pins'' floor' {
                 & $python tests/kimi_k3_sessions_harness.py --binary ./kimi_k3.exe --fixture ./kimi_k31_tiny }
+            Run 'the weights on two drives: copies read, filled, missing or differing -- the same logits' {
+                & $python tests/kimi_k3_mirror_harness.py --binary ./kimi_k3.exe --fixture ./kimi_k31_tiny }
         }
         Run 'tests\test_k3_cuda_experts.exe (build)' { & $make tests/test_k3_cuda_experts.exe @flags }
         Run 'coli_cuda_k3.dll against the CPU, K3.1''s masked attention' { & .\tests\test_k3_cuda_experts.exe --dsa }

@@ -1,13 +1,22 @@
-Kimi K3.1 Pro's engine, release kimi-k31-pro-4090-r11, built 2026-11-17 on the RTX 4090 machine
-commit: e1101d18cbf3e072f85f520394130c1cd01ca4d1 (kimi_k3.exe, coli_cuda_k3.dll, tools/start_kimi_k31_pro_4090.ps1)
+Kimi K3.1 Pro's engine, release kimi-k31-pro-4090-r12, built 2026-11-17 on the RTX 4090 machine
+commit: d532e39e63076bd97d1beefbddff928fbbbca0b1 (kimi_k3.exe, tools/start_kimi_k31_pro_4090.ps1)
 kimi_k3.exe: mingw32-make -C c kimi_k3 CUDA_DLL=1 ARCH=native VK=0 on the msvcrt C runtime (gcc.exe (MinGW-W64 x86_64-msvcrt-posix-seh, built by Brecht Sanders, r2) 14.2.0)
 ARCH=native is AMD Ryzen 9 7950X3D 16-Core Processor: rebuild with ARCH=znver4 / x86-64-v3 before moving the binaries to another box
-coli_cuda_k3.dll: this commit's (c\build_k3_cuda.bat, CUDA_ARCH=sm_89, CUDA 13.4, MSVC 2022, the CUDA runtime
+coli_cuda_k3.dll: release r11's, commit e1101d18, its source unchanged since (c\build_k3_cuda.bat, CUDA_ARCH=sm_89, CUDA 13.4, MSVC 2022, the CUDA runtime
   linked statically; the file measured below -- two builds of the same source differ in some 5,500 bytes)
 coli_cuda.dll: release kimi-k3-4090-r1's (unchanged by K3.1)
-kimi_k3.exe sha256 58fcc582645a01865467b832642e7894f963b6e1cd63cd422fd1d78fd1d35650
+kimi_k3.exe sha256 628ebac6fa63923b6f43fa899d9718bc05bda7748fd64c38dd7b4888ad917bbe
 coli_cuda_k3.dll sha256 5a74777799b0e21fdc3a28814413b58c75cbb586963b1ca24d5629a3d1e39684
-what changed since r10 (README-KIMI-K31-PRO-4090.md, "What release r11 adds"):
+what changed since r11 (README-KIMI-K31-PRO-4090.md, "What release r12 adds"):
+  The weights whole on both drives (k3_mirror.h, the expert readers in kimi_k3.c; commit d532e39e): a shard file
+  whole in K3_DIRS on another drive too (the same size and header) is read from both -- a decode step's expert
+  read cut 60/40 over the two, a prompt step's whole from the drive whose queue is shorter, 3 readers a drive
+  (with copies of some files only, every read of those whole by queue and 2 readers). At every start the engine
+  copies to the model folder what it lacks of K3_DIRS's files (K3_FILL; the launcher's -NoFill, -FillKeepGB).
+  The readers keep Windows handles (msvcrt's 2,048 C descriptors ran out with 188 files on two drives).
+  A 3,759-token prompt 107.4 -> 100.5 s, a decode token 1,209 -> 1,140 ms (its wait 364 -> 289 ms), the
+  drives together 13.5 -> 14.4 GB/s (prompt) and 11.5 -> 12.3 GB/s (decode); an agent turn's reply 103.8 -> 101.2 s.
+what r11 changed since r10:
   A draft model (k3_draft.h, backend_cuda_k3_draft.cuh; commit e1101d18): with Inferact/Kimi-K3.1-Pro-DSpark
   (5 GB, in <model folder>-DSpark; the launcher's -Draft, -NoDraft, -DraftP, -DraftMax) a decode step also carries
   the next tokens the draft model is sure of, and each one the model then picks costs no step of its own; every
@@ -59,7 +68,17 @@ what r2 changed since r1's K3.1 pair:
   The load on every core and the dense cache (start 138 -> 9.7 s); a prompt's selecting rows over
   their lists and steps of 16,384 (16,511 tokens 375 -> 221 s); the expert cache lending its slots
   (K3_LEND); no pins by default; the same request again restored whole (27 -> 0.27 s).
-checks, on this pair, on the RTX 4090 and on moonshotai/Kimi-K3.1-Pro itself (r11):
+checks, on this pair, on the RTX 4090 and on moonshotai/Kimi-K3.1-Pro itself (r12):
+  build-windows.ps1's list, the draft harness and the new kimi_k3_mirror_harness (copies in a second folder:
+    cut reads at several shares, whole reads by queue, buffered, slow readers, a copy missing or differing,
+    the copies of the expert files only, the fill: missing, shortened, a leftover, no room): passed
+  a 3,759-token prompt and 32 tokens of its reply, every position's logits: r11's exe = this one reading
+    every file from both drives (2 and 3 readers a drive) = reading C: alone = the start that copied 558.6
+    GB to C: first, the same bytes
+  the copies byte for byte: C:'s 96 files on D: and D:'s 92 parts on C:
+  through the API, the launcher: a recorded agent turn answered with the same tool call 8 times (cut
+    layout, both drives); the install's START-KIMI-K31-PRO.cmd: two requests answered by one engine
+checks on r11's pair, on the RTX 4090 and on moonshotai/Kimi-K3.1-Pro itself:
   build-windows.ps1's list (test_k3_dsa, the tiny K3 and K3.1 models, the lending, the dense cache, the
     photos, the system prompt's photo, the sessions) and the new kimi_k3_draft_harness (drafts from a file:
     right, wrong, mixed, sampled at 0.9, a reply that ends inside a block): passed
@@ -104,6 +123,6 @@ checks made on earlier pairs and not run again on this one: the 16,511- and 5,86
   system prompt's photo through the API (r3), K3_CHECK=1, RAM_GB=110 and a conversation past the context (r2)
 the record: docs/experiments/kimi-k31-4090-2026-11-10
 
-58fcc582645a01865467b832642e7894f963b6e1cd63cd422fd1d78fd1d35650  kimi_k3.exe
+628ebac6fa63923b6f43fa899d9718bc05bda7748fd64c38dd7b4888ad917bbe  kimi_k3.exe
 5a74777799b0e21fdc3a28814413b58c75cbb586963b1ca24d5629a3d1e39684  coli_cuda_k3.dll
 0ae7268206e60c340c3b9faf3675a1d727580565ebd8fc69b187a4b48d3cccbc  coli_cuda.dll

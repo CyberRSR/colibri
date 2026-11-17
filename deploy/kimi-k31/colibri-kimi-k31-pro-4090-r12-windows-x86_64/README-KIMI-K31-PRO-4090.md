@@ -9,7 +9,7 @@ row attends only the 2,048 earlier rows its layer's indexer scores highest. Ever
 format) is K3's. Sources: the model card and TokenSpeed's implementation,
 [lightseekorg/tokenspeed#3015](https://github.com/lightseekorg/tokenspeed/pull/3015).
 
-**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r11: `kimi_k3.exe` and
+**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r12: `kimi_k3.exe` and
 `coli_cuda_k3.dll` here were built on the RTX 4090 machine and checked there on the model
 itself (BUILD-INFO-K31.txt: the commit, the toolchain, the checks). Release kimi-k3-4090-r1's
 `kimi_k3.exe` does not read `dsa_config`: it would run every MLA layer dense, which is K3.1's
@@ -225,6 +225,35 @@ What release r11 adds (2026-11-17):
   or more, at most that many a step (each 0.43 GB of RAM). The launcher's banner says which. How it
   works and how it was checked: `docs/kimi_k3.md`, "Kimi K3.1: a draft model".
 
+What release r12 adds (2026-11-17):
+
+- **The weights whole on both drives: prompts and decode 6% sooner, the same replies.** With every
+  model file in both folders (`C:\AI\Kimi-K3.1-Pro` and `D:\AI\Models\Kimi-K3.1-Pro` each holding
+  all 188, 1.56 TB) a decode step reads each expert from both drives at once (60% of its bytes from
+  `C:`, 40% from `D:`) and a prompt step reads each whole from the drive with less to do, 3 readers
+  a drive. On the 4090 machine a 3,759-token prompt took 100.5 s instead of 107.4, a decode token
+  1.14 s instead of 1.21 and its wait for reads 289 ms instead of 364; the drives together read 14.4
+  GB/s instead of 13.5 during a prompt and 12.3 instead of 11.5 during decode. A recorded agent turn
+  of 23,295 tokens: its reply 101.2 s instead of 103.8 (a prompt that long is the card's, 299 s
+  either way). The logits are the same bytes.
+- **Each start checks `C:`.** The engine copies to the model folder every model file of
+  `D:\AI\Models\Kimi-K3.1-Pro` it lacks (0.2 s when nothing is missing), as long as `C:` keeps the
+  conversations' files' room plus 64 GB free (`-FillKeepGB`); what does not fit is read from `D:`.
+  On the layout the download tool makes, the first start copies `D:`'s parts to `C:` (559 GB, about
+  5 minutes; `-NoFill` keeps the layout as it is). For every file on both drives, copy `C:`'s to `D:`
+  once:
+
+  ```powershell
+  robocopy C:\AI\Kimi-K3.1-Pro D:\AI\Models\Kimi-K3.1-Pro *.safetensors /J /MT:4   # 1,002 GB, 3 minutes here
+  ```
+
+  A file is read from both drives only when both copies have the same size and header. While only
+  some files have their copy (`C:` filled, `D:` not yet), every read of such a file goes whole to the
+  drive with less to do and 2 readers a drive stay, so that layout reads as fast as before.
+  `-NoMirror` reads each file from one drive, `-MirrorSplit` (0.6) is `C:`'s share of a decode
+  step's read, and `-IoPerDrive 0` (the default) is the engine's choice of readers. How it works and
+  how it was measured: `docs/kimi_k3.md`, "Kimi K3.1: the weights on both drives".
+
 ---
 
 Everything below is the K3 install's account, measured on Kimi K3: the experts, the drives'
@@ -301,7 +330,9 @@ its header rewritten in place to name only the tensors it still holds, and `D:` 
 `model-000NN-of-000096.p2.safetensors` with the rest. The engine reads them as one
 model with `K3_DIRS=D:\AI\Models\Kimi-K3.1-Pro`, and a step's two drives read its experts
 together. `-Join` puts the published shards back (for another engine), checked
-against their SHA-256.
+against their SHA-256. Since release r12 every file can be on both drives instead ("What release
+r12 adds", above): `robocopy C:\AI\Kimi-K3.1-Pro D:\AI\Models\Kimi-K3.1-Pro *.safetensors /J /MT:4`
+puts `C:`'s files on `D:`, and the launcher's start copies `D:`'s parts to `C:` (`-NoFill`: not).
 
 ## Build and run
 

@@ -11,7 +11,9 @@ Unzip anywhere (e.g. C:\colibri) and start one model at a time:
                            in <model folder>\k3_sessions (27-32 s to its next reply, not 220; -Sessions 0: off);
                            a long prompt whose client gave up resumes where it was when it is sent again;
                            with a draft model in <model folder>-DSpark (Inferact/Kimi-K3.1-Pro-DSpark, 5 GB)
-                           the same replies come 9-18% sooner (README-KIMI-K31-PRO-4090.md, release r11)
+                           the same replies come 9-18% sooner (README-KIMI-K31-PRO-4090.md, release r11);
+                           with every model file on both drives, prompts and decode 6% sooner, and each start
+                           copies to C: what it lacks of D:'s files (README-KIMI-K31-PRO-4090.md, release r12)
   START-MIMO.cmd           MiMo-V2.6-Pro-MOPD (tools\start_mimo_cuda_4090.ps1)  README-MIMO-4090.md
   START-MIMO-HERETIC.cmd   MiMo-V2.6-Pro-MOPD-heretic (the same launcher, -Model heretic)
 
