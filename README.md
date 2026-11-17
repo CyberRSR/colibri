@@ -25,7 +25,6 @@ logits are the same bytes as a run with no GPU path at all.
 |---|---|
 | ready after start | 7.5 s |
 | a 16,511-token prompt | 190 s (5,862 tokens: 117 s, the drives' pace) |
-| a long answer (512 tokens, release r10) | 0.86 tokens/s, 1.16 s a token; 0.75-0.8 at 6-16k tokens of context |
 | ... with a draft model beside it | the same tokens 9-18% sooner (an agent's turn at 23k tokens: a tool call 121 -> 103 s, reasoning 269 -> 248 s) |
 | ... with the weights whole on both drives | 6% sooner again, prompts and decode alike (a 3,759-token prompt 107 -> 100.5 s, a token 1.21 -> 1.14 s, its wait for reads 21% shorter) |
 | **a long answer now** (release r12, both of the above: 2,048 tokens of code) | **0.98 tokens/s**, 1.02 s a token, 35 minutes; 1.08 in its first 512 tokens, 0.89-0.95 in the middle, 1.02 at the end; 3 tokens a step, 98% of the draft model's guesses stood ([the run](docs/experiments/kimi-k31-4090-2026-11-10/README.md#a-long-answer-2026-11-17)) |
