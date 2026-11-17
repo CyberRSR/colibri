@@ -490,6 +490,27 @@ The first single runs of the day -- r11 waiting 750 ms a token, the copies' firs
 were on drives that had just taken 934 and 558 GB of writes and were still busy behind them; the
 table's runs came an hour and more later, alternating.
 
+## A long answer (2026-11-17)
+
+One request through the API with release r12 as installed in `C:\colibri` (the draft model on,
+every model file on both drives, the user's launcher: 24 threads), a fresh server on port 18081:
+a short prompt (209 tokens) asking for a whole Python module, greedy, 2,048 tokens of code
+(`long/`: `make_requests.py`, `long_answer.sh`, `stream_time.py` timing every streamed token,
+`summarize.py`; the record is `long/long_answer.txt`).
+
+| | |
+|---|---:|
+| the first token (the prompt, on a fresh server's empty expert cache) | 65.2 s |
+| the 2,047 tokens after it | 2,095 s: **0.977 tokens/s**, 1,024 ms a token |
+| by 256 tokens of the answer, tokens/s | 1.08, 1.09, 0.95, 0.95, 0.89, 0.94, 0.94, 1.02 |
+| the draft model | 2,048 tokens in 687 steps (2.98 a step), 1,360 of 1,385 guesses stood |
+| the drives during the answer | 13.5 GB/s together, `C:` busy 94% of the time, `D:` 97% |
+
+A step carried three tokens and took 3.05 s: its four rows ask for the experts of four tokens,
+which the drives bring at their pace, 13.8 GB a token -- even code the draft model guesses almost
+always right. The run was to be the first of eight (code, prose, reasoning and a 16.5k-token
+context, each with the draft model and without); the series was cut to this one.
+
 ## Not done
 
 - **The draft model's context is not in the photos.** A conversation that comes back from a file,
