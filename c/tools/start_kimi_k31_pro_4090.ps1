@@ -78,6 +78,17 @@ param(
     # one that follows the conversation -- decode 0.78 against 0.85 tok/s measured, and 7 s of
     # reads (68 GB) at every start. -Pins turns it on
     [switch]$Pins,
+    # A draft model's folder (K3_DRAFT; Inferact/Kimi-K3.1-Pro-DSpark: config.json and
+    # model.safetensors, 5 GB). A decode step then also carries the next tokens the draft model is
+    # sure of, and each one the model itself picks costs no step of its own; every token is still
+    # the model's own pick, so a reply is the same tokens with it and without. Its 2.5 GB on the
+    # GPU come out of -DenseGB's matrices. Default: <ModelDir>-DSpark when that folder holds one;
+    # -NoDraft: off. -DraftP: a guess is checked when the draft model gives it this probability or
+    # more; -DraftMax: the most guesses a step carries (each 0.43 GB of RAM)
+    [string]$Draft = '',
+    [switch]$NoDraft,
+    [ValidateRange(0.5,1)][double]$DraftP = 0.98,
+    [ValidateRange(1,7)][int]$DraftMax = 3,
     # No GPU: the dense matrices stay on the CPU (a CPU build, or to compare)
     [switch]$Cpu,
     # A prompt step's routed experts and other dense matrices on the CPU alone (K3_GPU_EXPERTS=0)
@@ -138,6 +149,28 @@ if (Test-Path -LiteralPath $layout -PathType Leaf) {
         throw "$ModelDir is not completely downloaded yet (k3_layout.json); rerun tools/download_kimi_k31_pro_4090.ps1"
     }
 }
+# The draft model: the folder named, or the one beside the model when it is there
+$draftDir = ''
+if (!$NoDraft -and !$Cpu) {
+    $draftDir = $(if ($Draft) { $Draft } else { $ModelDir.TrimEnd('\', '/') + '-DSpark' })
+    $draftFiles = @('config.json', 'model.safetensors' | ForEach-Object { Join-Path $draftDir $_ })
+    if (@($draftFiles | Where-Object { !(Test-Path -LiteralPath $_ -PathType Leaf) }).Count) {
+        if ($Draft) { throw "No draft model in $Draft (config.json and model.safetensors of Inferact/Kimi-K3.1-Pro-DSpark)" }
+        $draftDir = ''
+    } else {   # its kernels are coli_cuda_k3.dll's: one built before them leaves the engine without it
+        $k3dll = Join-Path $EngineDir 'coli_cuda_k3.dll'
+        $hasDraft = (Test-Path -LiteralPath $k3dll -PathType Leaf) -and
+                    [System.IO.File]::ReadAllText($k3dll, [System.Text.Encoding]::ASCII).Contains('k3cu_draft_begin')
+        if (!$hasDraft) {
+            if ($Draft) { throw "coli_cuda_k3.dll in $EngineDir has no draft model kernels (k3cu_draft_begin): build it with c\build_k3_cuda.bat" }
+            Write-Warning "A draft model is in $draftDir, but coli_cuda_k3.dll in $EngineDir predates it: running without"
+            $draftDir = ''
+        }
+    }
+}
+$env:K3_DRAFT = $draftDir
+$env:K3_DRAFT_P = [string]$DraftP
+$env:K3_DRAFT_MAX = [string]$DraftMax
 $env:K3_DIRS = $shardDirs -join ';'
 $env:K3_CUDA = '0'                     # no VRAM tier: a decode step's experts on the CPU, read in place
 $env:K3_GPU_EXPERTS = $(if ($Cpu -or $CpuExperts) { '0' } else { '1' })
@@ -175,7 +208,7 @@ if ($null -eq $env:COLI_CLIENT_BLOB_DIRS) {
 }
 foreach ($key in @('K3_LAYERS', 'K3_TRACE', 'K3_LOGITS', 'K3_X0', 'K3_MMAP', 'K3_IO_THREADS', 'K3_LOAD_THREADS',
                    'K3_IO_DELAY_US', 'K3_VK', 'COLI_GPU_FAIL_AFTER', 'K3_VAL_LOGITS', 'K3_VALIDATE_LAYER',
-                   'COLI_K3_CKPT_DIR', 'K3_SNAP_TEST')) {
+                   'COLI_K3_CKPT_DIR', 'K3_SNAP_TEST', 'K3_DRAFT_DUMP', 'K3_DRAFT_ORACLE', 'K3_DRAFT_MINCTX')) {
     Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue
 }
 Write-Host "Kimi K3.1 Pro: $ModelDir$(if ($shardDirs.Count) { '; experts also from ' + ($shardDirs -join '; ') })"
@@ -184,6 +217,7 @@ Write-Host "K3.1's index scores and picks: $(if ($indexerOnGpu) { 'on the GPU (k
 Write-Host "Context $Context tokens, replies up to $MaxOutput tokens, prompt steps of $Chunk (read-ahead $($env:K3_READAHEAD_GB) GB), $Photos photos (the system prompt's end and the turns')"
 Write-Host "Dense matrices' quantization: $(if ($NoDenseCache) { 'from the checkpoint at every start (-NoDenseCache)' } else { 'kept in ' + $(if ($DenseCache) { $DenseCache } else { Join-Path $ModelDir 'k3_dense_cache.bin' }) + ' (33 GB, written by the first start)' })"
 Write-Host "Conversations kept aside: $(if ($Sessions -gt 0) { "up to $Sessions, in $sessionPath (up to $SessionDiskGB GB), none in RAM" } else { 'off (-Sessions 0)' })"
+Write-Host "Draft model: $(if ($draftDir) { "$draftDir -- up to $DraftMax guesses a step, each checked at probability $DraftP or more; the replies' tokens are the same" } elseif ($NoDraft) { 'off (-NoDraft)' } else { 'none (Inferact/Kimi-K3.1-Pro-DSpark beside the model as <ModelDir>-DSpark turns it on)' })"
 Write-Host "API: http://127.0.0.1:$Port/v1, model $ModelId"
 & python (Join-Path $EngineDir 'coli') serve --model $ModelDir --ram $RamGB --ctx $Context `
     --ngen $MaxOutput --host 127.0.0.1 --port $Port --model-id $ModelId --kv-slots 1 `

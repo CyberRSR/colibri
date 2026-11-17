@@ -332,8 +332,91 @@ Through the API (worktree build, `-Sessions 0`, a fresh expert cache; `raw/visio
   prompt's end (1,930 of 3,236 tokens, the first picture in it) and the tower ran only for the new
   picture (0.65 s).
 
+## A draft model (2026-11-17)
+
+Speculative decoding for K3.1 Pro (`k3_draft.h`, `backend_cuda_k3_draft.cuh`; docs/kimi_k3.md,
+"Kimi K3.1: a draft model"). The scripts are in `draft/`.
+
+**Which one.** Four draft models for this target are on Hugging Face. By their own cards, at
+width 8 and temperature 1.0:
+
+| | first draft stands, SWE-bench Pro | accepted length, GSM8K / AIME 2026 | size |
+|---|---:|---:|---:|
+| Inferact/Kimi-K3.1-Pro-DSpark (2026-11-14) | 0.75 | 5.57 / 3.43 | 4.96 GB |
+| Inferact/Kimi-K3.1-Pro-DSpark-preview | 0.67 | 4.60 / 2.97 | 5.37 GB |
+| LithosAI/Kimi-K3.1-Pro-DSpark | 0.67 | 4.76 / 2.80 | 4.50 GB |
+| RadixArk/Kimi-K3.1-Dflash2-Preview | -- | 5.29 / 3.32 | 5.57 GB |
+
+Inferact's second checkpoint leads on every benchmark two of them share, and is the simplest
+to run: plain grouped-query attention with a window of 2,048 positions, where the preview and
+Dflash2 are MLA stacks. (gureshov/Kimi-K3.1-Pro-Coding-720E-DSpark is for a pruned target;
+ZhuoBohang-AMD's is gated.)
+
+**What it would guess on real work**, before any of the engine was written. Two recorded Kimi
+Code sessions replayed through the engine as prompts (47,767 and 58,123 tokens; `build_req.py`),
+with a temporary hook (`patch_hid.py`: `K3_HID_DUMP`) writing the hidden rows after ten layers,
+every position's input id and the id the head ranks first; then the draft model in PyTorch over
+those rows (`dspark2_eval.py`) at each of the 9,660 positions the model itself had written
+(`spans.py`), a draft standing when it is the head's first id there:
+
+| drafts 1..i all stand | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| the rows after layers 75, 79, 83, 87, 91 | 0.79 | 0.59 | 0.43 | 0.31 | 0.23 | 0.17 | 0.13 |
+| the rows after layers 74, 78, 82, 86, 90 | 0.70 | 0.46 | 0.30 | 0.20 | 0.13 | 0.07 | 0.05 |
+| the matrices and the head as int8 rows | 0.79 | 0.59 | 0.43 | 0.31 | 0.23 | 0.17 | 0.13 |
+| ... as int4 in groups of 64 | 0.78 | 0.58 | 0.41 | 0.29 | 0.22 | 0.15 | 0.11 |
+| a window of 1,024 / of 256 rows | 0.78 / 0.76 | 0.58 / 0.54 | 0.41 / 0.36 | | | | |
+
+(the second, fourth and fifth rows on 1,500 of the positions; `acceptance_int8.txt` is the
+third's whole output). So `aux_hidden_state_layer_ids` 76..92 count from 1, as vLLM captures
+them. By what the model was writing: a tool call's arguments 0.83, 0.65, 0.50; a reply 0.83,
+0.62, 0.43; reasoning 0.63, 0.38, 0.25. The confidence head says 0.95 or more at 57% of the
+positions and 92% of those stand; the pick's own probability sorts better (at 0.98 or more, up
+to 3 drafts: 92% of 4,623 stand).
+
+**The same bytes.** `rowtest.sh`: a 51-token prompt in steps of 1, 2, 3 and 8 rows -- one
+logits file. `drafttest.sh` (the CLI, greedy, `K3_LOGITS` with `K3_LOGITS_DECODE=1`, a fresh
+process a run):
+
+| | plain | `K3_DRAFT`, 0.98, at most 3 | `K3_DRAFT_P=0.3 K3_DRAFT_MAX=7` |
+|---|---:|---:|---:|
+| 51-token prompt, 48 tokens of reply | 62.6 s | 52.6 s; 24 steps, 24 of 24 drafts stood | |
+| 3,759-token prompt, 120 tokens | 173.3 s | 153.4 s; 73 steps, 47 of 49 stood | 163.6 s; 25 steps, 95 of 143 stood |
+| logits, every position | | the plain run's bytes | the plain run's bytes |
+
+In the third column blocks ended with 0, 1, 2, 3, 4, 6 and 7 of their drafts standing: every
+depth of what a block takes back. The card's draft model against PyTorch on the rows it was
+given (`K3_DRAFT_DUMP`, `tools/k3_draft_ref.py`): 151 of 152, 503 of 504 and 167 of 168 picks
+the same in the three runs, the differing one a tie at probability 0.28 each time, the
+probabilities within 2.3e-3.
+
+**What a draft costs here.** From the second row: a step of one row 1.445 s (this prompt, a
+fresh process: 14 GB of experts read a token); with the draft model a step carried 1.67 rows
+on average and took 2.10 s, so a draft row about 0.6 of a step, its routed experts read and
+computed for it alone, plus 77 ms a step that is the draft model's: its pass (23-37 ms) and the
+1.9 GiB of dense matrices it moved off the card (20.0 -> 18.1 GiB there). With those costs over
+the replayed sessions (`econ3.py`), the gate's two numbers hardly matter between 0.95 and 0.99
+and from 3 drafts up: x1.13 everywhere (0.98 and 3: x1.131; 0.8 and 7: x1.05; always one draft:
+x1.09).
+
+**Through the API** (`serve_ab.sh`: the launcher on port 18081, a request sent twice, the second
+time answered from its prompt's photo so the time is the reply's; temperature 0):
+
+| a recorded Kimi Code turn | without | with | |
+|---|---:|---:|---:|
+| 23,295 tokens, answered by a tool call, 91 tokens | 121.4 s | 102.9 s | +18% |
+| 23,371 tokens (the user then asks for an account), 220 tokens of reasoning | 269.0 s | 247.7 s | +9% |
+| their prompts, the first time | 288.8, 301.1 s | 294.0, 303.7 s | |
+
+The replies are the same text in all eight responses. The start takes 2.1-2.7 s more (5 GB of
+bf16 read and quantized on the card).
+
 ## Not done
 
+- **The draft model's context is not in the photos.** A conversation that comes back from a file,
+  or a new one that starts after the system prompt's photo, drafts from the rows its own prompt
+  step computes (the last 2,047) and from none before them; a turn that restores its own
+  conversation's photo keeps what the ring still holds.
 - **A large step's MoE waits for the bus.** 16,511 rows take 190 s where the drives need 105: the
   routed experts' weights go up (1.34 TB) while their outputs come down (0.33 TB), 60 s of copies
   in an 83 s phase. Their outputs summed on the card would need 3.8 GB of it at 16,384 rows (2-2.5

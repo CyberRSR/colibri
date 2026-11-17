@@ -258,6 +258,13 @@ Judge quantization choices on real-text logits, not synthetic-vector norms.
 | `K3_PIN_LOG` | 0 | 1: a line for each registration |
 | `K3_GPU_EXPERT_TILES` | 1 | a routed expert's piece of 32 rows or more in the tile kernels (k3_gu_t, k3_dn_t; 0: k3_gate_up and k3_down, the same bytes) |
 | `K3_LOGITS_DECODE` | 0 | the CLI's `K3_LOGITS` file keeps the decode's rows after the prompt's |
+| `K3_DRAFT` | unset | a draft model's folder (Inferact/Kimi-K3.1-Pro-DSpark; a CUDA build): a decode step also carries the next tokens it guesses, the reply's tokens the same ("a draft model", below) |
+| `K3_DRAFT_P` | 0.98 | a draft is checked when the draft model gives its pick this probability or more |
+| `K3_DRAFT_MAX` | 3 | the most drafts a step carries, 1..7 (each 0.43 GB of RAM: a KDA state beside the live one) |
+| `K3_DRAFT_MINCTX` | 256 | the fewest context rows the draft model's ring must hold before it drafts (fewer when the conversation is shorter) |
+| `K3_DRAFT_LOG` | 0 | 1: a line for every block |
+| `K3_DRAFT_DUMP` | unset | tests: the context rows the card was given and every pass's picks, for `tools/k3_draft_ref.py` |
+| `K3_DRAFT_ORACLE` | unset | tests: the drafts from a file of `position id` lines instead of a draft model (any build) |
 | `K3_CANCEL_TEST` | 0 | tests: the N-th cancel poll of the serve's first prompt cancels it |
 | `K3_LAYERS` | all | truncate the stack (validation) |
 | `K3_TRACE` | — | dump f32 hidden state after every layer (validation) |
@@ -999,9 +1006,79 @@ disabled", a Kimi Code session stopped for good). `tests/kimi_k3_vision_harness.
 a tiny tower of its own (numpy's reading of the modeling code for the rows, the builder, the
 reuse, the refusals).
 
+## Kimi K3.1: a draft model (`k3_draft.h`, `K3_DRAFT`)
+
+A decode step reads the dense matrices once whether it carries one row or several, so a step
+that also carries the *next* tokens -- when they can be guessed -- gets them for less than a step
+each. [Inferact/Kimi-K3.1-Pro-DSpark](https://huggingface.co/Inferact/Kimi-K3.1-Pro-DSpark) guesses
+them: a draft model trained for this target (speculators' `DSparkDraftModel`, 2.48 B parameters,
+5 GB of bf16), five Qwen3-style layers of the target's width that read its hidden rows after
+layers 75, 79, 83, 87 and 91 (0-based; `aux_hidden_state_layer_ids` 76..92) and propose 7 tokens
+in one pass. `K3_DRAFT=<folder>` (the launcher: `-Draft`, on by itself when `<ModelDir>-DSpark`
+holds the checkpoint, `-NoDraft` to run without) loads it; a CUDA build only. The folder needs
+the repository's `config.json` and `model.safetensors`:
+
+```powershell
+$d = 'C:\AI\Kimi-K3.1-Pro-DSpark'; mkdir $d -Force | Out-Null
+foreach ($f in 'config.json', 'model.safetensors') {
+    curl.exe -L -C - -o "$d\$f" "https://huggingface.co/Inferact/Kimi-K3.1-Pro-DSpark/resolve/main/$f"
+}
+```
+
+- **The reply is the same.** Every token is still sampled from the target's logits, in order, by
+  the loop's own sampler; a draft only decides whether the row after it was computed in advance.
+  The step that feeds the last token feeds the drafts behind it (`step_chunk` over `[token,
+  draft 1 .. n]`), the head runs for a row when its turn comes, and the first draft the model
+  does not pick ends the block. A row is computed alone in a step of any size (a prompt of 51
+  tokens in steps of 1, 2, 3 and 8 rows: the same logits file), so the logits are the plain
+  loop's bytes -- with greedy decoding and with a temperature (`rand()` is drawn once a token
+  either way).
+- **What a rejected draft takes back.** The KDA layers' recurrent state: a block's first row
+  updates it in place, row t >= 1 writes its state beside it (`k3_kda_head` reads the row
+  before's and writes its own: the same two sweeps), and the row the block ends on becomes the
+  live state by a swap of pointers -- nothing copied, nothing recomputed; `K3_DRAFT_MAX` states
+  of 0.43 GB stand beside the live one. The conv windows: rebuilt from their copy before the
+  block and the block's raw projections. The MLA caches and the index keys are rows by position
+  and are written again when those positions come; the record of the tokens fed is cut back.
+- **The draft model on the card** (`backend_cuda_k3_draft.cuh`, `k3cu_draft_*`): f32 in its own
+  order of the sums -- a draft is a guess, not one of the engine's exact paths. Its matrices are
+  quantized on the card from the checkpoint's bf16 to int8 rows with a scale each (2.49 GB; 2.1 s
+  at the start) and its logits come from the target's own head as `K3_CUDA_DENSE` holds it.
+  A position's five tapped rows go through `fc` and `hidden_norm` once, as the step that
+  computed them ends, and each layer's key and value of them stay in a ring of the last 2,112
+  positions (85 MB); a pass is then the block `[token, mask x 6]` over the ring's rows within
+  the window of 2,048 and the block's own rows, the head over its 7 rows, and the Markov bias
+  `w2 . w1[previous]` added left to right as each row's token is picked: 23-37 ms.
+- **The ring across requests.** Every ring row carries a hash of the tokens through its
+  position. A request that starts on a restored state (a turn's photo, the system prompt's, a
+  conversation read back) keeps the rows up to that position when their hash is the prompt's
+  (`k3d_sync`), and starts with none otherwise; a prompt's last 2,047 rows refill it either way.
+- **The wager.** A draft row costs about 0.6 of a step on this machine -- its routed experts are
+  its own to read and compute -- so a draft pays only when it is very likely to stand. The gate
+  is the draft model's own probability of its pick: the leading drafts at `K3_DRAFT_P` (0.98)
+  or more, at most `K3_DRAFT_MAX` (3). Its confidence head is not used (it says 0.95 where 91%
+  stand; the pick's probability sorts better).
+
+Measured on the 4090 machine (`docs/experiments/kimi-k31-4090-2026-11-10/`, "A draft model"):
+on two recorded Kimi Code sessions (9,660 positions the model wrote, its hidden rows replayed)
+the drafts 1..7 all stand at 0.79, 0.59, 0.43, 0.31, 0.23, 0.17, 0.13 of the positions (tool
+arguments and replies 0.83 for the first, reasoning 0.63), the same with the int8 matrices as
+with bf16. The card's picks are a PyTorch reading's of the same rows (`tools/k3_draft_ref.py`
+over `K3_DRAFT_DUMP`: 821 of 824, the three at ties far below the gate). With the draft model
+and without it: a 3,759-token prompt and 120 tokens of reply, the logits of all 3,879 positions
+the same bytes -- also with `K3_DRAFT_P=0.3 K3_DRAFT_MAX=7`, where 48 of 143 drafts were taken
+back from every depth -- in 153 s instead of 173 (47 of 49 drafts stood); through the API, a
+recorded agent turn of 23,295 tokens answered with the same tool call in 103 s instead of 121
+(+18%), and one answered by 220 tokens of reasoning in 248 s instead of 269 (+9%). Over the two
+sessions' replay the gate's costs and gains come to about +13%. The start takes 2 s more, a
+prompt 1-2% longer, and the dense matrices on the card are 18.1 GiB instead of 20.
+`tests/kimi_k3_draft_harness.py` checks the blocks on the tiny fixture with drafts read from a
+file (`K3_DRAFT_ORACLE`: right ones, wrong ones, mixed, at a temperature) on any build.
+
 ## Current limitations
 
-- Decode is single-token (no speculative decoding — K3 has no MTP head).
+- Without a draft model decode is one token a step; with one (above) a step carries the drafts
+  it is sure of. The checkpoint itself has no MTP head.
 - Pictures need Kimi K3.1's tower (above); video is not read, nor a picture in an assistant
   turn. Without the tower a picture the user sends is refused with HTTP 400 and one inside a
   tool result reaches the model as a line saying an image was there (`text_only_tool_results`).

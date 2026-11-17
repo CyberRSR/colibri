@@ -33,6 +33,15 @@ static int (*p_mla_mask)(const float *, const float *, int, int, int, const floa
 static int (*p_dsa_mask)(const float *, int, int, int, const float *, const float *, int, int, int, uint32_t *, int);   /* and this */
 static int (*p_mla_sel)(const float *, const float *, int, int, int, const float *, const float *, const int8_t *,
                         const float *, int, int, int, int, int, float, const uint32_t *, int, int, float *);   /* and this */
+static int (*p_draft_begin)(const K3cuDraftCfg *);   /* optional: the draft model (k3_draft.h), all nine or none */
+static int (*p_draft_matrix)(int, int, const uint16_t *, int, int);
+static int (*p_draft_vector)(int, int, const float *, int);
+static int (*p_draft_ready)(const void *, const float *);
+static size_t (*p_draft_bytes)(void);
+static int (*p_draft_rows)(const float *, int, int);
+static int (*p_draft_block)(int, int, const float *);
+static int (*p_draft_pick)(int, const float *, int *, float *);
+static void (*p_draft_free)(void);
 static int (*p_host_register)(void *, size_t);   /* optional: registered rows beside the kernels */
 static void (*p_host_unregister)(void *);
 static void (*p_report)(void), (*p_shutdown)(void);
@@ -66,6 +75,19 @@ int k3cu_init(int device) {
     { FARPROC fn = GetProcAddress(h, "k3cu_mla_mask"); if (fn) memcpy(&p_mla_mask, &fn, sizeof fn); else fprintf(stderr, "[K3-CUDA] coli_cuda_k3.dll has no k3cu_mla_mask: K3.1's sparse rows on the CPU\n"); }
     { FARPROC fn = GetProcAddress(h, "k3cu_mla_sel"); if (fn) memcpy(&p_mla_sel, &fn, sizeof fn); else fprintf(stderr, "[K3-CUDA] coli_cuda_k3.dll has no k3cu_mla_sel: K3.1's selecting rows against every position (k3cu_mla_mask), slower as the context grows\n"); }
     { FARPROC fn = GetProcAddress(h, "k3cu_dsa_mask"); if (fn) memcpy(&p_dsa_mask, &fn, sizeof fn); else fprintf(stderr, "[K3-CUDA] coli_cuda_k3.dll has no k3cu_dsa_mask: K3.1's picks on the CPU, a long prompt waits there\n"); }
+    {   /* the draft model's calls: an older DLL has none, and K3_DRAFT then says so (k3cu_draft_begin 0) */
+        static const char *const names[9] = {"k3cu_draft_begin", "k3cu_draft_matrix", "k3cu_draft_vector", "k3cu_draft_ready",
+            "k3cu_draft_bytes", "k3cu_draft_rows", "k3cu_draft_block", "k3cu_draft_pick", "k3cu_draft_free"};
+        FARPROC fn[9]; int all = 1;
+        for (int i = 0; i < 9; i++) if (!(fn[i] = GetProcAddress(h, names[i]))) all = 0;
+        if (all) {
+            memcpy(&p_draft_begin, &fn[0], sizeof fn[0]); memcpy(&p_draft_matrix, &fn[1], sizeof fn[0]);
+            memcpy(&p_draft_vector, &fn[2], sizeof fn[0]); memcpy(&p_draft_ready, &fn[3], sizeof fn[0]);
+            memcpy(&p_draft_bytes, &fn[4], sizeof fn[0]); memcpy(&p_draft_rows, &fn[5], sizeof fn[0]);
+            memcpy(&p_draft_block, &fn[6], sizeof fn[0]); memcpy(&p_draft_pick, &fn[7], sizeof fn[0]);
+            memcpy(&p_draft_free, &fn[8], sizeof fn[0]);
+        }
+    }
     { FARPROC fn = GetProcAddress(h, "k3cu_host_register"), fu = GetProcAddress(h, "k3cu_host_unregister");
       if (fn && fu) { memcpy(&p_host_register, &fn, sizeof fn); memcpy(&p_host_unregister, &fu, sizeof fu); } }
     module = h;
@@ -122,5 +144,14 @@ int k3cu_shared(float *sd, const float *x, int S, int D, int I, const uint8_t *g
 int k3cu_kda(const K3cuKda *a, const float *x, float *out) { return module && p_kda ? p_kda(a, x, out) : 0; }
 int k3cu_mla_layer(const K3cuMlaLayer *a, const float *x, float *out) { return module && p_mla_layer ? p_mla_layer(a, x, out) : 0; }
 int k3cu_vision(const K3cuVision *v, const uint8_t *rgb, int gh, int gw, float *rows) { return module && p_vision ? p_vision(v, rgb, gh, gw, rows) : 0; }
+int k3cu_draft_begin(const K3cuDraftCfg *c) { return module && p_draft_begin ? p_draft_begin(c) : 0; }
+int k3cu_draft_matrix(int kind, int layer, const uint16_t *w, int O, int I) { return module && p_draft_matrix ? p_draft_matrix(kind, layer, w, O, I) : 0; }
+int k3cu_draft_vector(int kind, int layer, const float *v, int n) { return module && p_draft_vector ? p_draft_vector(kind, layer, v, n) : 0; }
+int k3cu_draft_ready(const void *head_w, const float *head_s) { return module && p_draft_ready ? p_draft_ready(head_w, head_s) : 0; }
+size_t k3cu_draft_bytes(void) { return module && p_draft_bytes ? p_draft_bytes() : 0; }
+int k3cu_draft_rows(const float *taps, int n, int pos0) { return module && p_draft_rows ? p_draft_rows(taps, n, pos0) : 0; }
+int k3cu_draft_block(int a, int lo, const float *first) { return module && p_draft_block ? p_draft_block(a, lo, first) : 0; }
+int k3cu_draft_pick(int slot, const float *me, int *id, float *prob) { return module && p_draft_pick ? p_draft_pick(slot, me, id, prob) : 0; }
+void k3cu_draft_free(void) { if (module && p_draft_free) p_draft_free(); }
 void k3cu_report(void) { if (module) p_report(); }
 void k3cu_shutdown(void) { if (module) p_shutdown(); }

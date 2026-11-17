@@ -82,6 +82,11 @@
  *                        K3_CUDA_RELEASE_HOST=1 frees their host copies
  *   K3_TOPP=F            keep routed experts to cumulative weight F (0 = off)
  *   K3_CHUNK=N           prefill chunk size (default 32, at most 16384; 1 = token-at-a-time)
+ *   K3_DRAFT=dir         (a CUDA build) a draft model's folder (Inferact/Kimi-K3.1-Pro-DSpark):
+ *                        a decode step also carries the next tokens it guesses, and the ones
+ *                        the model then picks cost no step of their own; the reply's tokens
+ *                        are the same (k3_draft.h: K3_DRAFT_P, K3_DRAFT_MAX, K3_DRAFT_MINCTX,
+ *                        K3_DRAFT_LOG). Unset: none of it runs.
  *   K3_THINK=0|1         chat mode: open the think channel (default 1)
  *   K3_LAYERS=N          truncate to first N layers (validation; skips head)
  *   K3_TRACE=path        dump f32 hidden state after every layer (validation)
@@ -358,6 +363,22 @@ typedef struct {
 } Model;
 
 static double now_s(void){ struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return t.tv_sec+t.tv_nsec*1e-9; }
+
+/* ---------- K3_DRAFT (k3_draft.h, included after step_chunk): what the code before it reads ----------
+ * A decode step may carry the tokens a draft model guesses behind the one it feeds -- a block --
+ * and the rows of the guesses the model does not pick are taken back. g_k3d_blk: the rows of the
+ * block the running step computes, 0 in every other step. */
+static int g_k3d_blk;
+static float **g_k3d_chain[8];   /* [t-1][layer]: where a KDA layer's state after the block's row t >= 1 goes */
+static float *g_k3d_mix;         /* [rows][hidden]: the block's rows as the head reads them */
+static int g_k3d_tap_on;         /* the running step's rows after the tapped layers are kept for the draft model */
+static void k3d_tap(Model *m, int li, const float *hidden, int C);
+static void k3d_kda_save(Model *m, int li, const float *q, const float *k, const float *v, int C);
+static void k3d_step_begin(Model *m, int pos0, int C);
+static void k3d_step_end(Model *m, const int *ids, int pos0, int C, int completed);
+static double k3d_plan_gb(const Cfg *c);
+static void k3d_load(Model *m);
+static void k3d_ready(Model *m);
 
 /* ---------- K3_CHECK (debugging, off by default) -------------------------------------------
  * K3_CHECK=1: a sampled hash of an expert's bytes as its read lands, checked when the GPU or a
@@ -2598,12 +2619,15 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
         fprintf(stderr,"[K3-MMAP] %llu views, %.1f GB prepared weights/scales file-backed\n",
                 (unsigned long long)g_k3_mmap_views,g_k3_mmap_bytes/1e9);
 #ifdef COLI_CUDA
+    /* K3_DRAFT: the draft model's matrices first, so the dense ones take what it leaves */
+    if(!segment_mode&&load_boundaries&&m->has_head) k3d_load(m);
     /* K3_CUDA_DENSE: before the expert cache is sized, so released host copies count */
     if(!segment_mode&&load_boundaries) k3_cuda_dense_place(m);
 #endif
 #ifdef COLI_K3_CUDA
     if(!segment_mode&&load_boundaries) k3g_init(m);   /* after the dense matrices took their VRAM */
 #endif
+    if(!segment_mode&&load_boundaries) k3d_ready(m);  /* K3_DRAFT: the head's place on the card, a block's room */
 #ifdef COLI_VULKAN
     /* COLI_VULKAN=1 (K3_VK=1 alike): the device opens once the weights are in RAM,
      * a missing one costing a line and nothing else. Whether the routed-expert tier
@@ -2725,7 +2749,7 @@ static void model_init_range(Model *m, const char *snap, int layer_begin,
          * slots now: RAM_GB is a whole-process ceiling even for opt-in memory. */
         double ckpt_gb = k3_ckpt_reserve_gb(m,g_k3_ckpt_slots);
         double act_gb = k3_act_gb(), ra_gb = k3_ra_gb();
-        double reserve = 2.5 + act_gb + ra_gb + kv_gb + ckpt_gb + k3_vision_plan_gb(&m->S);
+        double reserve = 2.5 + act_gb + ra_gb + kv_gb + ckpt_gb + k3_vision_plan_gb(&m->S) + k3d_plan_gb(c);
         g_k3_ram_later = (kv_gb + ckpt_gb) * 1e9;   /* allocated once it serves: the tier's host pool leaves it (#2314) */
         g_k3_kv_plan_bytes = kv_gb * 1e9;           /* what the caches take past it, the expert cache lends (k3_cache_lent_sync) */
         double for_experts = 0.0;
@@ -2920,14 +2944,22 @@ static __attribute__((noinline)) void k3_kda_head(Model *m, const Kda *a, int li
     }
     float beta=sigmoidf_(bt[h]);
     float *S=(m->mux_rows?m->mux_rows[t].seq->kstate[li]:m->kstate[li])+(int64_t)h*hd*hd;
+    /* K3_DRAFT, a block's row t >= 1 (a draft's): the state it reads is the row before's and the
+     * one it leaves goes beside it, so the live state stays the first row's until the block ends
+     * (k3d_settle). The sweeps below are the same sums: the first reads Sin and writes S. */
+    const float *Sin=S;
+    if(g_k3d_blk&&t>0){
+        if(t>1) Sin=g_k3d_chain[t-2][li]+(int64_t)h*hd*hd;
+        S=g_k3d_chain[t-1][li]+(int64_t)h*hd*hd;
+    }
     memset(kS,0,sizeof(kS));
 #ifdef __AVX2__
     if(!(hd&7)){
         for(int kk=0;kk<hd;kk++){
-            float *row=S+(int64_t)kk*hd;
+            float *row=S+(int64_t)kk*hd; const float *rin=Sin+(int64_t)kk*hd;
             __m256 al8=_mm256_set1_ps(alpha[kk]), kv8=_mm256_set1_ps(kn[kk]);
             for(int vv=0;vv<hd;vv+=8){
-                __m256 r=_mm256_mul_ps(_mm256_loadu_ps(row+vv),al8);
+                __m256 r=_mm256_mul_ps(_mm256_loadu_ps(rin+vv),al8);
                 _mm256_storeu_ps(row+vv,r);
                 _mm256_storeu_ps(kS+vv,_mm256_fmadd_ps(kv8,r,_mm256_loadu_ps(kS+vv)));
             }
@@ -2946,8 +2978,8 @@ static __attribute__((noinline)) void k3_kda_head(Model *m, const Kda *a, int li
     } else {
 #endif
     for(int kk=0;kk<hd;kk++){
-        float *row=S+(int64_t)kk*hd; float al=alpha[kk], kv=kn[kk];
-        for(int vv=0;vv<hd;vv++){ row[vv]*=al; kS[vv]+=kv*row[vv]; }
+        float *row=S+(int64_t)kk*hd; const float *rin=Sin+(int64_t)kk*hd; float al=alpha[kk], kv=kn[kk];
+        for(int vv=0;vv<hd;vv++){ row[vv]=rin[vv]*al; kS[vv]+=kv*row[vv]; }
     }
     for(int vv=0;vv<hd;vv++) vt[vv]=(vh[vv]-kS[vv])*beta;
     memset(oh,0,sizeof(oh));
@@ -3062,6 +3094,7 @@ static void kda_forward_rows(Model *m, Layer *l, int li, const float *x, int C, 
         fflush(stderr); } }
     w_matmul(q,x,&a->q,C); w_matmul(k,x,&a->k,C); w_matmul(v,x,&a->v,C);
     w_matmul(gp,x,&a->g,C);
+    if(g_k3d_blk) k3d_kda_save(m,li,q,k,v,C);   /* K3_DRAFT: what taking a block's last rows back needs */
     double tf=now_s();
     if(!K3_F32_DEV(a->vk_fa,t1,x,C,c->hidden,c->kda_hd)){
         K3_F32_NEED(a->fa); k3_matmul_f32((void*)&a->metal_fa, t1, x, a->fa, C, c->hidden, c->kda_hd); }
@@ -6190,6 +6223,7 @@ static int k3_layers_forward_range(Model *m, float *hidden, float *bres,
               val_dump("hidden",hidden+(int64_t)t*D,D); }
         }
         if(g_k3_ckf){ k3_ck_rows(K3CK_HID,i,hidden,C,D); fflush(g_k3_ckf); }
+        if(g_k3d_tap_on) k3d_tap(m,i,hidden,C);   /* K3_DRAFT: the rows the draft model reads */
         /* Prefill does not emit tokens, and a full chunk can take minutes on
          * CPU. Poll after each layer so the gateway can cancel before the
          * first token instead of waiting for the entire prompt. */
@@ -6713,6 +6747,7 @@ static float *step_chunk_ex(Model *m, const int *ids, int pos0, int C,
     float *mix=falloc(D);
     int nb=0;
     k3_embed(m,ids,pos0,C,hidden);
+    k3d_step_begin(m,pos0,C);
     if(pos0==0&&C<=1) fprintf(stderr,"[DBG] step_chunk pos=%d C=%d metal=%d\n", pos0, C, g_k3_metal);
     int echo_on = g_echo_k>0 && g_echo_id;
     int from=0;   /* the first layer the CPU runs */
@@ -6737,6 +6772,14 @@ static float *step_chunk_ex(Model *m, const int *ids, int pos0, int C,
     if((!cancelled||!*cancelled)&&m->has_head){
         double t0=now_s();
         for(int t=0;t<C;t++){
+            if(g_k3d_blk){   /* K3_DRAFT's block: every row as the head reads it (a draft's logits when the
+                              * model picks it, k3d_step), and the first row's logits now -- the calls below */
+                float *mx=g_k3d_mix+(int64_t)t*D;
+                res_mix(mx,hidden+(int64_t)t*D,bres+(int64_t)t*nbmax*D,nb,D,m->out_sw,c->eps);
+                rmsnorm_(mx,mx,m->final_norm,D,c->eps);
+                if(t==0){ logits=falloc(c->vocab); w_matmul(logits,mx,&m->lm_head,1); }
+                continue;
+            }
             /* head only where needed: the chunk's last token (feeds sampling)
              * and every position when K3_LOGITS dumps teacher-forced logits;
              * also all positions during Phase 10 validation; and every
@@ -6772,6 +6815,7 @@ static float *step_chunk_ex(Model *m, const int *ids, int pos0, int C,
     }
     /* record what was just fed, at the positions it went to (kv_prefix.h) */
     if(!cancelled||!*cancelled) kv_prefix_record(&m->kvp,ids,pos0,C);
+    k3d_step_end(m,ids,pos0,C,!cancelled||!*cancelled);
     free(hidden);free(bres);free(mix);
     k3_bcache_drop();   /* the step's kept buffers back to the OS */
     if(g_k3_pin_n) fprintf(stderr,"[K3] the step registered %d buffers (%.1f GB) with the card in %.1fs and let %d go in %.1fs\n",
@@ -6788,6 +6832,7 @@ static float *step_chunk_ex(Model *m, const int *ids, int pos0, int C,
 static float *step_chunk(Model *m, const int *ids, int pos0, int C){
     return step_chunk_ex(m,ids,pos0,C,NULL,NULL,NULL);
 }
+#include "k3_draft.h"   /* K3_DRAFT: a draft model's guesses checked in the step that feeds the last token */
 
 /* ---- several conversations at once (KV_SLOTS>1, serve_mux) ------------------- */
 static void k3_seq_swap(Model *m, K3Seq *q){
@@ -7957,6 +8002,7 @@ static int k3_serve_start(Model *m, Tok *T, ServeReq *q, int **ids_out, int *np_
     }
     k3_sess_pick(m,ids,np,np+q->max_tok+8,chat?chat_key:np);   /* another conversation's request: the live one aside */
     int reuse=prepare_request_state(m,ids,np,np+q->max_tok+8);
+    k3d_sync(ids,reuse);   /* K3_DRAFT: the draft model's context rows that are this state's */
     if(g_k3_img_n&&!k3_img_rows(q->id,reuse)){   /* the pictures past the reused prefix: their rows */
         coli_serve_write_error(stdout,q->id,"the vision tower could not compute a picture (out of memory?)");
         k3_cancel_unpublished_state(m);
@@ -8093,6 +8139,7 @@ static int serve_one(Model *m, Tok *T, ServeReq *q){
     char buf[512], xtag[320];   /* tool-call open tags carry attributes: call tool="..." index="..." (#1143) */
     double tg=now_s();
     int forwards=1;                       /* the prefill; decode steps are counted where they run */
+    k3d_stats_reset();
     for(int s=0;s<q->max_tok&&!cancelled;s++){
         int tk=sample_tok(lo,m->c.vocab,q->temp,q->top_p);
         g_lp_tail[0]=0;
@@ -8143,8 +8190,15 @@ static int serve_one(Model *m, Tok *T, ServeReq *q){
         }
         if(cancelled){ limited=0; break; }
         if(eos){ limited=0; break; }
-        if(s+1<q->max_tok){ lo=step_chunk(m,&tk,np+s,1); forwards++; }
+        if(s+1<q->max_tok){
+            /* K3_DRAFT: the step may carry the next tokens' guesses, and a guess the model picks next
+             * has its logits already (no forward); the logprobs channel reads every step's, so none there */
+            const uint64_t st0=g_k3d.s_steps;
+            lo=k3d_step(m,tk,np+s,q->logprobs>0?0:q->max_tok-2-s);
+            forwards+=g_k3d.blocks?(int)(g_k3d.s_steps-st0):1;
+        }
     }
+    k3d_settle(m);   /* a block the reply ended inside: the rows past its last token taken back */
     if(poll.fatal){ free(lo); free(ids); return -1; }
     free(lo); free(ids);
     /* End of the reply: the next turn's transcript extends THIS state, and an
@@ -8162,6 +8216,7 @@ static int serve_one(Model *m, Tok *T, ServeReq *q){
            dt,np,gen,disk,0.0,moe>disk?moe-disk:moe,m->t_attn-a0,m->t_head-h0,forwards);
     fflush(stdout);
     k3_io_report(m,"turn");
+    k3d_report("turn",gen);
 #ifdef COLI_CUDA
     k3_cuda_report("turn");
 #endif
@@ -8544,6 +8599,7 @@ int main(int argc, char **argv){
         fprintf(stderr,"[K3] K3_TRACE set: prefill chunk forced to 1\n");
     }
     double t0=now_s(), pf0=k3_page_faults(); float *lo=NULL;
+    k3d_sync(ids,0);
     /* K3_SNAP_TEST=N (tests): the KDA layers' calls of the step that crosses position N made in
      * two, as the system prompt's photo makes them (kda_forward) -- the logits must not move */
     const int snap_at=getenv("K3_SNAP_TEST")?atoi(getenv("K3_SNAP_TEST")):0;
@@ -8633,7 +8689,11 @@ int main(int argc, char **argv){
         ntok++;
         if(is_eos){ fprintf(stderr,"\n[K3] eos\n"); break; }
         if(np+ntok>=max_t){ fprintf(stderr,"\n[K3] context full\n"); break; }
-        lo=step_chunk(&m,&t,np+ntok-1,1);
+        {   /* K3_DRAFT: as a served reply's step (k3d_step), within --ngen and the context */
+            int room=ngen-1-ntok;
+            if(room>max_t-np-ntok) room=max_t-np-ntok;
+            lo=k3d_step(&m,t,np+ntok-1,room);
+        }
         double el=now_s()-tg;
         /* Per-token stats every K3_STAT_EVERY tokens (default 32) to keep the token stream
          * readable. The final summary below always prints. K3_STAT_EVERY=1 restores per-token. */
@@ -8644,6 +8704,7 @@ int main(int argc, char **argv){
                     ntok,el/ntok,100.0*m.hits/(m.hits+m.miss+1e-9),m.ebytes/1e9);
     }
     if(lo) free(lo);
+    k3d_settle(&m);
     if(g_lfp){ fclose(g_lfp); g_lfp=NULL; }   /* K3_LOGITS_DECODE: the decode's rows too */
     double dt=now_s()-tg;
     fprintf(stderr,"\n[K3] decode %d tokens in %.1fs (%.2f tok/s) | expert hit %.1f%% (%llu/%llu) | %.1f GB streamed\n",
@@ -8666,6 +8727,7 @@ int main(int argc, char **argv){
         }
     }
     k3_io_report(&m,"run");
+    k3d_report("run",ntok);
     k3_reuse_save(&m);
 #ifdef COLI_CUDA
     k3_cuda_report("run");

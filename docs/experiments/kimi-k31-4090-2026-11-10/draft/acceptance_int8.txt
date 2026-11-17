@@ -1,0 +1,46 @@
+9660 anchors judged
+published (pooled, sampling at temperature 1.0): 0.72, 0.50, 0.34, 0.23, 0.16, 0.11, 0.08
+all, against the model's greedy pick:    0.79, 0.59, 0.43, 0.31, 0.23, 0.17, 0.13  | accepted a verify: 2.43
+all, against the recorded next tokens:   0.76, 0.55, 0.39, 0.28, 0.20, 0.15, 0.11  | accepted a verify: 2.41
+  argument         4548 anchors:  0.83, 0.65, 0.50, 0.38, 0.29, 0.23, 0.18
+  think            2023 anchors:  0.63, 0.38, 0.25, 0.16, 0.11, 0.07, 0.03
+  response         1758 anchors:  0.83, 0.62, 0.43, 0.28, 0.20, 0.14, 0.09
+  call              755 anchors:  0.79, 0.53, 0.31, 0.17, 0.10, 0.05, 0.03
+  message           369 anchors:  0.82, 0.73, 0.64, 0.50, 0.36, 0.15, 0.06
+  tools             207 anchors:  0.79, 0.65, 0.44, 0.37, 0.28, 0.23, 0.20
+  transcript 0    4377 anchors:  0.82, 0.61, 0.44, 0.30, 0.22, 0.15, 0.10
+  transcript 1    5283 anchors:  0.76, 0.56, 0.42, 0.32, 0.24, 0.19, 0.15
+  positions 0-30000: 1379 anchors:  0.77, 0.57, 0.41, 0.28, 0.18, 0.12, 0.08
+  positions 30000-50000: 6133 anchors:  0.80, 0.60, 0.44, 0.32, 0.23, 0.17, 0.13
+  positions 50000-end: 2148 anchors:  0.76, 0.56, 0.42, 0.31, 0.25, 0.20, 0.16
+confidence head, first draft: stated -> stood
+  0.00-0.30:   0.2% of anchors, stood   0.0%
+  0.30-0.50:   3.1% of anchors, stood  25.9%
+  0.50-0.60:   4.3% of anchors, stood  36.7%
+  0.60-0.70:   7.1% of anchors, stood  51.2%
+  0.70-0.80:   9.9% of anchors, stood  64.3%
+  0.80-0.90:  10.8% of anchors, stood  73.4%
+  0.90-0.95:   7.3% of anchors, stood  80.7%
+  0.95-1.00:  57.3% of anchors, stood  91.6%
+
+block times: [(1, 1.336), (2, 2.22), (4, 3.944), (8, 7.277)]; a plain step 1.336 s
+gate                                         free draft   +30 ms   +55 ms  +115 ms   tokens a verify, drafts kept
+never draft (plain decode)                       1.000    1.000    1.000    1.000   0.00, 0% of 0
+always 1 draft(s)                                1.063    1.049    1.038    1.011   1.77, 77% of 5466
+always 2 draft(s)                                0.986    0.977    0.969    0.951   2.28, 64% of 8489
+always 3 draft(s)                                0.868    0.861    0.856    0.843   2.56, 52% of 11307
+always 7 draft(s)                                0.539    0.536    0.534    0.530   2.93, 28% of 23076
+confidence head >= 0.60                          0.859    0.853    0.848    0.836   2.66, 51% of 11863
+confidence head >= 0.70                          0.922    0.914    0.908    0.893   2.46, 56% of 10189
+confidence head >= 0.80                          0.973    0.964    0.956    0.938   2.22, 61% of 8658
+confidence head >= 0.90                          1.018    1.006    0.996    0.974   1.97, 67% of 7104
+draft's own probability >= 0.70                  0.993    0.984    0.976    0.958   2.37, 64% of 8797
+draft's own probability >= 0.80                  1.043    1.032    1.023    1.003   2.26, 70% of 7752
+draft's own probability >= 0.90                  1.095    1.082    1.072    1.048   2.12, 77% of 6614
+draft's own probability >= 0.95                  1.117    1.103    1.092    1.066   2.00, 82% of 5904
+draft's own probability >= 0.98                  1.140    1.125    1.113    1.084   1.87, 88% of 5101
+draft's own probability >= 0.99                  1.145    1.129    1.116    1.086   1.80, 91% of 4709
+expected value, probability made honest          1.147    1.133    1.121    1.093   1.98, 88% of 5397
+expected value by the confidence head            1.007    0.997    0.989    0.971   2.34, 66% of 8437
+expected value by the draft's probability        1.065    1.054    1.045    1.024   2.33, 72% of 7612
+all-knowing (exactly what will stand)            1.300    1.287    1.277    1.252   2.93, 100% of 6371

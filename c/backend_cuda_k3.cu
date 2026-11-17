@@ -2916,8 +2916,11 @@ extern "C" int k3cu_vision(const K3cuVision *v, const uint8_t *rgb, int gh, int 
     return ok;
 }
 
+#include "backend_cuda_k3_draft.cuh"
+
 extern "C" void k3cu_report(void) {
     if (!ready) return;
+    kd_report();
     if (n_steps)
         fprintf(stderr, "[K3-CUDA] experts: %llu steps, %llu experts, %llu rows on the GPU; copying their bytes %.1fs, waiting for slots %.1fs%s\n",
                 n_steps, n_experts, n_rows, t_copy, t_wait, failed ? "; the device failed" : "");
@@ -2938,6 +2941,7 @@ extern "C" void k3cu_report(void) {
 extern "C" void k3cu_shutdown(void) {
     if (!ready) return;
     if (m_on) k3cu_moe_end();
+    if (kd.D) kd_free_all();
     slots_free();
     cudaFree(d_zq); cudaFree(d_zs); d_zq = nullptr; d_zs = nullptr; zq_cap = zs_cap = 0;
     cudaFree(mm_w); cudaFree(mm_s); cudaFree(mm_x); cudaFree(mm_y); mm_w = nullptr; mm_s = mm_x = mm_y = nullptr;

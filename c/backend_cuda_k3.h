@@ -157,6 +157,41 @@ typedef struct {
     const uint16_t *const *qkv, *const *wo, *const *fc0, *const *fc1;
 } K3cuVision;
 K3CU_API int k3cu_vision(const K3cuVision *v, const uint8_t *rgb, int gh, int gw, float *rows);
+/* Kimi K3.1 Pro's draft model (k3_draft.h; Inferact/Kimi-K3.1-Pro-DSpark): L decoder layers of
+ * width D that read the target's hidden rows and propose the next `block` tokens in one pass.
+ * f32 in this file's own order of the sums, the matrices int8 rows with a scale each quantized
+ * on the device from the checkpoint's bf16 -- a draft is a guess the target checks, not one of
+ * the engine's exact paths. Every call 1, or 0 when it cannot (drafting then stops; an older
+ * DLL has none of them: the loader).
+ * begin: the shapes (H query heads over G key heads of hd = 64, MLP width I, vocabulary V,
+ *   Markov rank R, T tapped rows a position, a window of win positions, a ring of `ring` slots
+ *   >= win + block); frees a draft model held before.
+ * matrix: one of the checkpoint's, bf16 rows [O][I]. vector: f32 (the norms' weights; MASK: the
+ *   mask token's embedding).
+ * ready: every matrix and vector given; the target's head as coli_cuda.dll holds it (int8 rows
+ *   [V][D] and their scales, coli_cuda_tensor_dev_ptrs), which stays that DLL's.
+ * rows: context positions pos0 .. pos0+n-1, taps [n][T D] (a position's tapped rows side by
+ *   side); their keys and values of every layer into the ring's slots (position mod ring).
+ * block: the rows at positions a .. a+block-1, the first `first` [D] (the embedding of the token
+ *   at a), the others the mask's, over the ring's positions lo .. a-1. The rows' logits stay on
+ *   the device.
+ * pick: row `slot` of them plus the Markov bias w2 . me (me [R]); its first maximum and that
+ *   token's probability. */
+typedef struct {
+    int D, H, G, hd, I, V, R, L, T, block, win, ring;
+    float eps, theta;
+} K3cuDraftCfg;
+enum { K3CU_DM_FC, K3CU_DM_Q, K3CU_DM_K, K3CU_DM_V, K3CU_DM_O, K3CU_DM_GATE, K3CU_DM_UP, K3CU_DM_DOWN, K3CU_DM_W2 };
+enum { K3CU_DV_HNORM, K3CU_DV_NORM, K3CU_DV_IN, K3CU_DV_POST, K3CU_DV_QN, K3CU_DV_KN, K3CU_DV_MASK };
+K3CU_API int k3cu_draft_begin(const K3cuDraftCfg *c);
+K3CU_API int k3cu_draft_matrix(int kind, int layer, const uint16_t *w, int O, int I);
+K3CU_API int k3cu_draft_vector(int kind, int layer, const float *v, int n);
+K3CU_API int k3cu_draft_ready(const void *head_w, const float *head_s);
+K3CU_API size_t k3cu_draft_bytes(void);
+K3CU_API int k3cu_draft_rows(const float *taps, int n, int pos0);
+K3CU_API int k3cu_draft_block(int a, int lo, const float *first);
+K3CU_API int k3cu_draft_pick(int slot, const float *me, int *id, float *prob);
+K3CU_API void k3cu_draft_free(void);
 K3CU_API void k3cu_report(void);
 K3CU_API void k3cu_shutdown(void);
 #ifdef __cplusplus

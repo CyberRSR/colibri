@@ -26,6 +26,7 @@ logits are the same bytes as a run with no GPU path at all.
 | ready after start | 7.5 s |
 | a 16,511-token prompt | 190 s (5,862 tokens: 117 s, the drives' pace) |
 | a long answer (512 tokens) | 0.86 tokens/s, 1.16 s a token; 0.75-0.8 at 6-16k tokens of context |
+| ... with a draft model beside it | the same tokens 9-18% sooner (an agent's turn at 23k tokens: a tool call 121 -> 103 s, reasoning 269 -> 248 s) |
 | the same request again | answers in 0.3 s |
 | a new conversation, same 16.5k-token system prompt | 20 s instead of 220 |
 | an interrupted conversation, back from its file | 27-32 s instead of 220 |
@@ -36,6 +37,13 @@ weights through RAM), the drives bring the 11 GB of them the RAM cache lacks (0.
 waiting), the shared experts, attention and router take the rest. Deeper read queues, wider
 expert prediction and the GPU beside the CPU were measured and are all slower
 ([the measurements](docs/experiments/kimi-k31-4090-2026-11-10/README.md)).
+
+A draft model is the one thing that does help: with
+[Inferact/Kimi-K3.1-Pro-DSpark](https://huggingface.co/Inferact/Kimi-K3.1-Pro-DSpark) (5 GB) in
+`C:\AI\Kimi-K3.1-Pro-DSpark`, a step that feeds a token also carries the next ones the draft
+model is sure of, and each one the model then picks itself costs no step of its own. Every token
+is still the model's own pick -- the logits are the same bytes with it and without -- so only
+the time changes ([how](docs/kimi_k3.md#kimi-k31-a-draft-model-k3_drafth-k3_draft)).
 
 To run it: take the install from the latest release
 ([kimi-k31-pro-4090-r10](https://github.com/CyberRSR/colibri/releases/tag/kimi-k31-pro-4090-r10)),
