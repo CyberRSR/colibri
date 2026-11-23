@@ -1438,6 +1438,42 @@ def inkling_content_segments(content, param, audio_out):
     return segments
 
 
+# ---- Kimi K3 thinking effort -----------------------------------------------------------------
+# The API's `reasoning_effort` is encoding_k3.py's `thinking_effort`: in thinking mode a typed
+# system message after the tool declaration and before the conversation, which
+# apply_chat_template defaults to max (the model cards: "low", "high" and "max", default "max").
+# The message's wording is the same in both checkpoints; the levels their encoders take are
+# not: K3's are low/high/max, K3.1's add medium. serve() picks the set from config.json.
+K3_THINKING_EFFORT_BODY = ("`thinking_effort` guides on how much to think in your thinking "
+                           "channel (not including the response channel), supported values "
+                           "include `low`, `medium`, `high`, and `max`.\n"
+                           "Now the system is invoked with `thinking_effort={}`.")
+K3_EFFORTS_K3 = ("low", "high", "max")
+K3_EFFORTS_K31 = ("low", "medium", "high", "max")
+K3_EFFORTS = K3_EFFORTS_K3
+# OpenAI's levels -> K3's; an absent level (or `none` with enable_thinking forced on) is the
+# encoder's default, max
+K3_EFFORT_FROM_OPENAI = {None: "max", "none": "max", "minimal": "low", "low": "low",
+                         "medium": "medium", "high": "high", "xhigh": "max", "max": "max"}
+
+
+def detect_k3_efforts(model_dir):
+    """The thinking efforts a Kimi checkpoint's encoder takes: K3.1 (kimi_k31) adds medium."""
+    try:
+        config = json.loads((Path(model_dir) / "config.json").read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        config = {}
+    if isinstance(config, dict) and config.get("model_type") == "kimi_k31":
+        return K3_EFFORTS_K31
+    return K3_EFFORTS_K3
+
+
+def k3_thinking_effort(reasoning_effort):
+    """The thinking_effort K3's prompt names for a request's reasoning_effort."""
+    effort = K3_EFFORT_FROM_OPENAI.get(reasoning_effort, "max")
+    return effort if effort in K3_EFFORTS else "high"   # medium on K3: the next level up
+
+
 # ---- Kimi K3 tool calling (#1143) ----------------------------------------------------------
 # K3's normative renderer is encoding_k3.py in the checkpoint repo: tools are pure XTML over
 # the four special tokens. The gateway ships typed K3CHAT1 records; kimi_k3.c constructs the
@@ -1580,6 +1616,9 @@ def render_chat_kimi(messages, enable_thinking=False, reasoning_effort=None, too
     contract. This private length-framed payload preserves roles, UTF-8 bytes,
     and message boundaries; kimi_k3.c constructs the native XTML tokens.
 
+    With thinking on, reasoning_effort becomes the reference's thinking-effort system
+    message (k3_thinking_effort: none given = max, the encoder's default).
+
     add_generation_prompt=False continues a trailing assistant turn. Kimi frames turns
     engine-side, so unlike the string renderers there is no terminator to drop here: the final
     assistant turn is emitted as a `C` record (reasoning + text), which kimi_k3.c renders as
@@ -1603,6 +1642,9 @@ def render_chat_kimi(messages, enable_thinking=False, reasoning_effort=None, too
                 "```json\n" + json.dumps(tools, ensure_ascii=False, separators=(",", ":"),
                                          sort_keys=True) + "\n```")
         parts.append(f"Y 12 {len(body.encode('utf-8'))}\ntool-declare{body}")
+    if enable_thinking:   # where build_chat_segments puts it: before the conversation
+        body = K3_THINKING_EFFORT_BODY.format(k3_thinking_effort(reasoning_effort))
+        parts.append(f"Y 15 {len(body.encode('utf-8'))}\nthinking-effort{body}")
     tool_index = 0
     last_calls = []
     for index, message in enumerate(messages):
@@ -9818,9 +9860,11 @@ class APIHandler(BaseHTTPRequestHandler):
                            "logprobs", "unsupported_parameter")
         reasoning_effort = body.get("reasoning_effort")
         efforts = (None, "none", "minimal", "low", "medium", "high", "xhigh")
+        if ARCH == "kimi":
+            efforts += ("max",)   # Kimi's own top level, its API's default (k3_thinking_effort)
         if reasoning_effort not in efforts:
-            raise APIError(400, "`reasoning_effort` must be none, minimal, low, medium, high, or xhigh.",
-                           "reasoning_effort")
+            raise APIError(400, "`reasoning_effort` must be " + ", ".join(efforts[1:-1]) +
+                           ", or " + efforts[-1] + ".", "reasoning_effort")
         # COLI_THINK=1 makes thinking the default when the client sends NEITHER reasoning_effort
         # nor enable_thinking (a global switch, like the old server's --think). An explicit
         # client value always wins. Default off => exact OpenAI-standard behavior.
@@ -10142,7 +10186,8 @@ class APIHandler(BaseHTTPRequestHandler):
             translated["tool_choice"] = tool_choice
         if tool_choice == "none":
             tools = None
-        default_effort = "xhigh" if chat_flavor() == "qwen38" and thinking is None else "high"
+        default_effort = ("xhigh" if chat_flavor() == "qwen38" and thinking is None
+                          else None if ARCH == "kimi" else "high")   # Kimi: its own default, max
         add_generation_prompt = resolve_generation_prompt(messages, body)
         prompt = render_chat_for_arch(messages, enable_thinking,
                                       default_effort if enable_thinking else None,
@@ -10543,9 +10588,11 @@ def serve(model, host="127.0.0.1", port=8000, model_id=None, api_key=None,
     previous_sigterm = signal.getsignal(signal.SIGTERM)
     try:
         family = pending_family or resolve_model(model).descriptor
-        global ARCH, CHAT_FLAVOR
+        global ARCH, CHAT_FLAVOR, K3_EFFORTS
         ARCH = family.id
         CHAT_FLAVOR = detect_chat_flavor(family.id, model)
+        if ARCH == "kimi":
+            K3_EFFORTS = detect_k3_efforts(model)
         if CHAT_FLAVOR:
             print(f"[gateway] {family.id} engine, {CHAT_FLAVOR} chat template "
                   "(from the checkpoint's chat_template.jinja)", file=sys.stderr)

@@ -42,7 +42,15 @@ from openai_server import (APIError, engine_exit_status, APIHandler, APIServer, 
                            _compose_span_maps, _cut_span_map, _project_span,
                             _keepalive_choice,
                             stop_policy, tune_child_env,
-                            TOOL_CHOICE_REQUIRED_INSTRUCTION)
+                            TOOL_CHOICE_REQUIRED_INSTRUCTION,
+                            K3_EFFORTS_K3, K3_EFFORTS_K31, K3_THINKING_EFFORT_BODY,
+                            detect_k3_efforts, k3_thinking_effort)
+
+
+def k3_effort_record(effort):
+    """The K3CHAT1 record of encoding_k3.py's thinking-effort system message."""
+    body = K3_THINKING_EFFORT_BODY.format(effort)
+    return f"Y 15 {len(body.encode('utf-8'))}\nthinking-effort{body}"
 
 
 def echo_record(pos, data, lp, topk):
@@ -462,7 +470,7 @@ class TemplateTest(unittest.TestCase):
         ], enable_thinking=True)
         self.assertEqual(
             prompt,
-            "K3CHAT1\n"
+            "K3CHAT1\n" + k3_effort_record("max") +
             "M system 11\nBe precise."
             "M user 11\n你好\nKimi"
             "A 0 9\n你好。"
@@ -759,8 +767,50 @@ class TemplateTest(unittest.TestCase):
         self.assertEqual(
             render_chat_kimi([{"role": "assistant", "reasoning_content": "why",
                                "content": "answer"}], enable_thinking=True),
-            "K3CHAT1\nA 3 6\nwhyanswerG 1\n",
+            "K3CHAT1\n" + k3_effort_record("max") + "A 3 6\nwhyanswerG 1\n",
         )
+
+    def test_kimi_thinking_effort_message(self):
+        """encoding_k3.py's thinking-effort message: in thinking mode only, after the tool
+        declaration and before the conversation, its level from reasoning_effort (none given:
+        max, apply_chat_template's default)."""
+        self.assertEqual(len(K3_THINKING_EFFORT_BODY.format("max").encode("utf-8")), 223)
+        self.assertTrue(k3_effort_record("max").endswith(
+            "supported values include `low`, `medium`, `high`, and `max`.\n"
+            "Now the system is invoked with `thinking_effort=max`."))
+        hi = [{"role": "system", "content": "Be brief."}, {"role": "user", "content": "Hi"}]
+        tools = [{"type": "function", "function": {
+            "name": "get_weather", "parameters": {"type": "object"}}}]
+        declare = render_chat_kimi(hi, tools=tools).split("M system")[0]
+        with patch("openai_server.K3_EFFORTS", K3_EFFORTS_K31):
+            self.assertEqual(render_chat_kimi(hi, True, "high", tools=tools),
+                             declare + k3_effort_record("high") +
+                             "M system 9\nBe brief.M user 2\nHiG 1\n")
+            for asked, named in ((None, "max"), ("max", "max"), ("xhigh", "max"),
+                                 ("high", "high"), ("medium", "medium"), ("low", "low"),
+                                 ("minimal", "low")):
+                with self.subTest(model="K3.1", reasoning_effort=asked):
+                    self.assertEqual(render_chat_kimi(hi, True, asked),
+                                     "K3CHAT1\n" + k3_effort_record(named) +
+                                     "M system 9\nBe brief.M user 2\nHiG 1\n")
+            # thinking off: no effort message, whatever the level (the reference's rule)
+            self.assertEqual(render_chat_kimi(hi, False, "high"),
+                             "K3CHAT1\nM system 9\nBe brief.M user 2\nHiG 0\n")
+        with patch("openai_server.K3_EFFORTS", K3_EFFORTS_K3):
+            # K3's encoder takes low/high/max: medium is the next level up
+            self.assertEqual(k3_thinking_effort("medium"), "high")
+            self.assertEqual(k3_thinking_effort("low"), "low")
+            self.assertEqual(k3_thinking_effort(None), "max")
+
+    def test_kimi_effort_levels_follow_the_checkpoint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "config.json"
+            for model_type, efforts in (("kimi_k31", K3_EFFORTS_K31), ("kimi_k3", K3_EFFORTS_K3),
+                                        ("kimi_linear", K3_EFFORTS_K3)):
+                config.write_text(json.dumps({"model_type": model_type}), encoding="utf-8")
+                self.assertEqual(detect_k3_efforts(tmp), efforts)
+            self.assertEqual(detect_k3_efforts(Path(tmp) / "missing"), K3_EFFORTS_K3)
+        self.assertEqual(K3_EFFORTS_K31, ("low", "medium", "high", "max"))
 
     def test_olmoe_renders_native_chat_template(self):
         # Matches allenai/OLMoE-1B-7B-0125-Instruct's tokenizer_config.json
@@ -3520,6 +3570,45 @@ class HTTPTest(unittest.TestCase):
             "M user 8\nContinue"
             "G 0\n",
         )
+
+    def test_kimi_reasoning_effort_reaches_the_prompt(self):
+        """Kimi's levels end to end: max is accepted for Kimi only, a level becomes the
+        thinking-effort message, none turns thinking off, /v1/messages thinks at max."""
+        hi = [{"role": "user", "content": "Hi"}]
+        with patch("openai_server.ARCH", "kimi"), \
+             patch("openai_server.K3_EFFORTS", K3_EFFORTS_K31):
+            for asked, named in (("max", "max"), ("medium", "medium"), ("xhigh", "max"),
+                                 ("low", "low")):
+                with self.subTest(reasoning_effort=asked):
+                    with self.request("/v1/chat/completions", {
+                            "model": "test-model", "messages": hi,
+                            "reasoning_effort": asked}) as response:
+                        self.assertEqual(response.status, 200)
+                    self.assertEqual(self.engine.calls[-1][0], "K3CHAT1\n" +
+                                     k3_effort_record(named) + "M user 2\nHiG 1\n")
+            with self.request("/v1/chat/completions", {
+                    "model": "test-model", "messages": hi,
+                    "reasoning_effort": "none"}) as response:
+                self.assertEqual(response.status, 200)
+            self.assertEqual(self.engine.calls[-1][0], "K3CHAT1\nM user 2\nHiG 0\n")
+            with self.request("/v1/messages", {
+                    "model": "test-model", "max_tokens": 4, "messages": hi,
+                    "thinking": {"type": "enabled", "budget_tokens": 1024}}) as response:
+                self.assertEqual(response.status, 200)
+            self.assertEqual(self.engine.calls[-1][0], "K3CHAT1\n" +
+                             k3_effort_record("max") + "M user 2\nHiG 1\n")
+        # the other families keep their six levels: max is still a 400 there
+        calls_before = len(self.engine.calls)
+        with self.assertRaises(HTTPError) as caught:
+            self.request("/v1/chat/completions", {"model": "test-model", "messages": hi,
+                                                  "reasoning_effort": "max"})
+        self.addCleanup(caught.exception.close)
+        self.assertEqual(caught.exception.code, 400)
+        error = json.load(caught.exception)["error"]
+        self.assertEqual(error["param"], "reasoning_effort")
+        self.assertEqual(error["message"], "`reasoning_effort` must be none, minimal, low, "
+                                           "medium, high, or xhigh.")
+        self.assertEqual(len(self.engine.calls), calls_before)
 
     def test_chat_completion_stops_across_engine_chunks(self):
         before = self.engine.stop_requests

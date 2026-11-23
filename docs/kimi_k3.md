@@ -369,6 +369,24 @@ produced **identical numbers on all 77 test conversations** — multi-turn
 histories with system, user and assistant messages, including non-ASCII text.
 So the engine is not subtly mangling anything before the model sees it.
 
+How hard the model thinks is the request's `reasoning_effort`, as on Moonshot's
+API: `low`, `high` or `max`, and on K3.1 also `medium` (its `encoding_k3.py`
+takes it, the API page lists three). With thinking on, the gateway sends it as
+the checkpoint's own `thinking-effort` system message, where `encoding_k3.py`
+puts it: after the tool declaration, before the conversation. A request with
+no level gets `max`, the encoder's default; `minimal` is `low`, `xhigh` is
+`max`, `medium` on K3 is `high`, and `none` turns thinking off (Moonshot's API
+always thinks; the encoder still has the mode). The engine's tokens for it are
+the reference's (K3 and K3.1, with tools, tool history and `tool_choice`).
+Because the message sits at the top of the prompt, a conversation whose level
+changes is read again from there: its photos and prefix belong to the old one.
+In Kimi Code give the model `support_efforts = ["low", "medium", "high", "max"]`,
+`default_effort = "max"` and the `always_thinking` capability
+(`~/.kimi-code/config.toml`): the app then offers the levels and sends one with
+every request. Without a list it sends no level on a new conversation's first
+request, and the gateway thinks only when asked (`COLI_THINK=1` makes thinking
+the default), so that request was answered without thinking.
+
 `coli chat` starts a private local server for Kimi and keeps the 2.8T model
 loaded for the whole terminal session. `coli serve` exposes streaming and
 non-streaming `/v1/chat/completions`; `coli web` uses that same API. Reasoning
