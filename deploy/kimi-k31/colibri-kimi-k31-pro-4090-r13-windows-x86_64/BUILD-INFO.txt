@@ -1,4 +1,6 @@
-Kimi K3.1 Pro on the RTX 4090 beside MiMo-V2.6-Pro (release mimo-pro-4090-r7), 2026-11-17
+Kimi K3.1 Pro on the RTX 4090 beside MiMo-V2.6-Pro (release mimo-pro-4090-r7), 2026-11-23
+Release kimi-k31-pro-4090-r13: r12's install with a new openai_server.py (commit be74187a): reasoning_effort (low,
+medium, high, max) reaches the model as its own thinking-effort message, and Kimi Code can offer the levels.
 Release kimi-k31-pro-4090-r12: r11's install with a new kimi_k3.exe and launcher (commit d532e39e): the model's files
 whole on both drives are read from both, prompts and decode 6% sooner; each start copies to C: what it lacks of D:'s.
 Release kimi-k31-pro-4090-r11: r10's install with a new kimi_k3.exe, coli_cuda_k3.dll and launcher (commit e1101d18): a draft

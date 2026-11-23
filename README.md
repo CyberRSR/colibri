@@ -53,7 +53,7 @@ engine copies to `C:` whatever of `D:`'s files it lacks
 ([how](docs/kimi_k3.md#kimi-k31-the-weights-on-both-drives-k3_mirrorh-k3_mirror-k3_fill)).
 
 To run it: take the install from the latest release
-([kimi-k31-pro-4090-r12](https://github.com/CyberRSR/colibri/releases/tag/kimi-k31-pro-4090-r12)),
+([kimi-k31-pro-4090-r13](https://github.com/CyberRSR/colibri/releases/tag/kimi-k31-pro-4090-r13)),
 then from its folder:
 
 ```powershell

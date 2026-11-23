@@ -9,7 +9,7 @@ row attends only the 2,048 earlier rows its layer's indexer scores highest. Ever
 format) is K3's. Sources: the model card and TokenSpeed's implementation,
 [lightseekorg/tokenspeed#3015](https://github.com/lightseekorg/tokenspeed/pull/3015).
 
-**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r12: `kimi_k3.exe` and
+**This install carries the K3.1 engine**, release kimi-k31-pro-4090-r13: `kimi_k3.exe` and
 `coli_cuda_k3.dll` here were built on the RTX 4090 machine and checked there on the model
 itself (BUILD-INFO-K31.txt: the commit, the toolchain, the checks). Release kimi-k3-4090-r1's
 `kimi_k3.exe` does not read `dsa_config`: it would run every MLA layer dense, which is K3.1's
@@ -253,6 +253,34 @@ What release r12 adds (2026-11-17):
   `-NoMirror` reads each file from one drive, `-MirrorSplit` (0.6) is `C:`'s share of a decode
   step's read, and `-IoPerDrive 0` (the default) is the engine's choice of readers. How it works and
   how it was measured: `docs/kimi_k3.md`, "Kimi K3.1: the weights on both drives".
+
+What release r13 adds (2026-11-23):
+
+- **How hard the model thinks is the request's `reasoning_effort`, as on Moonshot's API:** `low`,
+  `high` or `max` (the default), and `medium`, which K3.1's own `encoding_k3.py` takes too (the API
+  page lists three). The gateway answered `max` with HTTP 400 and left every level out of the
+  prompt; the level now reaches the model as the checkpoint's own `thinking-effort` message, where
+  `encoding_k3.py` puts it (after the tool declaration, before the conversation), and the engine's
+  tokens are the reference's. On the 4090 machine the same short question took 46 tokens at `low`
+  and 140 at `max`, both answered right. `minimal` is `low`, `xhigh` is `max`, `none` turns thinking
+  off; a request that turns thinking on without a level gets `max`, the encoder's default.
+- **Kimi Code offers the levels.** Kimi Code shows a level picker only for a model with a list of
+  levels; without one it has On and Off, and On sent no level on a conversation's first request,
+  which the gateway answered without thinking. In the model's entry of
+  `%USERPROFILE%\.kimi-code\config.toml`:
+
+  ```toml
+  capabilities = [ "tool_use", "thinking", "always_thinking", "image_in" ]
+  support_efforts = [ "low", "medium", "high", "max" ]
+  default_effort = "max"
+  ```
+
+  and restart Kimi Code: its composer then reads "Thinking: Low Medium High Max" and every request
+  carries its level (`always_thinking`: K3.1 always thinks, as on Moonshot's API, so there is no
+  Off; `low` is the quick one). The level sits at the top of the prompt, so a conversation whose
+  level changes is read again from its start (Kimi Code says so too), and a conversation from
+  before this release is read again once. Only `openai_server.py` changed; how it works:
+  `docs/kimi_k3.md`, "Chat, API, and Web".
 
 ---
 

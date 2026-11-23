@@ -1,4 +1,5 @@
-Kimi K3.1 Pro's engine, release kimi-k31-pro-4090-r12, built 2026-11-17 on the RTX 4090 machine
+Kimi K3.1 Pro's engine, release kimi-k31-pro-4090-r13 (2026-11-23): r12's pair, built 2026-11-17 on the RTX 4090 machine
+commit: be74187ad5ebda8bdccdec4621bf482679d35c77 (openai_server.py)
 commit: d532e39e63076bd97d1beefbddff928fbbbca0b1 (kimi_k3.exe, tools/start_kimi_k31_pro_4090.ps1)
 kimi_k3.exe: mingw32-make -C c kimi_k3 CUDA_DLL=1 ARCH=native VK=0 on the msvcrt C runtime (gcc.exe (MinGW-W64 x86_64-msvcrt-posix-seh, built by Brecht Sanders, r2) 14.2.0)
 ARCH=native is AMD Ryzen 9 7950X3D 16-Core Processor: rebuild with ARCH=znver4 / x86-64-v3 before moving the binaries to another box
@@ -7,7 +8,13 @@ coli_cuda_k3.dll: release r11's, commit e1101d18, its source unchanged since (c\
 coli_cuda.dll: release kimi-k3-4090-r1's (unchanged by K3.1)
 kimi_k3.exe sha256 628ebac6fa63923b6f43fa899d9718bc05bda7748fd64c38dd7b4888ad917bbe
 coli_cuda_k3.dll sha256 5a74777799b0e21fdc3a28814413b58c75cbb586963b1ca24d5629a3d1e39684
-what changed since r11 (README-KIMI-K31-PRO-4090.md, "What release r12 adds"):
+what changed since r12 (README-KIMI-K31-PRO-4090.md, "What release r13 adds"):
+  The gateway (openai_server.py, commit be74187a): reasoning_effort reaches the model as the checkpoint's own
+  thinking-effort system message (encoding_k3.py's, after the tool declaration and before the conversation, in
+  thinking mode only): low, high, max (the default), and medium on K3.1, whose encoder takes it (the levels follow
+  config.json's model_type); minimal = low, xhigh = max, medium on K3 = high. "max" is no longer an HTTP 400 for
+  Kimi. kimi_k3.exe, coli_cuda_k3.dll and the launcher are r12's.
+what r12 changed since r11:
   The weights whole on both drives (k3_mirror.h, the expert readers in kimi_k3.c; commit d532e39e): a shard file
   whole in K3_DIRS on another drive too (the same size and header) is read from both -- a decode step's expert
   read cut 60/40 over the two, a prompt step's whole from the drive whose queue is shorter, 3 readers a drive
@@ -68,6 +75,14 @@ what r2 changed since r1's K3.1 pair:
   The load on every core and the dense cache (start 138 -> 9.7 s); a prompt's selecting rows over
   their lists and steps of 16,384 (16,511 tokens 375 -> 221 s); the expert cache lending its slots
   (K3_LEND); no pins by default; the same request again restored whole (27 -> 0.27 s).
+checks on r13's gateway, on the RTX 4090 and on moonshotai/Kimi-K3.1-Pro itself:
+  c\tests\test_openai_server.py, test_anthropic_messages.py, test_family_registry.py: 584 passed
+  the thinking-effort message's tokens: kimi_k3.exe --wire-test against the checkpoint's encoding_k3.py with
+    tiktoken's rank-BPE over its tiktoken.model, 7 conversations (tools, tool calls and results,
+    tool_choice=required, every level, thinking off): the same tokens, for Kimi-K3.1-Pro and for Kimi-K3
+  through the launcher, the same question: low 46 tokens, max 140, both answered right
+  Kimi Code 2.6.3 with support_efforts in its config.toml: its first request at max, answered with reasoning;
+    the composer's picker Low, Medium, High, Max
 checks, on this pair, on the RTX 4090 and on moonshotai/Kimi-K3.1-Pro itself (r12):
   build-windows.ps1's list, the draft harness and the new kimi_k3_mirror_harness (copies in a second folder:
     cut reads at several shares, whole reads by queue, buffered, slow readers, a copy missing or differing,
